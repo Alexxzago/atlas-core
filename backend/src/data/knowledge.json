@@ -1,0 +1,23 @@
+{
+  "company": {
+    "name": "Atlas Real Estate",
+    "country": "USA",
+    "city": "Miami",
+    "language": "en"
+  },
+  "business": {
+    "hours": "Monday to Friday from 9 AM to 6 PM",
+    "phone": "+1 305 555 1234",
+    "email": "info@atlasrealestate.com"
+  },
+  "faq": [
+    {
+      "question": "What are your business hours?",
+      "answer": "We are open Monday to Friday from 9 AM to 6 PM."
+    },
+    {
+      "question": "Where are you located?",
+      "answer": "We are located in Miami, Florida."
+    }
+  ]
+}
