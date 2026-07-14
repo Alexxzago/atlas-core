@@ -1,8 +1,8 @@
 import { Router } from "express";
 import type { RequestHandler } from "express";
 
-export function createKnowledgeRouter(controller: RequestHandler): Router {
+export function createScrapeRouter(controller: RequestHandler): Router {
   const router = Router();
-  router.get("/knowledge", controller);
+  router.post("/scrape", controller);
   return router;
 }

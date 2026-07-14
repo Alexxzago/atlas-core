@@ -1,16 +1,55 @@
-# Dependencias
+# ==========================
+# Dependencies
+# ==========================
 node_modules/
 
-# Variables de entorno
+# ==========================
+# Environment
+# ==========================
 .env
 .env.*
 
+# ==========================
 # Logs
+# ==========================
 *.log
+npm-debug.log*
 
-# Archivos del sistema
+# ==========================
+# SQLite
+# ==========================
+*.sqlite
+*.sqlite3
+
+# ==========================
+# Database
+# ==========================
+database/
+
+# Si en el futuro queremos versionar solo la carpeta:
+#!database/.gitkeep
+
+# ==========================
+# Knowledge debug
+# ==========================
+knowledge/*.md
+
+# Mantener la carpeta
+!knowledge/.gitkeep
+
+# ==========================
+# Build
+# ==========================
+dist/
+coverage/
+
+# ==========================
+# IDE
+# ==========================
+.vscode/settings.json
+
+# ==========================
+# OS
+# ==========================
 .DS_Store
 Thumbs.db
-
-# VS Code
-.vscode/settings.json
