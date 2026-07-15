@@ -16,6 +16,7 @@ import { firecrawlProvider } from "./providers/firecrawl.js";
 import { geminiProvider } from "./providers/gemini.js";
 import { companyRepository } from "./repositories/companyRepository.js";
 import { knowledgeRepository } from "./repositories/knowledgeRepository.js";
+import { workspaceRepository } from "./repositories/workspaceRepository.js";
 import { FileMarkdownDebugStore } from "./repositories/markdownDebugRepository.js";
 import { createChatRouter } from "./routes/chat.js";
 import { createCompaniesRouter } from "./routes/companies.js";
@@ -27,8 +28,10 @@ import { KnowledgeService } from "./services/knowledgeService.js";
 import { cleanMarkdown } from "./services/markdownCleaner.js";
 import { OnboardingService } from "./services/onboardingService.js";
 import { ScrapeService } from "./services/scrapeService.js";
+import { createWorkspaceContext } from "./types/workspaceContext.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
 const agent = new AtlasAgent(geminiProvider);
 const chatService = new ChatService(companyRepository, knowledgeRepository, agent);
 const companyService = new CompanyService(companyRepository);
@@ -43,14 +46,14 @@ const onboardingService = new OnboardingService(
   new FileMarkdownDebugStore(resolve(repositoryRoot, "knowledge"))
 );
 
-export const chatRouter = createChatRouter(createChatController(chatService));
+export const chatRouter = createChatRouter(createChatController(chatService, workspaceContext));
 export const companiesRouter = createCompaniesRouter({
-  list: createListCompaniesController(companyService),
-  create: createCompanyController(companyService),
-  get: createGetCompanyController(companyService),
-  update: createUpdateCompanyController(companyService),
-  delete: createDeleteCompanyController(companyService),
-  onboard: createOnboardingController(onboardingService),
+  list: createListCompaniesController(companyService, workspaceContext),
+  create: createCompanyController(companyService, workspaceContext),
+  get: createGetCompanyController(companyService, workspaceContext),
+  update: createUpdateCompanyController(companyService, workspaceContext),
+  delete: createDeleteCompanyController(companyService, workspaceContext),
+  onboard: createOnboardingController(onboardingService, workspaceContext),
 });
-export const knowledgeRouter = createKnowledgeRouter(createKnowledgeController(knowledgeService));
+export const knowledgeRouter = createKnowledgeRouter(createKnowledgeController(knowledgeService, workspaceContext));
 export const scrapeRouter = createScrapeRouter(createScrapeController(scrapeService));

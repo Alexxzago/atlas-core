@@ -1,7 +1,8 @@
 import type { RequestHandler } from "express";
 import type { ChatService } from "../services/chatService.js";
+import type { WorkspaceContext } from "../types/workspaceContext.js";
 
-export function createChatController(service: ChatService): RequestHandler {
+export function createChatController(service: ChatService, context: WorkspaceContext): RequestHandler {
   return async (req, res): Promise<void> => {
     const { companyId, message } = req.body ?? {};
     if (!Number.isInteger(companyId) || companyId <= 0 || typeof message !== "string" || !message.trim()) {
@@ -10,7 +11,7 @@ export function createChatController(service: ChatService): RequestHandler {
     }
 
     try {
-      const result = await service.chat(companyId as number, message.trim());
+      const result = await service.chat(context, companyId as number, message.trim());
       const status = result.kind === "company_not_found" ? 404 : 200;
       res.status(status).json({ answer: result.answer, status: result.kind });
     } catch (error: unknown) {

@@ -1,20 +1,12 @@
-import { database } from "../config/database.js";
 import type { DatabaseSync } from "node:sqlite";
-
-export type CompanyStatus = "processing" | "ready" | "failed";
-
-export interface Company {
-  id: number;
-  name: string;
-  website: string;
-  phone: string;
-  email: string;
-  status: CompanyStatus;
-  createdAt: string;
-}
+import type { CompanyRepositoryPort } from "../application/ports/repositories.js";
+import { database } from "../config/database.js";
+import type { Company, CompanyCreateInput, CompanyPersistenceInput, CompanyStatus } from "../types/company.js";
+import type { WorkspaceContext } from "../types/workspaceContext.js";
 
 interface CompanyRow {
   id: number;
+  workspace_id: number;
   name: string;
   website: string;
   phone: string;
@@ -26,6 +18,7 @@ interface CompanyRow {
 function mapCompany(row: CompanyRow): Company {
   return {
     id: row.id,
+    workspaceId: row.workspace_id,
     name: row.name,
     website: row.website,
     phone: row.phone,
@@ -35,150 +28,79 @@ function mapCompany(row: CompanyRow): Company {
   };
 }
 
-export class CompanyRepository {
+export class CompanyRepository implements CompanyRepositoryPort {
   public constructor(private readonly db: DatabaseSync) {}
 
-  public findById(id: number): Company | null {
-  const row = this.db
-    .prepare(`
-      SELECT
-        id,
-        name,
-        website,
-        phone,
-        email,
-        status,
-        created_at
+  public findById(context: WorkspaceContext, companyId: number): Company | null {
+    const row = this.db.prepare(`
+      SELECT id, workspace_id, name, website, phone, email, status, created_at
       FROM companies
-      WHERE id = ?
-    `)
-    .get(id) as CompanyRow | undefined;
+      WHERE workspace_id = ? AND id = ?
+    `).get(context.workspaceId, companyId) as CompanyRow | undefined;
+    return row ? mapCompany(row) : null;
+  }
 
-  return row ? mapCompany(row) : null;
-}
-
-  public findByWebsite(website: string): Company | null {
-  const row = this.db
-    .prepare(`
-      SELECT
-        id,
-        name,
-        website,
-        phone,
-        email,
-        status,
-        created_at
+  public findByWebsite(context: WorkspaceContext, website: string): Company | null {
+    const row = this.db.prepare(`
+      SELECT id, workspace_id, name, website, phone, email, status, created_at
       FROM companies
-      WHERE website = ?
-    `)
-    .get(website) as CompanyRow | undefined;
+      WHERE workspace_id = ? AND website = ?
+    `).get(context.workspaceId, website) as CompanyRow | undefined;
+    return row ? mapCompany(row) : null;
+  }
 
-  return row ? mapCompany(row) : null;
-}
-
-  public list(): Company[] {
-  const rows = this.db
-    .prepare(`
-      SELECT
-        id,
-        name,
-        website,
-        phone,
-        email,
-        status,
-        created_at
+  public list(context: WorkspaceContext): Company[] {
+    const rows = this.db.prepare(`
+      SELECT id, workspace_id, name, website, phone, email, status, created_at
       FROM companies
+      WHERE workspace_id = ?
       ORDER BY id DESC
-    `)
-    .all() as unknown as CompanyRow[];
+    `).all(context.workspaceId) as unknown as CompanyRow[];
+    return rows.map(mapCompany);
+  }
 
-  return rows.map(mapCompany);
-}
-
-  public create(input: {
-    name: string;
-    website: string;
-    phone?: string;
-    email?: string;
-    status?: CompanyStatus;
-  }): Company {
-  const result = this.db
-    .prepare(`
-      INSERT INTO companies (
-        name,
-        website,
-        phone,
-        email,
-        status
-      )
-      VALUES (?, ?, ?, ?, ?)
-    `)
-    .run(
+  public create(context: WorkspaceContext, input: CompanyCreateInput): Company {
+    const result = this.db.prepare(`
+      INSERT INTO companies (workspace_id, name, website, phone, email, status)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      context.workspaceId,
       input.name,
       input.website,
       input.phone ?? "",
       input.email ?? "",
       input.status ?? "processing"
     );
-
-  const company = this.findById(Number(result.lastInsertRowid));
-
-  if (!company) {
-    throw new Error("Company could not be created.");
+    const company = this.findById(context, Number(result.lastInsertRowid));
+    if (!company) throw new Error("Company could not be created.");
+    return company;
   }
 
-  return company;
+  public update(context: WorkspaceContext, companyId: number, input: CompanyPersistenceInput): Company | null {
+    const result = this.db.prepare(`
+      UPDATE companies
+      SET name = ?, website = ?, phone = ?, email = ?, status = ?
+      WHERE workspace_id = ? AND id = ?
+    `).run(input.name, input.website, input.phone, input.email, input.status, context.workspaceId, companyId);
+    return result.changes === 0 ? null : this.findById(context, companyId);
   }
 
-  public update(companyId: number, input: {
-    name: string;
-    website: string;
-    phone: string;
-    email: string;
-    status: CompanyStatus;
-  }): Company | null {
-    const result = this.db
-      .prepare(`
-        UPDATE companies
-        SET name = ?, website = ?, phone = ?, email = ?, status = ?
-        WHERE id = ?
-      `)
-      .run(input.name, input.website, input.phone, input.email, input.status, companyId);
-
-    return result.changes === 0 ? null : this.findById(companyId);
-  }
-
-  public delete(companyId: number): boolean {
-    const result = this.db.prepare("DELETE FROM companies WHERE id = ?").run(companyId);
+  public delete(context: WorkspaceContext, companyId: number): boolean {
+    const result = this.db.prepare(`
+      DELETE FROM companies
+      WHERE workspace_id = ? AND id = ?
+    `).run(context.workspaceId, companyId);
     return result.changes > 0;
   }
 
-  public updateStatus(
-  companyId: number,
-  status: CompanyStatus
-): Company {
-  this.db
-    .prepare(`
+  public updateStatus(context: WorkspaceContext, companyId: number, status: CompanyStatus): Company | null {
+    const result = this.db.prepare(`
       UPDATE companies
       SET status = ?
-      WHERE id = ?
-    `)
-    .run(status, companyId);
-
-  const company = this.findById(companyId);
-
-  if (!company) {
-    throw new Error("Company could not be found after status update.");
-  }
-
-  return company;
+      WHERE workspace_id = ? AND id = ?
+    `).run(status, context.workspaceId, companyId);
+    return result.changes === 0 ? null : this.findById(context, companyId);
   }
 }
 
 export const companyRepository = new CompanyRepository(database);
-
-export const findCompanyById = (id: number): Company | null => companyRepository.findById(id);
-export const findCompanyByWebsite = (website: string): Company | null => companyRepository.findByWebsite(website);
-export const listCompanies = (): Company[] => companyRepository.list();
-export const saveCompany = (input: Parameters<CompanyRepository["create"]>[0]): Company => companyRepository.create(input);
-export const updateCompanyStatus = (companyId: number, status: CompanyStatus): Company => companyRepository.updateStatus(companyId, status);

@@ -7,11 +7,13 @@ import { createOnboardingController } from "../controllers/onboarding.js";
 import { createDatabase } from "../config/database.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
 import { KnowledgeRepository } from "../repositories/knowledgeRepository.js";
+import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
 import { createCompaniesRouter } from "../routes/companies.js";
 import { CompanyService } from "../services/companyService.js";
 import { OnboardingService } from "../services/onboardingService.js";
 import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 import type { KnowledgeExtractor, MarkdownDebugStore, WebsiteScraper } from "../types/ports.js";
+import { createWorkspaceContext, type WorkspaceContext } from "../types/workspaceContext.js";
 
 const extractedKnowledge: CompanyKnowledge = {
   company: { name: "Extracted Company", website: "", phone: "+54 11", email: "info@example.test" },
@@ -26,6 +28,7 @@ class FakeDebugStore implements MarkdownDebugStore {
 interface TestContext {
   companies: CompanyRepository;
   knowledge: KnowledgeRepository;
+  context: WorkspaceContext;
   baseUrl: string;
 }
 
@@ -35,7 +38,8 @@ async function withApi(
 ): Promise<void> {
   const database = createDatabase(":memory:");
   const companies = new CompanyRepository(database);
-  const knowledge = new KnowledgeRepository(database, companies);
+  const knowledge = new KnowledgeRepository(database);
+  const context = createWorkspaceContext(new WorkspaceRepository(database).resolveDefault());
   const companyService = new CompanyService(companies);
   const defaultScraper: WebsiteScraper = {
     async scrape(): Promise<{ markdown: string }> { return { markdown: "# Useful company content" }; },
@@ -55,12 +59,12 @@ async function withApi(
   const app = express();
   app.use(express.json());
   app.use("/companies", createCompaniesRouter({
-    list: createListCompaniesController(companyService),
-    create: createCompanyController(companyService),
-    get: createGetCompanyController(companyService),
-    update: createUpdateCompanyController(companyService),
-    delete: createDeleteCompanyController(companyService),
-    onboard: createOnboardingController(onboardingService),
+    list: createListCompaniesController(companyService, context),
+    create: createCompanyController(companyService, context),
+    get: createGetCompanyController(companyService, context),
+    update: createUpdateCompanyController(companyService, context),
+    delete: createDeleteCompanyController(companyService, context),
+    onboard: createOnboardingController(onboardingService, context),
   }));
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve, reject) => {
@@ -70,7 +74,7 @@ async function withApi(
   const address = server.address() as AddressInfo;
 
   try {
-    await run({ companies, knowledge, baseUrl: `http://127.0.0.1:${address.port}` });
+    await run({ companies, knowledge, context, baseUrl: `http://127.0.0.1:${address.port}` });
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
@@ -80,8 +84,8 @@ async function withApi(
 }
 
 test("GET returns an existing company", async () => {
-  await withApi(async ({ companies, baseUrl }) => {
-    const company = companies.create({ name: "Alpha", website: "https://alpha.test" });
+  await withApi(async ({ companies, context, baseUrl }) => {
+    const company = companies.create(context, { name: "Alpha", website: "https://alpha.test" });
     const response = await fetch(`${baseUrl}/companies/${company.id}`);
     assert.equal(response.status, 200);
     assert.equal((await response.json() as { id: number }).id, company.id);
@@ -96,8 +100,8 @@ test("GET returns not found for a missing company", async () => {
 });
 
 test("PATCH updates allowed company fields and preserves status", async () => {
-  await withApi(async ({ companies, baseUrl }) => {
-    const company = companies.create({ name: "Old", website: "https://old.test", status: "ready" });
+  await withApi(async ({ companies, context, baseUrl }) => {
+    const company = companies.create(context, { name: "Old", website: "https://old.test", status: "ready" });
     const response = await fetch(`${baseUrl}/companies/${company.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -112,9 +116,9 @@ test("PATCH updates allowed company fields and preserves status", async () => {
 });
 
 test("PATCH rejects a duplicate website", async () => {
-  await withApi(async ({ companies, baseUrl }) => {
-    const alpha = companies.create({ name: "Alpha", website: "https://alpha.test" });
-    companies.create({ name: "Beta", website: "https://beta.test" });
+  await withApi(async ({ companies, context, baseUrl }) => {
+    const alpha = companies.create(context, { name: "Alpha", website: "https://alpha.test" });
+    companies.create(context, { name: "Beta", website: "https://beta.test" });
     const response = await fetch(`${baseUrl}/companies/${alpha.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -125,19 +129,19 @@ test("PATCH rejects a duplicate website", async () => {
 });
 
 test("DELETE removes the company and cascades related knowledge", async () => {
-  await withApi(async ({ companies, knowledge, baseUrl }) => {
-    const company = companies.create({ name: "Alpha", website: "https://alpha.test" });
-    knowledge.save(company.id, { ...extractedKnowledge, company: { ...extractedKnowledge.company, website: company.website } });
+  await withApi(async ({ companies, knowledge, context, baseUrl }) => {
+    const company = companies.create(context, { name: "Alpha", website: "https://alpha.test" });
+    knowledge.save(context, company.id, { ...extractedKnowledge, company: { ...extractedKnowledge.company, website: company.website } });
     const response = await fetch(`${baseUrl}/companies/${company.id}`, { method: "DELETE" });
     assert.equal(response.status, 204);
-    assert.equal(companies.findById(company.id), null);
-    assert.equal(knowledge.load(company.id), null);
+    assert.equal(companies.findById(context, company.id), null);
+    assert.equal(knowledge.load(context, company.id), null);
   });
 });
 
 test("company-targeted onboarding updates the same company without creating another", async () => {
-  await withApi(async ({ companies, knowledge, baseUrl }) => {
-    const company = companies.create({ name: "Original", website: "https://old.test" });
+  await withApi(async ({ companies, knowledge, context, baseUrl }) => {
+    const company = companies.create(context, { name: "Original", website: "https://old.test" });
     const response = await fetch(`${baseUrl}/companies/${company.id}/onboard`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -147,9 +151,9 @@ test("company-targeted onboarding updates the same company without creating anot
     assert.equal(response.status, 200);
     assert.equal(result.companyId, company.id);
     assert.equal(result.status, "ready");
-    assert.equal(companies.list().length, 1);
-    assert.equal(companies.findById(company.id)?.website, "https://new.test");
-    assert.ok(knowledge.load(company.id));
+    assert.equal(companies.list(context).length, 1);
+    assert.equal(companies.findById(context, company.id)?.website, "https://new.test");
+    assert.ok(knowledge.load(context, company.id));
   });
 });
 
@@ -161,8 +165,8 @@ test("invalid companyId returns a controlled validation error", async () => {
 });
 
 test("company-targeted onboarding rejects an invalid URL", async () => {
-  await withApi(async ({ companies, baseUrl }) => {
-    const company = companies.create({ name: "Alpha", website: "https://alpha.test" });
+  await withApi(async ({ companies, context, baseUrl }) => {
+    const company = companies.create(context, { name: "Alpha", website: "https://alpha.test" });
     const response = await fetch(`${baseUrl}/companies/${company.id}/onboard`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -176,9 +180,9 @@ test("failed onboarding returns a controlled error and exposes failed status", a
   const failedScraper: WebsiteScraper = {
     async scrape(): Promise<never> { throw new Error("SCRAPE_ALL_ENGINES_FAILED"); },
   };
-  await withApi(async ({ companies, knowledge, baseUrl }) => {
-    const company = companies.create({ name: "Ready", website: "https://ready.test", status: "ready" });
-    knowledge.save(company.id, { ...extractedKnowledge, company: { ...extractedKnowledge.company, website: company.website } });
+  await withApi(async ({ companies, knowledge, context, baseUrl }) => {
+    const company = companies.create(context, { name: "Ready", website: "https://ready.test", status: "ready" });
+    knowledge.save(context, company.id, { ...extractedKnowledge, company: { ...extractedKnowledge.company, website: company.website } });
 
     const onboardingResponse = await fetch(`${baseUrl}/companies/${company.id}/onboard`, {
       method: "POST",
@@ -192,6 +196,6 @@ test("failed onboarding returns a controlled error and exposes failed status", a
     assert.equal(onboardingResponse.status, 500);
     assert.equal(errorBody.error, "Unable to onboard company.");
     assert.equal(refreshed.status, "failed");
-    assert.equal(knowledge.load(company.id), null);
+    assert.equal(knowledge.load(context, company.id), null);
   }, { scraper: failedScraper });
 });

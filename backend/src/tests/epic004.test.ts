@@ -4,10 +4,12 @@ import { AtlasAgent } from "../agents/atlas.js";
 import { createDatabase } from "../config/database.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
 import { KnowledgeRepository } from "../repositories/knowledgeRepository.js";
+import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
 import { ChatService } from "../services/chatService.js";
 import { OnboardingError, OnboardingService } from "../services/onboardingService.js";
 import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 import type { AnswerGenerator, KnowledgeExtractor, MarkdownDebugStore, WebsiteScraper } from "../types/ports.js";
+import { createWorkspaceContext, type WorkspaceContext } from "../types/workspaceContext.js";
 
 const alphaKnowledge: CompanyKnowledge = {
   company: { name: "Alpha", website: "https://alpha.test", phone: "", email: "" },
@@ -15,10 +17,20 @@ const alphaKnowledge: CompanyKnowledge = {
   faq: [],
 };
 
-function createRepositories(): { companies: CompanyRepository; knowledge: KnowledgeRepository } {
+interface TestRepositories {
+  companies: CompanyRepository;
+  knowledge: KnowledgeRepository;
+  context: WorkspaceContext;
+}
+
+function createRepositories(): TestRepositories {
   const database = createDatabase(":memory:");
-  const companies = new CompanyRepository(database);
-  return { companies, knowledge: new KnowledgeRepository(database, companies) };
+  const workspaces = new WorkspaceRepository(database);
+  return {
+    companies: new CompanyRepository(database),
+    knowledge: new KnowledgeRepository(database),
+    context: createWorkspaceContext(workspaces.resolveDefault()),
+  };
 }
 
 class FakeAnswerGenerator implements AnswerGenerator {
@@ -34,18 +46,15 @@ class FakeDebugStore implements MarkdownDebugStore {
 }
 
 test("chat keeps company knowledge isolated", async () => {
-  const { companies, knowledge } = createRepositories();
-  const alpha = companies.create({ name: "Alpha", website: "https://alpha.test", status: "ready" });
-  const beta = companies.create({ name: "Beta", website: "https://beta.test", status: "ready" });
-  knowledge.save(alpha.id, alphaKnowledge);
-  knowledge.save(beta.id, {
-    ...alphaKnowledge,
-    company: { ...alphaKnowledge.company, name: "Beta", website: "https://beta.test" },
-  });
+  const { companies, knowledge, context } = createRepositories();
+  const alpha = companies.create(context, { name: "Alpha", website: "https://alpha.test", status: "ready" });
+  const beta = companies.create(context, { name: "Beta", website: "https://beta.test", status: "ready" });
+  knowledge.save(context, alpha.id, alphaKnowledge);
+  knowledge.save(context, beta.id, { ...alphaKnowledge, company: { ...alphaKnowledge.company, name: "Beta", website: "https://beta.test" } });
   const generator = new FakeAnswerGenerator();
   const service = new ChatService(companies, knowledge, new AtlasAgent(generator));
 
-  const result = await service.chat(alpha.id, "Tell me about the company");
+  const result = await service.chat(context, alpha.id, "Tell me about the company");
 
   assert.equal(result.kind, "answered");
   assert.equal(result.answer, "Answer for Alpha");
@@ -53,88 +62,66 @@ test("chat keeps company knowledge isolated", async () => {
 });
 
 test("onboarding moves a company from processing to ready", async () => {
-  const { companies, knowledge } = createRepositories();
+  const { companies, knowledge, context } = createRepositories();
   let statusDuringScrape: string | undefined;
   const scraper: WebsiteScraper = {
     async scrape(url: string): Promise<{ markdown: string }> {
-      statusDuringScrape = companies.findByWebsite(url)?.status;
+      statusDuringScrape = companies.findByWebsite(context, url)?.status;
       return { markdown: "# Alpha\n\nUseful content" };
     },
   };
-  const extractor: KnowledgeExtractor = {
-    async extract(): Promise<unknown> { return alphaKnowledge; },
-  };
-  const service = new OnboardingService(
-    companies, knowledge, scraper, extractor, (markdown) => markdown.trim(), new FakeDebugStore()
-  );
-  const company = companies.create({ name: "Alpha", website: "https://old-alpha.test" });
+  const extractor: KnowledgeExtractor = { async extract(): Promise<unknown> { return alphaKnowledge; } };
+  const service = new OnboardingService(companies, knowledge, scraper, extractor, (markdown) => markdown.trim(), new FakeDebugStore());
+  const company = companies.create(context, { name: "Alpha", website: "https://old-alpha.test" });
 
-  const result = await service.onboard(company.id, " HTTPS://ALPHA.TEST/ ");
+  const result = await service.onboard(context, company.id, " HTTPS://ALPHA.TEST/ ");
 
   assert.equal(statusDuringScrape, "processing");
   assert.equal(result.status, "ready");
-  assert.equal(companies.findById(result.companyId)?.status, "ready");
-  assert.ok(knowledge.load(result.companyId));
+  assert.equal(companies.findById(context, result.companyId)?.status, "ready");
+  assert.ok(knowledge.load(context, result.companyId));
 });
 
 test("failed onboarding marks the company as failed", async () => {
-  const { companies, knowledge } = createRepositories();
-  const scraper: WebsiteScraper = {
-    async scrape(): Promise<never> { throw new Error("scrape unavailable"); },
-  };
-  const extractor: KnowledgeExtractor = {
-    async extract(): Promise<unknown> { return alphaKnowledge; },
-  };
-  const service = new OnboardingService(
-    companies, knowledge, scraper, extractor, (markdown) => markdown, new FakeDebugStore()
-  );
-  const company = companies.create({ name: "Failure", website: "https://failure.test" });
+  const { companies, knowledge, context } = createRepositories();
+  const scraper: WebsiteScraper = { async scrape(): Promise<never> { throw new Error("scrape unavailable"); } };
+  const extractor: KnowledgeExtractor = { async extract(): Promise<unknown> { return alphaKnowledge; } };
+  const service = new OnboardingService(companies, knowledge, scraper, extractor, (markdown) => markdown, new FakeDebugStore());
+  const company = companies.create(context, { name: "Failure", website: "https://failure.test" });
 
-  await assert.rejects(service.onboard(company.id, "https://failure.test"), OnboardingError);
-  assert.equal(companies.findByWebsite("https://failure.test")?.status, "failed");
+  await assert.rejects(service.onboard(context, company.id, company.website), OnboardingError);
+  assert.equal(companies.findById(context, company.id)?.status, "failed");
 });
 
 test("a failed retry invalidates old knowledge and keeps a previously ready company unavailable", async () => {
-  const { companies, knowledge } = createRepositories();
-  const company = companies.create({ name: "Ready", website: "https://ready.test", status: "ready" });
-  knowledge.save(company.id, alphaKnowledge);
-  const scraper: WebsiteScraper = {
-    async scrape(): Promise<never> { throw new Error("SCRAPE_ALL_ENGINES_FAILED"); },
-  };
-  const extractor: KnowledgeExtractor = {
-    async extract(): Promise<unknown> { return alphaKnowledge; },
-  };
+  const { companies, knowledge, context } = createRepositories();
+  const company = companies.create(context, { name: "Ready", website: "https://ready.test", status: "ready" });
+  knowledge.save(context, company.id, alphaKnowledge);
+  const scraper: WebsiteScraper = { async scrape(): Promise<never> { throw new Error("SCRAPE_ALL_ENGINES_FAILED"); } };
+  const extractor: KnowledgeExtractor = { async extract(): Promise<unknown> { return alphaKnowledge; } };
   const generator = new FakeAnswerGenerator();
-  const onboarding = new OnboardingService(
-    companies, knowledge, scraper, extractor, (markdown) => markdown, new FakeDebugStore()
-  );
+  const onboarding = new OnboardingService(companies, knowledge, scraper, extractor, (markdown) => markdown, new FakeDebugStore());
 
-  await assert.rejects(onboarding.onboard(company.id, company.website), OnboardingError);
+  await assert.rejects(onboarding.onboard(context, company.id, company.website), OnboardingError);
 
-  assert.equal(companies.findById(company.id)?.status, "failed");
-  assert.equal(knowledge.load(company.id), null);
-  const chat = await new ChatService(companies, knowledge, new AtlasAgent(generator)).chat(company.id, "Old question");
+  assert.equal(companies.findById(context, company.id)?.status, "failed");
+  assert.equal(knowledge.load(context, company.id), null);
+  const chat = await new ChatService(companies, knowledge, new AtlasAgent(generator)).chat(context, company.id, "Old question");
   assert.equal(chat.kind, "company_not_ready");
   assert.equal(generator.receivedKnowledge, null);
 });
 
 test("chat returns a controlled response for a missing company", async () => {
-  const { companies, knowledge } = createRepositories();
-  const service = new ChatService(companies, knowledge, new AtlasAgent(new FakeAnswerGenerator()));
-
-  const result = await service.chat(999, "Hello");
-
+  const { companies, knowledge, context } = createRepositories();
+  const result = await new ChatService(companies, knowledge, new AtlasAgent(new FakeAnswerGenerator())).chat(context, 999, "Hello");
   assert.equal(result.kind, "company_not_found");
   assert.match(result.answer, /human agent/i);
 });
 
 test("chat returns a controlled response when company knowledge is missing", async () => {
-  const { companies, knowledge } = createRepositories();
-  const company = companies.create({ name: "Empty", website: "https://empty.test", status: "ready" });
-  const service = new ChatService(companies, knowledge, new AtlasAgent(new FakeAnswerGenerator()));
-
-  const result = await service.chat(company.id, "Hello");
-
+  const { companies, knowledge, context } = createRepositories();
+  const company = companies.create(context, { name: "Empty", website: "https://empty.test", status: "ready" });
+  const result = await new ChatService(companies, knowledge, new AtlasAgent(new FakeAnswerGenerator())).chat(context, company.id, "Hello");
   assert.equal(result.kind, "knowledge_not_found");
   assert.match(result.answer, /human agent/i);
 });

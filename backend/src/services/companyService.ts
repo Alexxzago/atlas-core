@@ -1,4 +1,6 @@
-import type { Company, CompanyRepository } from "../repositories/companyRepository.js";
+import type { CompanyRepositoryPort } from "../application/ports/repositories.js";
+import type { Company } from "../types/company.js";
+import type { WorkspaceContext } from "../types/workspaceContext.js";
 import {
   CompanyNotFoundError,
   CompanyValidationError,
@@ -15,34 +17,34 @@ interface CompanyUpdate {
 }
 
 export class CompanyService {
-  public constructor(private readonly companies: CompanyRepository) {}
-  public list(): Company[] { return this.companies.list(); }
+  public constructor(private readonly companies: CompanyRepositoryPort) {}
+  public list(context: WorkspaceContext): Company[] { return this.companies.list(context); }
 
-  public get(companyIdValue: unknown): Company {
+  public get(context: WorkspaceContext, companyIdValue: unknown): Company {
     const companyId = parseCompanyId(companyIdValue);
-    const company = this.companies.findById(companyId);
+    const company = this.companies.findById(context, companyId);
     if (!company) throw new CompanyNotFoundError("Company was not found.");
     return company;
   }
 
-  public create(value: unknown): Company {
+  public create(context: WorkspaceContext, value: unknown): Company {
     const input = this.validateCreate(value);
-    if (this.companies.findByWebsite(input.website)) {
+    if (this.companies.findByWebsite(context, input.website)) {
       throw new DuplicateWebsiteError("A company already uses this website.");
     }
-    return this.companies.create(input);
+    return this.companies.create(context, input);
   }
 
-  public update(companyIdValue: unknown, value: unknown): Company {
-    const current = this.get(companyIdValue);
+  public update(context: WorkspaceContext, companyIdValue: unknown, value: unknown): Company {
+    const current = this.get(context, companyIdValue);
     const changes = this.validateUpdate(value);
     const website = changes.website ?? current.website;
-    const websiteOwner = this.companies.findByWebsite(website);
+    const websiteOwner = this.companies.findByWebsite(context, website);
     if (websiteOwner && websiteOwner.id !== current.id) {
       throw new DuplicateWebsiteError("A company already uses this website.");
     }
 
-    const updated = this.companies.update(current.id, {
+    const updated = this.companies.update(context, current.id, {
       name: changes.name ?? current.name,
       website,
       phone: changes.phone ?? current.phone,
@@ -53,9 +55,9 @@ export class CompanyService {
     return updated;
   }
 
-  public delete(companyIdValue: unknown): void {
+  public delete(context: WorkspaceContext, companyIdValue: unknown): void {
     const companyId = parseCompanyId(companyIdValue);
-    if (!this.companies.delete(companyId)) {
+    if (!this.companies.delete(context, companyId)) {
       throw new CompanyNotFoundError("Company was not found.");
     }
   }

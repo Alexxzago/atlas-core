@@ -1,29 +1,8 @@
-import { database } from "../config/database.js";
+import { companyRepository } from "../repositories/companyRepository.js";
+import { workspaceRepository } from "../repositories/workspaceRepository.js";
+import { createWorkspaceContext } from "../types/workspaceContext.js";
 
-const companies = database
-  .prepare(`
-    SELECT
-      id,
-      name,
-      website,
-      phone,
-      email,
-      created_at
-    FROM companies
-    ORDER BY id
-  `)
-  .all();
+const context = createWorkspaceContext(workspaceRepository.resolveDefault());
+const companies = companyRepository.list(context);
 
 console.table(companies);
-
-const knowledge = database
-  .prepare(`
-    SELECT
-      company_id,
-      updated_at
-    FROM company_knowledge
-    ORDER BY company_id
-  `)
-  .all();
-
-console.table(knowledge);

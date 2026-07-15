@@ -1,7 +1,7 @@
-import type { CompanyRepository } from "../repositories/companyRepository.js";
-import type { KnowledgeRepository } from "../repositories/knowledgeRepository.js";
+import type { CompanyRepositoryPort, KnowledgeRepositoryPort } from "../application/ports/repositories.js";
 import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 import type { KnowledgeExtractor, MarkdownDebugStore, WebsiteScraper } from "../types/ports.js";
+import type { WorkspaceContext } from "../types/workspaceContext.js";
 import { validateCompanyKnowledge } from "./knowledgeBuilder.js";
 import {
   CompanyNotFoundError,
@@ -20,26 +20,26 @@ export interface OnboardingResult {
 
 export class OnboardingService {
   public constructor(
-    private readonly companies: CompanyRepository,
-    private readonly knowledge: KnowledgeRepository,
+    private readonly companies: CompanyRepositoryPort,
+    private readonly knowledge: KnowledgeRepositoryPort,
     private readonly scraper: WebsiteScraper,
     private readonly extractor: KnowledgeExtractor,
     private readonly cleaner: (markdown: string) => string,
     private readonly debugStore: MarkdownDebugStore
   ) {}
 
-  public async onboard(companyIdValue: unknown, rawUrl: unknown): Promise<OnboardingResult> {
+  public async onboard(context: WorkspaceContext, companyIdValue: unknown, rawUrl: unknown): Promise<OnboardingResult> {
     const companyId = parseCompanyId(companyIdValue);
     const website = normalizeWebsiteUrl(rawUrl);
-    const company = this.companies.findById(companyId);
+    const company = this.companies.findById(context, companyId);
     if (!company) throw new CompanyNotFoundError("Company was not found.");
 
-    const websiteOwner = this.companies.findByWebsite(website);
+    const websiteOwner = this.companies.findByWebsite(context, website);
     if (websiteOwner && websiteOwner.id !== company.id) {
       throw new DuplicateWebsiteError("A company already uses this website.");
     }
 
-    const processingCompany = this.companies.update(company.id, {
+    const processingCompany = this.companies.update(context, company.id, {
       ...company,
       website,
       status: "processing",
@@ -49,7 +49,7 @@ export class OnboardingService {
     try {
       // A retry invalidates the previous snapshot. It must not be served as if
       // it were knowledge refreshed by this onboarding attempt.
-      this.knowledge.delete(company.id);
+      this.knowledge.delete(context, company.id);
       const scrapeResult = await this.scraper.scrape(website);
       if (!scrapeResult.markdown?.trim()) {
         throw new Error("Website scraper returned no content.");
@@ -73,7 +73,7 @@ export class OnboardingService {
         },
       };
 
-      const updatedCompany = this.companies.update(company.id, {
+      const updatedCompany = this.companies.update(context, company.id, {
         name: finalKnowledge.company.name,
         website,
         phone: finalKnowledge.company.phone,
@@ -81,13 +81,15 @@ export class OnboardingService {
         status: "processing",
       });
       if (!updatedCompany) throw new Error("Company disappeared during onboarding.");
-      this.knowledge.save(updatedCompany.id, finalKnowledge);
-      this.companies.updateStatus(updatedCompany.id, "ready");
+      if (!this.knowledge.save(context, updatedCompany.id, finalKnowledge)) {
+        throw new Error("Company knowledge could not be saved in the workspace.");
+      }
+      this.companies.updateStatus(context, updatedCompany.id, "ready");
 
       return { companyId: updatedCompany.id, status: "ready", knowledge: finalKnowledge };
     } catch (error: unknown) {
       try {
-        this.companies.updateStatus(company.id, "failed");
+        this.companies.updateStatus(context, company.id, "failed");
       } catch (statusError: unknown) {
         throw new OnboardingError("Onboarding failed and company status could not be updated.", {
           cause: new AggregateError([error, statusError]),
