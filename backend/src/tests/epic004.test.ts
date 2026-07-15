@@ -35,8 +35,8 @@ class FakeDebugStore implements MarkdownDebugStore {
 
 test("chat keeps company knowledge isolated", async () => {
   const { companies, knowledge } = createRepositories();
-  const alpha = companies.save({ name: "Alpha", website: "https://alpha.test", status: "ready" });
-  const beta = companies.save({ name: "Beta", website: "https://beta.test", status: "ready" });
+  const alpha = companies.create({ name: "Alpha", website: "https://alpha.test", status: "ready" });
+  const beta = companies.create({ name: "Beta", website: "https://beta.test", status: "ready" });
   knowledge.save(alpha.id, alphaKnowledge);
   knowledge.save(beta.id, {
     ...alphaKnowledge,
@@ -67,8 +67,9 @@ test("onboarding moves a company from processing to ready", async () => {
   const service = new OnboardingService(
     companies, knowledge, scraper, extractor, (markdown) => markdown.trim(), new FakeDebugStore()
   );
+  const company = companies.create({ name: "Alpha", website: "https://old-alpha.test" });
 
-  const result = await service.onboard(" HTTPS://ALPHA.TEST/ ");
+  const result = await service.onboard(company.id, " HTTPS://ALPHA.TEST/ ");
 
   assert.equal(statusDuringScrape, "processing");
   assert.equal(result.status, "ready");
@@ -87,9 +88,34 @@ test("failed onboarding marks the company as failed", async () => {
   const service = new OnboardingService(
     companies, knowledge, scraper, extractor, (markdown) => markdown, new FakeDebugStore()
   );
+  const company = companies.create({ name: "Failure", website: "https://failure.test" });
 
-  await assert.rejects(service.onboard("https://failure.test"), OnboardingError);
+  await assert.rejects(service.onboard(company.id, "https://failure.test"), OnboardingError);
   assert.equal(companies.findByWebsite("https://failure.test")?.status, "failed");
+});
+
+test("a failed retry invalidates old knowledge and keeps a previously ready company unavailable", async () => {
+  const { companies, knowledge } = createRepositories();
+  const company = companies.create({ name: "Ready", website: "https://ready.test", status: "ready" });
+  knowledge.save(company.id, alphaKnowledge);
+  const scraper: WebsiteScraper = {
+    async scrape(): Promise<never> { throw new Error("SCRAPE_ALL_ENGINES_FAILED"); },
+  };
+  const extractor: KnowledgeExtractor = {
+    async extract(): Promise<unknown> { return alphaKnowledge; },
+  };
+  const generator = new FakeAnswerGenerator();
+  const onboarding = new OnboardingService(
+    companies, knowledge, scraper, extractor, (markdown) => markdown, new FakeDebugStore()
+  );
+
+  await assert.rejects(onboarding.onboard(company.id, company.website), OnboardingError);
+
+  assert.equal(companies.findById(company.id)?.status, "failed");
+  assert.equal(knowledge.load(company.id), null);
+  const chat = await new ChatService(companies, knowledge, new AtlasAgent(generator)).chat(company.id, "Old question");
+  assert.equal(chat.kind, "company_not_ready");
+  assert.equal(generator.receivedKnowledge, null);
 });
 
 test("chat returns a controlled response for a missing company", async () => {
@@ -104,7 +130,7 @@ test("chat returns a controlled response for a missing company", async () => {
 
 test("chat returns a controlled response when company knowledge is missing", async () => {
   const { companies, knowledge } = createRepositories();
-  const company = companies.save({ name: "Empty", website: "https://empty.test", status: "ready" });
+  const company = companies.create({ name: "Empty", website: "https://empty.test", status: "ready" });
   const service = new ChatService(companies, knowledge, new AtlasAgent(new FakeAnswerGenerator()));
 
   const result = await service.chat(company.id, "Hello");

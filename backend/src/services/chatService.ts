@@ -5,6 +5,7 @@ import type { KnowledgeRepository } from "../repositories/knowledgeRepository.js
 export type ChatResult =
   | { kind: "answered"; answer: string }
   | { kind: "company_not_found"; answer: string }
+  | { kind: "company_not_ready"; answer: string }
   | { kind: "knowledge_not_found"; answer: string };
 
 const SAFE_RESPONSE = "I don't have that information yet. I can connect you with a human agent.";
@@ -17,8 +18,12 @@ export class ChatService {
   ) {}
 
   public async chat(companyId: number, message: string): Promise<ChatResult> {
-    if (!this.companies.findById(companyId)) {
+    const company = this.companies.findById(companyId);
+    if (!company) {
       return { kind: "company_not_found", answer: SAFE_RESPONSE };
+    }
+    if (company.status !== "ready") {
+      return { kind: "company_not_ready", answer: SAFE_RESPONSE };
     }
     const companyKnowledge = this.knowledge.load(companyId);
     if (!companyKnowledge) {

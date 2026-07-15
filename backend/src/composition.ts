@@ -2,7 +2,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AtlasAgent } from "./agents/atlas.js";
 import { createChatController } from "./controllers/chatController.js";
-import { createCompanyController, createListCompaniesController } from "./controllers/companyController.js";
+import {
+  createCompanyController,
+  createDeleteCompanyController,
+  createGetCompanyController,
+  createListCompaniesController,
+  createUpdateCompanyController,
+} from "./controllers/companyController.js";
 import { createKnowledgeController } from "./controllers/knowledgeController.js";
 import { createOnboardingController } from "./controllers/onboarding.js";
 import { createScrapeController } from "./controllers/scrapeController.js";
@@ -14,7 +20,6 @@ import { FileMarkdownDebugStore } from "./repositories/markdownDebugRepository.j
 import { createChatRouter } from "./routes/chat.js";
 import { createCompaniesRouter } from "./routes/companies.js";
 import { createKnowledgeRouter } from "./routes/knowledge.js";
-import { createOnboardingRouter } from "./routes/onboarding.js";
 import { createScrapeRouter } from "./routes/scrape.js";
 import { ChatService } from "./services/chatService.js";
 import { CompanyService } from "./services/companyService.js";
@@ -39,10 +44,13 @@ const onboardingService = new OnboardingService(
 );
 
 export const chatRouter = createChatRouter(createChatController(chatService));
-export const companiesRouter = createCompaniesRouter(
-  createListCompaniesController(companyService),
-  createCompanyController(companyService)
-);
+export const companiesRouter = createCompaniesRouter({
+  list: createListCompaniesController(companyService),
+  create: createCompanyController(companyService),
+  get: createGetCompanyController(companyService),
+  update: createUpdateCompanyController(companyService),
+  delete: createDeleteCompanyController(companyService),
+  onboard: createOnboardingController(onboardingService),
+});
 export const knowledgeRouter = createKnowledgeRouter(createKnowledgeController(knowledgeService));
-export const onboardingRouter = createOnboardingRouter(createOnboardingController(onboardingService));
 export const scrapeRouter = createScrapeRouter(createScrapeController(scrapeService));

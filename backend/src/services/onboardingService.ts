@@ -3,8 +3,13 @@ import type { KnowledgeRepository } from "../repositories/knowledgeRepository.js
 import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 import type { KnowledgeExtractor, MarkdownDebugStore, WebsiteScraper } from "../types/ports.js";
 import { validateCompanyKnowledge } from "./knowledgeBuilder.js";
+import {
+  CompanyNotFoundError,
+  DuplicateWebsiteError,
+  normalizeWebsiteUrl,
+  parseCompanyId,
+} from "./companyValidation.js";
 
-export class InvalidWebsiteUrlError extends Error {}
 export class OnboardingError extends Error {}
 
 export interface OnboardingResult {
@@ -23,27 +28,28 @@ export class OnboardingService {
     private readonly debugStore: MarkdownDebugStore
   ) {}
 
-  public async onboard(rawUrl: string): Promise<OnboardingResult> {
-    const website = this.normalizeWebsiteUrl(rawUrl);
-    const existing = this.companies.findByWebsite(website);
-    const processingCompany: {
-      name: string;
-      website: string;
-      phone?: string;
-      email?: string;
-      status: "processing";
-    } = {
-      name: existing?.name ?? new URL(website).hostname,
+  public async onboard(companyIdValue: unknown, rawUrl: unknown): Promise<OnboardingResult> {
+    const companyId = parseCompanyId(companyIdValue);
+    const website = normalizeWebsiteUrl(rawUrl);
+    const company = this.companies.findById(companyId);
+    if (!company) throw new CompanyNotFoundError("Company was not found.");
+
+    const websiteOwner = this.companies.findByWebsite(website);
+    if (websiteOwner && websiteOwner.id !== company.id) {
+      throw new DuplicateWebsiteError("A company already uses this website.");
+    }
+
+    const processingCompany = this.companies.update(company.id, {
+      ...company,
       website,
       status: "processing",
-    };
-    if (existing) {
-      processingCompany.phone = existing.phone;
-      processingCompany.email = existing.email;
-    }
-    const company = this.companies.save(processingCompany);
+    });
+    if (!processingCompany) throw new CompanyNotFoundError("Company was not found.");
 
     try {
+      // A retry invalidates the previous snapshot. It must not be served as if
+      // it were knowledge refreshed by this onboarding attempt.
+      this.knowledge.delete(company.id);
       const scrapeResult = await this.scraper.scrape(website);
       if (!scrapeResult.markdown?.trim()) {
         throw new Error("Website scraper returned no content.");
@@ -59,16 +65,22 @@ export class OnboardingService {
       const validated = validateCompanyKnowledge(extracted);
       const finalKnowledge: CompanyKnowledge = {
         ...validated,
-        company: { ...validated.company, website },
+        company: {
+          name: validated.company.name || processingCompany.name,
+          website,
+          phone: validated.company.phone || processingCompany.phone,
+          email: validated.company.email || processingCompany.email,
+        },
       };
 
-      const updatedCompany = this.companies.save({
-        name: finalKnowledge.company.name || new URL(website).hostname,
+      const updatedCompany = this.companies.update(company.id, {
+        name: finalKnowledge.company.name,
         website,
         phone: finalKnowledge.company.phone,
         email: finalKnowledge.company.email,
         status: "processing",
       });
+      if (!updatedCompany) throw new Error("Company disappeared during onboarding.");
       this.knowledge.save(updatedCompany.id, finalKnowledge);
       this.companies.updateStatus(updatedCompany.id, "ready");
 
@@ -76,33 +88,13 @@ export class OnboardingService {
     } catch (error: unknown) {
       try {
         this.companies.updateStatus(company.id, "failed");
-      } catch {
-        // Preserve the original onboarding failure.
+      } catch (statusError: unknown) {
+        throw new OnboardingError("Onboarding failed and company status could not be updated.", {
+          cause: new AggregateError([error, statusError]),
+        });
       }
       throw new OnboardingError("Unable to onboard company.", { cause: error });
     }
   }
 
-  private normalizeWebsiteUrl(rawUrl: string): string {
-    if (typeof rawUrl !== "string" || !rawUrl.trim()) {
-      throw new InvalidWebsiteUrlError("A website URL is required.");
-    }
-
-    let url: URL;
-    try {
-      url = new URL(rawUrl.trim());
-    } catch {
-      throw new InvalidWebsiteUrlError("The website URL is invalid.");
-    }
-
-    if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) {
-      throw new InvalidWebsiteUrlError("The website URL must use HTTP or HTTPS.");
-    }
-
-    url.hash = "";
-    url.search = "";
-    url.hostname = url.hostname.toLowerCase();
-    url.pathname = url.pathname === "/" ? "" : url.pathname.replace(/\/$/, "");
-    return url.toString().replace(/\/$/, "");
-  }
 }

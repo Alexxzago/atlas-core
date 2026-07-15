@@ -1,0 +1,8 @@
+*, *::before, *::after { box-sizing: border-box; }
+html { color-scheme: light; }
+body, h1, h2, p, dl, dd { margin: 0; }
+body { min-width: 320px; min-height: 100vh; }
+button, input, textarea, select { font: inherit; }
+button { border: 0; }
+a { color: inherit; }
+img, svg { display: block; max-width: 100%; }

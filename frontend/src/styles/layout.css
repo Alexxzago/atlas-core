@@ -1,0 +1,29 @@
+.portal-shell { min-block-size: 100vh; display: grid; grid-template: var(--header-height) 1fr / var(--sidebar-width) minmax(0, 1fr); }
+.portal-header { position: sticky; inset-block-start: 0; z-index: 20; grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding-inline: var(--space-7); background: var(--color-surface); border-block-end: 1px solid var(--color-border); box-shadow: 0 1px 2px rgb(17 24 39 / 5%); }
+.portal-brand { display: flex; align-items: baseline; gap: var(--space-3); }
+.portal-brand strong { font-size: 16px; letter-spacing: .08em; }
+.portal-brand span { color: var(--color-text-secondary); }
+.company-sidebar { position: sticky; inset-block-start: var(--header-height); block-size: calc(100vh - var(--header-height)); overflow-y: auto; background: var(--color-surface); border-inline-end: 1px solid var(--color-border); padding: var(--space-6); }
+.workspace { min-inline-size: 0; padding: var(--space-8); }
+.workspace-surface { max-inline-size: 960px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; }
+.workspace-section { padding: var(--space-7); }
+.workspace-section + .workspace-section { border-block-start: 1px solid var(--color-border-subtle); }
+.workspace-state { display: grid; place-items: center; max-inline-size: 960px; min-block-size: 360px; text-align: center; }
+.workspace-state h1 { margin-block-end: var(--space-3); }
+.mobile-company-switcher { display: none; }
+
+@media (max-width: 767px) {
+  :root { --header-height: 56px; }
+  .portal-shell { display: block; padding-block-start: var(--header-height); }
+  .portal-header { position: fixed; inset-block-start: 0; inset-inline: 0; block-size: var(--header-height); padding-inline: var(--space-5); }
+  .language-selector select { max-inline-size: 112px; }
+  .mobile-company-switcher { display: block; padding: var(--space-4) var(--space-5) 0; }
+  .company-sidebar { display: none; position: relative; inset: auto; block-size: auto; max-block-size: calc(100vh - 120px); margin: var(--space-3) var(--space-5) 0; border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: 0 12px 32px rgb(17 24 39 / 14%); padding: var(--space-5); z-index: 10; }
+  .company-sidebar.is-open { display: block; }
+  .workspace { padding: var(--space-5); }
+  .workspace-surface { inline-size: 100%; }
+  .workspace-section { padding: var(--space-5); }
+  .workspace-state { min-block-size: 260px; }
+  h1 { font-size: 20px; line-height: 28px; }
+  input, textarea, select { font-size: 16px; }
+}

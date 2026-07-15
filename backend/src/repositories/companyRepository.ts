@@ -95,43 +95,13 @@ export class CompanyRepository {
   return rows.map(mapCompany);
 }
 
-  public save(input: {
-  name: string;
-  website: string;
-  phone?: string;
-  email?: string;
-  status?: CompanyStatus;
-}): Company {
-  const existingCompany = this.findByWebsite(input.website);
-
-  if (existingCompany) {
-    this.db
-      .prepare(`
-        UPDATE companies
-        SET
-          name = ?,
-          phone = ?,
-          email = ?,
-          status = ?
-        WHERE id = ?
-      `)
-      .run(
-        input.name,
-        input.phone ?? "",
-        input.email ?? "",
-        input.status ?? existingCompany.status,
-        existingCompany.id
-      );
-
-    const updatedCompany = this.findById(existingCompany.id);
-
-    if (!updatedCompany) {
-      throw new Error("Company could not be updated.");
-    }
-
-    return updatedCompany;
-  }
-
+  public create(input: {
+    name: string;
+    website: string;
+    phone?: string;
+    email?: string;
+    status?: CompanyStatus;
+  }): Company {
   const result = this.db
     .prepare(`
       INSERT INTO companies (
@@ -158,7 +128,30 @@ export class CompanyRepository {
   }
 
   return company;
-}
+  }
+
+  public update(companyId: number, input: {
+    name: string;
+    website: string;
+    phone: string;
+    email: string;
+    status: CompanyStatus;
+  }): Company | null {
+    const result = this.db
+      .prepare(`
+        UPDATE companies
+        SET name = ?, website = ?, phone = ?, email = ?, status = ?
+        WHERE id = ?
+      `)
+      .run(input.name, input.website, input.phone, input.email, input.status, companyId);
+
+    return result.changes === 0 ? null : this.findById(companyId);
+  }
+
+  public delete(companyId: number): boolean {
+    const result = this.db.prepare("DELETE FROM companies WHERE id = ?").run(companyId);
+    return result.changes > 0;
+  }
 
   public updateStatus(
   companyId: number,
@@ -187,5 +180,5 @@ export const companyRepository = new CompanyRepository(database);
 export const findCompanyById = (id: number): Company | null => companyRepository.findById(id);
 export const findCompanyByWebsite = (website: string): Company | null => companyRepository.findByWebsite(website);
 export const listCompanies = (): Company[] => companyRepository.list();
-export const saveCompany = (input: Parameters<CompanyRepository["save"]>[0]): Company => companyRepository.save(input);
+export const saveCompany = (input: Parameters<CompanyRepository["create"]>[0]): Company => companyRepository.create(input);
 export const updateCompanyStatus = (companyId: number, status: CompanyStatus): Company => companyRepository.updateStatus(companyId, status);

@@ -92,6 +92,13 @@ export class KnowledgeRepository {
     faq: JSON.parse(row.faq_json) as CompanyKnowledge["faq"],
   };
   }
+
+  public delete(companyId: number): boolean {
+    const result = this.db
+      .prepare("DELETE FROM company_knowledge WHERE company_id = ?")
+      .run(companyId);
+    return result.changes > 0;
+  }
 }
 
 export const knowledgeRepository = new KnowledgeRepository(database, companyRepository);
