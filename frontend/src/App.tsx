@@ -6,8 +6,14 @@ import { PortalHeader } from "./components/PortalHeader";
 import { useI18n } from "./i18n/I18nContext";
 import { applyOnboardingFailure, replaceCompany, setCompanyStatus } from "./state/companyState";
 import type { Company, CompanyInput, CompanyUpdate } from "./types/api";
+import { AuthenticationPortal } from "./components/AuthenticationPortal";
 
 export default function App(): React.JSX.Element {
+  if(import.meta.env.VITE_ATLAS_TRUSTED_LOCAL_MODE!=="true")return <AuthenticationPortal/>;
+  return <TrustedPortal/>;
+}
+
+function TrustedPortal(): React.JSX.Element {
   const { t } = useI18n();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);

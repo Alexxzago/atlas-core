@@ -12,15 +12,16 @@ import {
 import { createKnowledgeController } from "./controllers/knowledgeController.js";
 import { createOnboardingController } from "./controllers/onboarding.js";
 import { createScrapeController } from "./controllers/scrapeController.js";
-import { createRegistrationController, createResendVerificationController, createVerifyEmailController } from "./controllers/identityController.js";
+import { createAuthenticationControllers, createRegistrationController, createResendVerificationController, createVerifyEmailController } from "./controllers/identityController.js";
 import { database } from "./config/database.js";
 import { DevelopmentVerificationDelivery, UnavailableVerificationDelivery } from "./identity/infrastructure/developmentVerificationDelivery.js";
-import { SecureRandomProvider, Sha256VerificationHashProvider } from "./identity/infrastructure/securityProviders.js";
+import { ScryptPasswordProvider, SecureRandomProvider, Sha256CredentialEnrollmentHashProvider, Sha256SessionIdentifierProvider, Sha256VerificationHashProvider } from "./identity/infrastructure/securityProviders.js";
 import { SystemClock } from "./identity/infrastructure/systemClock.js";
 import { RegistrationService } from "./identity/services/registrationService.js";
 import { ResendEmailVerificationService } from "./identity/services/resendEmailVerificationService.js";
 import { VerifyEmailService } from "./identity/services/verifyEmailService.js";
-import { SqliteIdentityTransaction } from "./repositories/identityTransaction.js";
+import { SqliteAuthenticationTransaction, SqliteIdentityTransaction } from "./repositories/identityTransaction.js";
+import { AuthenticationService } from "./identity/services/authenticationService.js";
 import { createIdentityRouter } from "./routes/identity.js";
 import { firecrawlProvider } from "./providers/firecrawl.js";
 import { geminiProvider } from "./providers/gemini.js";
@@ -73,6 +74,8 @@ const resendVerificationService = new ResendEmailVerificationService(identityTra
   verificationHashProvider, identityClock, verificationDelivery, verificationOrigin,
   verificationLifetimeMilliseconds, verificationCooldownMilliseconds);
 const verifyEmailService = new VerifyEmailService(identityTransaction, verificationHashProvider, identityClock);
+const authenticationService=new AuthenticationService(new SqliteAuthenticationTransaction(database),randomProvider,new Sha256CredentialEnrollmentHashProvider(),new ScryptPasswordProvider(),new Sha256SessionIdentifierProvider(),identityClock,verificationDelivery,verificationOrigin,process.env.NODE_ENV==="production");
+const authenticationControllers=createAuthenticationControllers(authenticationService);
 
 export const chatRouter = createChatRouter(createChatController(chatService, workspaceContext));
 export const companiesRouter = createCompaniesRouter({
@@ -89,4 +92,5 @@ export const identityRouter = createIdentityRouter({
   register: createRegistrationController(registrationService),
   resend: createResendVerificationController(resendVerificationService),
   verify: createVerifyEmailController(verifyEmailService),
+  ...authenticationControllers,
 });

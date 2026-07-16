@@ -92,3 +92,7 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+.auth-card { max-width: 32rem; margin: 8vh auto; padding: 2rem; background: var(--color-surface, white); border-radius: 1rem; }
+.auth-card form { display: grid; gap: 1rem; }
+.auth-card label { display: grid; gap: .4rem; }
+.auth-card input { min-height: 2.75rem; padding: .6rem; }

@@ -216,7 +216,7 @@ test("verification succeeds once and invalid, expired, superseded and invalidate
   assert.equal(user?.authenticationIdentities[0]?.emailVerified, true);
   assert.deepEqual(await setup.registration.register("USER@example.com", "en"), { status: "verification_requested" });
   assert.equal(delivery.requests.length, 2);
-  assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sessions'").get(), undefined);
+  assert.equal((database.prepare("SELECT COUNT(*) AS count FROM sessions").get() as {count:number}).count,0);
   database.close();
 
   const expiredDb = createDatabase(":memory:");
@@ -325,7 +325,7 @@ test("migration 4 upgrades migration-3 identity data and rejects checksum tamper
     const upgraded = createDatabase(path);
     assert.equal(new UserRepository(upgraded).findById(userId("preserved-user"))?.locale, "es");
     assert.equal((upgraded.prepare("SELECT COUNT(*) AS count FROM workspaces WHERE key = 'default'").get() as { count: number }).count, 1);
-    assert.equal((upgraded.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 4);
+    assert.equal((upgraded.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 5);
     upgraded.prepare("UPDATE schema_migrations SET checksum = ? WHERE id = 4").run("tampered");
     upgraded.close();
     assert.throws(() => createDatabase(path), /checksum mismatch/i);

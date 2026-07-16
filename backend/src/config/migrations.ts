@@ -190,6 +190,57 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 5,
+    name: "0005_authentication_sessions",
+    checksumSource: "password-credentials-v1|credential-enrollment-v1|opaque-sessions-v1|login-throttle-v1|no-workspace-authority",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE password_credentials (
+          id TEXT PRIMARY KEY, authentication_identity_id TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('active','replaced')),
+          algorithm TEXT NOT NULL CHECK(algorithm='scrypt'), algorithm_version TEXT NOT NULL, parameters TEXT NOT NULL,
+          salt TEXT NOT NULL, confirmation TEXT NOT NULL, credential_version INTEGER NOT NULL CHECK(credential_version>0),
+          created_at TEXT NOT NULL, replaced_at TEXT, upgraded_at TEXT,
+          FOREIGN KEY(authentication_identity_id) REFERENCES authentication_identities(id) ON DELETE CASCADE
+        );
+        CREATE UNIQUE INDEX idx_password_credentials_current ON password_credentials(authentication_identity_id) WHERE state='active';
+        CREATE INDEX idx_password_credentials_identity ON password_credentials(authentication_identity_id);
+
+        CREATE TABLE credential_enrollments (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, authentication_identity_id TEXT NOT NULL,
+          purpose TEXT NOT NULL CHECK(purpose='credential_enrollment'), digest_version TEXT NOT NULL CHECK(digest_version='sha256-v1'),
+          proof_digest TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','consumed','superseded','invalidated')),
+          delivery_status TEXT NOT NULL CHECK(delivery_status IN ('pending','accepted','temporary_failure','permanent_failure','uncertain')),
+          issued_at TEXT NOT NULL, expires_at TEXT NOT NULL, consumed_at TEXT, superseded_at TEXT, invalidated_at TEXT, updated_at TEXT NOT NULL,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(authentication_identity_id) REFERENCES authentication_identities(id) ON DELETE CASCADE,
+          UNIQUE(purpose,digest_version,proof_digest)
+        );
+        CREATE UNIQUE INDEX idx_credential_enrollments_current ON credential_enrollments(authentication_identity_id,purpose) WHERE status='pending';
+        CREATE INDEX idx_credential_enrollments_digest ON credential_enrollments(purpose,digest_version,proof_digest);
+
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, authentication_identity_id TEXT NOT NULL, strategy TEXT NOT NULL CHECK(strategy='password'),
+          authentication_version INTEGER NOT NULL, credential_version INTEGER NOT NULL, digest_version TEXT NOT NULL CHECK(digest_version='sha256-v1'),
+          identifier_digest TEXT NOT NULL UNIQUE, csrf_digest TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('active','replaced','revoked','expired')),
+          issued_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, idle_expires_at TEXT NOT NULL, absolute_expires_at TEXT NOT NULL,
+          predecessor_id TEXT, replaced_at TEXT, revoked_at TEXT, revocation_reason TEXT,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(authentication_identity_id) REFERENCES authentication_identities(id) ON DELETE CASCADE,
+          FOREIGN KEY(predecessor_id) REFERENCES sessions(id) ON DELETE SET NULL
+        );
+        CREATE INDEX idx_sessions_digest ON sessions(digest_version,identifier_digest);
+        CREATE INDEX idx_sessions_user_state ON sessions(user_id,state);
+
+        CREATE TABLE login_throttles (
+          identity_key TEXT NOT NULL, origin_key TEXT NOT NULL, failure_count INTEGER NOT NULL,
+          first_failure_at TEXT NOT NULL, last_failure_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+          PRIMARY KEY(identity_key,origin_key)
+        );
+        CREATE INDEX idx_login_throttles_expiry ON login_throttles(expires_at);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {
