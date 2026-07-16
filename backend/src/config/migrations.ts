@@ -241,6 +241,56 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id:6,
+    name:"0006_workspace_memberships_invitations",
+    checksumSource:"workspace-public-ids-v1|memberships-v1|invitations-v1|workspace-selection-v1|no-bootstrap-authority",
+    apply(database):void{
+      database.exec(`
+        ALTER TABLE workspaces ADD COLUMN public_id TEXT;
+        UPDATE workspaces SET public_id='wsp_' || lower(hex(randomblob(16))) WHERE public_id IS NULL;
+        CREATE UNIQUE INDEX idx_workspaces_public_id ON workspaces(public_id);
+
+        CREATE TABLE memberships (
+          id TEXT PRIMARY KEY, workspace_id INTEGER NOT NULL, user_id TEXT NOT NULL,
+          role TEXT NOT NULL CHECK(role IN ('owner','administrator','operator','viewer')),
+          status TEXT NOT NULL CHECK(status IN ('active','suspended','removed')), version INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL, activated_at TEXT NOT NULL, suspended_at TEXT, reactivated_at TEXT, removed_at TEXT, role_changed_at TEXT,
+          FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+        CREATE UNIQUE INDEX idx_memberships_current_user_workspace ON memberships(user_id,workspace_id) WHERE status!='removed';
+        CREATE INDEX idx_memberships_user_status ON memberships(user_id,status,workspace_id);
+        CREATE INDEX idx_memberships_workspace_status ON memberships(workspace_id,status);
+        CREATE INDEX idx_memberships_active_owners ON memberships(workspace_id,role,status) WHERE role='owner' AND status='active';
+
+        CREATE TABLE workspace_invitations (
+          id TEXT PRIMARY KEY, workspace_id INTEGER NOT NULL, issuer_membership_id TEXT NOT NULL, issuer_user_id TEXT NOT NULL,
+          recipient_normalized_email TEXT NOT NULL, proposed_role TEXT NOT NULL CHECK(proposed_role IN ('administrator','operator','viewer')),
+          purpose TEXT NOT NULL CHECK(purpose='workspace_invitation'), digest_version TEXT NOT NULL CHECK(digest_version='sha256-v1'), proof_digest TEXT NOT NULL UNIQUE,
+          status TEXT NOT NULL CHECK(status IN ('pending','accepted','rejected','revoked','expired','superseded')),
+          delivery_status TEXT NOT NULL CHECK(delivery_status IN ('pending','accepted','temporary_failure','permanent_failure','uncertain')),
+          version INTEGER NOT NULL DEFAULT 1, issued_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+          accepted_at TEXT, accepted_by_user_id TEXT, accepted_ip TEXT, accepted_user_agent TEXT,
+          rejected_at TEXT, revoked_at TEXT, superseded_at TEXT, updated_at TEXT NOT NULL,
+          FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+          FOREIGN KEY(issuer_membership_id) REFERENCES memberships(id) ON DELETE RESTRICT,
+          FOREIGN KEY(issuer_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+          FOREIGN KEY(accepted_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+        CREATE UNIQUE INDEX idx_invitations_current_recipient ON workspace_invitations(workspace_id,recipient_normalized_email) WHERE status='pending';
+        CREATE INDEX idx_invitations_digest ON workspace_invitations(purpose,digest_version,proof_digest);
+        CREATE INDEX idx_invitations_workspace_status ON workspace_invitations(workspace_id,status,expires_at);
+
+        CREATE TABLE workspace_selections (
+          user_id TEXT PRIMARY KEY, workspace_id INTEGER NOT NULL, selected_at TEXT NOT NULL,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_workspace_selections_workspace ON workspace_selections(workspace_id);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

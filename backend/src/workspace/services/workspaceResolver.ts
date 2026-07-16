@@ -1,0 +1,3 @@
+import type{WorkspaceRepositoryPort}from"../../application/ports/repositories.js";import{createWorkspaceContext,type WorkspaceContext}from"../../types/workspaceContext.js";import type{AuthorizationDecision}from"./authorizationService.js";
+export class WorkspaceResolutionError extends Error{}
+export class WorkspaceResolver{public constructor(private readonly workspaces:WorkspaceRepositoryPort){}public resolve(decision:AuthorizationDecision):WorkspaceContext{const workspace=this.workspaces.findById(decision.workspaceId);if(!workspace||workspace.publicId!==decision.workspacePublicId)throw new WorkspaceResolutionError();return createWorkspaceContext(workspace);}}

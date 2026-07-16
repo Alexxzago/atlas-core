@@ -31,6 +31,7 @@ export interface KnowledgeRepositoryPort {
 export interface WorkspaceRepositoryPort {
   findById(workspaceId: number): Workspace | null;
   findByKey(workspaceKey: string): Workspace | null;
+  findByPublicId(publicId: string): Workspace | null;
   resolveDefault(): Workspace;
   createForSystemUse(input: { key: string; name: string }): Workspace;
 }

@@ -40,6 +40,16 @@ import { cleanMarkdown } from "./services/markdownCleaner.js";
 import { OnboardingService } from "./services/onboardingService.js";
 import { ScrapeService } from "./services/scrapeService.js";
 import { createWorkspaceContext } from "./types/workspaceContext.js";
+import {createWorkspaceAdministrationControllers}from"./controllers/workspaceAdministrationController.js";
+import{createWorkspacesRouter}from"./routes/workspaces.js";
+import{SqliteWorkspaceAdministrationTransaction}from"./repositories/workspaceAdministrationTransaction.js";
+import{MembershipRepository}from"./repositories/workspaceAdministrationRepository.js";
+import{DevelopmentInvitationDelivery,SecureInvitationProofProvider,UnavailableInvitationDelivery}from"./workspace/infrastructure/invitationProviders.js";
+import{WorkspaceAdministrationService}from"./workspace/services/workspaceAdministrationService.js";
+import{AuthorizationService}from"./workspace/services/authorizationService.js";
+import{WorkspaceResolver}from"./workspace/services/workspaceResolver.js";
+import{createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
+import{UserRepository}from"./repositories/userRepository.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -76,6 +86,10 @@ const resendVerificationService = new ResendEmailVerificationService(identityTra
 const verifyEmailService = new VerifyEmailService(identityTransaction, verificationHashProvider, identityClock);
 const authenticationService=new AuthenticationService(new SqliteAuthenticationTransaction(database),randomProvider,new Sha256CredentialEnrollmentHashProvider(),new ScryptPasswordProvider(),new Sha256SessionIdentifierProvider(),identityClock,verificationDelivery,verificationOrigin,process.env.NODE_ENV==="production");
 const authenticationControllers=createAuthenticationControllers(authenticationService);
+const invitationDelivery=deliverySelection==="development"?new DevelopmentInvitationDelivery(process.env.NODE_ENV??"",message=>console.info(message)):new UnavailableInvitationDelivery();
+const workspaceAdministrationService=new WorkspaceAdministrationService(new SqliteWorkspaceAdministrationTransaction(database),new SecureInvitationProofProvider(),identityClock,invitationDelivery,verificationOrigin);
+export const authorizationService=new AuthorizationService(new MembershipRepository(database),workspaceRepository);
+export const authenticatedWorkspaceResolver=new WorkspaceResolver(workspaceRepository);
 
 export const chatRouter = createChatRouter(createChatController(chatService, workspaceContext));
 export const companiesRouter = createCompaniesRouter({
@@ -94,3 +108,5 @@ export const identityRouter = createIdentityRouter({
   verify: createVerifyEmailController(verifyEmailService),
   ...authenticationControllers,
 });
+export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService));
+export const authorizedCompaniesRouter=createAuthorizedCompaniesRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,controllers:{list:context=>createListCompaniesController(companyService,context),create:context=>createCompanyController(companyService,context),get:context=>createGetCompanyController(companyService,context),update:context=>createUpdateCompanyController(companyService,context),delete:context=>createDeleteCompanyController(companyService,context),onboard:context=>createOnboardingController(onboardingService,context)}});
