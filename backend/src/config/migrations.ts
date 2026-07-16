@@ -124,6 +124,36 @@ const migrations: Migration[] = [
       if (unowned.count !== 0) throw new Error("Workspace migration left unowned companies.");
     },
   },
+  {
+    id: 3,
+    name: "0003_identity_foundation",
+    checksumSource: "users-v1|authentication-identities-v1|normalized-email-unique|no-bootstrap-users",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE users (
+          id TEXT PRIMARY KEY,
+          status TEXT NOT NULL CHECK (status IN ('pending_verification', 'active', 'locked', 'disabled', 'deleted')),
+          locale TEXT NOT NULL CHECK (locale IN ('en', 'es')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE authentication_identities (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          email TEXT NOT NULL,
+          normalized_email TEXT NOT NULL UNIQUE,
+          email_verified INTEGER NOT NULL DEFAULT 0 CHECK (email_verified IN (0, 1)),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_authentication_identities_user_id
+          ON authentication_identities(user_id);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

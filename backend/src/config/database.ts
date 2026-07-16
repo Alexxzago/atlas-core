@@ -10,10 +10,14 @@ const databasePath = resolve(projectRoot, "database/atlas.sqlite");
 export function createDatabase(path: string): DatabaseSync {
   mkdirSync(dirname(path), { recursive: true });
   const instance = new DatabaseSync(path);
-  instance.exec("PRAGMA foreign_keys = ON;");
-  runMigrations(instance);
-
-  return instance;
+  try {
+    instance.exec("PRAGMA foreign_keys = ON;");
+    runMigrations(instance);
+    return instance;
+  } catch (error: unknown) {
+    instance.close();
+    throw error;
+  }
 }
 
 export const database = createDatabase(databasePath);

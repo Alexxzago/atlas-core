@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test src/tests/epic004.test.ts src/tests/epic005.test.ts src/tests/epic007.test.ts",
+    "test": "tsx --test src/tests/epic004.test.ts src/tests/epic005.test.ts src/tests/epic007.test.ts src/tests/epic0081.test.ts",
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/index.ts"
   },

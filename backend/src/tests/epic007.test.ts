@@ -57,7 +57,7 @@ function createWorkspacePair(): {
   };
 }
 
-test("fresh database receives both migrations and the default workspace", () => {
+test("fresh database receives all migrations and the default workspace", () => {
   const database = createDatabase(":memory:");
   const migrations = database.prepare(`
     SELECT id, name, checksum, applied_at FROM schema_migrations ORDER BY id
@@ -65,6 +65,7 @@ test("fresh database receives both migrations and the default workspace", () => 
   assert.deepEqual(migrations.map(({ id, name }) => ({ id, name })), [
     { id: 1, name: "0001_baseline" },
     { id: 2, name: "0002_workspace_foundation" },
+    { id: 3, name: "0003_identity_foundation" },
   ]);
   assert.ok(migrations.every((migration) => migration.checksum.length === 64 && migration.applied_at.length > 0));
   assert.equal(new WorkspaceRepository(database).resolveDefault().key, "default");
@@ -129,7 +130,7 @@ test("an already migrated database restarts idempotently", () => {
     const restarted = createDatabase(path);
     const migrationCount = restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number };
     const workspaceCount = restarted.prepare("SELECT COUNT(*) AS count FROM workspaces WHERE key = 'default'").get() as { count: number };
-    assert.equal(migrationCount.count, 2);
+    assert.equal(migrationCount.count, 3);
     assert.equal(workspaceCount.count, 1);
     assert.deepEqual(restarted.prepare("PRAGMA foreign_key_check").all(), []);
     restarted.close();
