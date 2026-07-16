@@ -291,6 +291,38 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 7,
+    name: "0007_assistant_profiles",
+    checksumSource: "assistant-profiles-v1|company-owned-multiple|normalized-name-unique|mutable-lifecycle|no-bootstrap-profiles",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE assistant_profiles (
+          id TEXT PRIMARY KEY,
+          company_id INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          normalized_name TEXT NOT NULL,
+          description TEXT,
+          business_role TEXT,
+          objective TEXT,
+          audience TEXT,
+          tone TEXT NOT NULL CHECK(tone IN ('professional','friendly','concise','empathetic')),
+          assistant_language TEXT NOT NULL CHECK(assistant_language IN ('es','en')),
+          welcome_message TEXT,
+          fallback_message TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('draft','ready','disabled','archived')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          archived_at TEXT,
+          FOREIGN KEY(company_id) REFERENCES companies(id) ON DELETE CASCADE,
+          UNIQUE(company_id,normalized_name),
+          CHECK((status='archived' AND archived_at IS NOT NULL) OR (status!='archived' AND archived_at IS NULL))
+        );
+        CREATE INDEX idx_assistant_profiles_company_status_created
+          ON assistant_profiles(company_id,status,created_at DESC,id DESC);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

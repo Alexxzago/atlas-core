@@ -1,6 +1,7 @@
 # ADR-006: Assistant Capabilities and Tools
 
-**Status:** Accepted — Not Yet Implemented  
+**Status:** Accepted
+**Partially superseded by:** [ADR-010](ADR-010-company-owned-assistant-profiles.md) for MVP Assistant Profile cardinality and persistence only
 **Date:** 2026-07-14
 
 ## Context
