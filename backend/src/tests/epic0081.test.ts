@@ -198,6 +198,7 @@ test("identity migration is additive, creates no users, and preserves the defaul
     { id: 1, name: "0001_baseline" },
     { id: 2, name: "0002_workspace_foundation" },
     { id: 3, name: "0003_identity_foundation" },
+    { id: 4, name: "0004_email_verification" },
   ]);
   assert.equal((database.prepare("SELECT COUNT(*) AS count FROM users").get() as { count: number }).count, 0);
   assert.equal(new WorkspaceRepository(database).resolveDefault().key, "default");
@@ -214,7 +215,7 @@ test("identity migration restarts safely with persisted aggregate state", () => 
     database.close();
 
     const restarted = createDatabase(path);
-    assert.equal((restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 3);
+    assert.equal((restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 4);
     assert.equal(new UserRepository(restarted).findById(userId("user-1"))?.authenticationIdentities.length, 1);
     assert.deepEqual(restarted.prepare("PRAGMA foreign_key_check").all(), []);
     restarted.close();
@@ -231,7 +232,8 @@ test("identity migration rolls back fully when its schema cannot be completed", 
     const prepared = new DatabaseSync(path);
     prepared.exec(`
       PRAGMA foreign_keys = OFF;
-      DELETE FROM schema_migrations WHERE id = 3;
+      DELETE FROM schema_migrations WHERE id >= 3;
+      DROP TABLE email_verifications;
       DROP TABLE authentication_identities;
       DROP TABLE users;
       CREATE TABLE authentication_identities (id TEXT PRIMARY KEY);

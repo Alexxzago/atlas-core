@@ -1,6 +1,6 @@
 import express from "express";
 import healthRouter from "./routes/health.js";
-import { chatRouter, companiesRouter, knowledgeRouter, scrapeRouter } from "./composition.js";
+import { chatRouter, companiesRouter, identityRouter, knowledgeRouter, scrapeRouter } from "./composition.js";
 
 const app = express();
 
@@ -15,5 +15,6 @@ app.use(knowledgeRouter);
 app.use(chatRouter);
 app.use(scrapeRouter);
 app.use("/companies", companiesRouter);
+app.use("/identity", identityRouter);
 
 export default app;

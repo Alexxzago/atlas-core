@@ -84,8 +84,9 @@ export class UserRepository implements UserRepositoryPort {
   }
 
   public create(user: User): User {
+    const ownsTransaction = !this.db.isTransaction;
     try {
-      this.db.exec("BEGIN IMMEDIATE;");
+      if (ownsTransaction) this.db.exec("BEGIN IMMEDIATE;");
       this.db.prepare(`
         INSERT INTO users (id, status, locale, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?)
@@ -106,25 +107,26 @@ export class UserRepository implements UserRepositoryPort {
           identity.updatedAt,
         );
       }
-      this.db.exec("COMMIT;");
+      if (ownsTransaction) this.db.exec("COMMIT;");
       return user;
     } catch (error: unknown) {
-      if (this.db.isTransaction) this.db.exec("ROLLBACK;");
+      if (ownsTransaction && this.db.isTransaction) this.db.exec("ROLLBACK;");
       if (isNormalizedEmailConflict(error)) throw new NormalizedEmailAlreadyExistsError();
       throw error;
     }
   }
 
   public update(user: User): User | null {
+    const ownsTransaction = !this.db.isTransaction;
     try {
-      this.db.exec("BEGIN IMMEDIATE;");
+      if (ownsTransaction) this.db.exec("BEGIN IMMEDIATE;");
       const updated = this.db.prepare(`
         UPDATE users
         SET status = ?, locale = ?, updated_at = ?
         WHERE id = ?
       `).run(user.status, user.locale, user.updatedAt, user.id);
       if (updated.changes === 0) {
-        this.db.exec("ROLLBACK;");
+        if (ownsTransaction) this.db.exec("ROLLBACK;");
         return null;
       }
 
@@ -154,10 +156,10 @@ export class UserRepository implements UserRepositoryPort {
         if (result.changes !== 1) throw new UserPersistenceConflictError();
       }
 
-      this.db.exec("COMMIT;");
+      if (ownsTransaction) this.db.exec("COMMIT;");
       return user;
     } catch (error: unknown) {
-      if (this.db.isTransaction) this.db.exec("ROLLBACK;");
+      if (ownsTransaction && this.db.isTransaction) this.db.exec("ROLLBACK;");
       if (isNormalizedEmailConflict(error)) throw new NormalizedEmailAlreadyExistsError();
       throw error;
     }

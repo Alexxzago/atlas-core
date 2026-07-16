@@ -154,6 +154,42 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 4,
+    name: "0004_email_verification",
+    checksumSource: "email-verifications-v1|purpose-version-digest-lookup|one-current-per-identity-purpose|no-raw-proof",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE email_verifications (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          authentication_identity_id TEXT NOT NULL,
+          purpose TEXT NOT NULL CHECK (purpose = 'email_verification'),
+          digest_version TEXT NOT NULL CHECK (digest_version = 'sha256-v1'),
+          token_digest TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'consumed', 'superseded', 'invalidated')),
+          delivery_status TEXT NOT NULL CHECK (delivery_status IN ('pending', 'accepted', 'temporary_failure', 'permanent_failure', 'uncertain')),
+          issued_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          consumed_at TEXT,
+          superseded_at TEXT,
+          invalidated_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (authentication_identity_id) REFERENCES authentication_identities(id) ON DELETE CASCADE,
+          UNIQUE (purpose, digest_version, token_digest)
+        );
+
+        CREATE UNIQUE INDEX idx_email_verifications_current_identity_purpose
+          ON email_verifications(authentication_identity_id, purpose)
+          WHERE status = 'pending';
+
+        CREATE INDEX idx_email_verifications_digest_lookup
+          ON email_verifications(purpose, digest_version, token_digest);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

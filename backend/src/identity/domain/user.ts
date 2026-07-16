@@ -1,4 +1,5 @@
 import { createEmailAddress, normalizeEmail, type EmailAddress, type NormalizedEmail } from "./email.js";
+import { isEmailVerificationAuthority, type EmailVerificationAuthority } from "./emailVerification.js";
 
 export type UserId = string & { readonly __brand: "UserId" };
 export type AuthenticationIdentityId = string & { readonly __brand: "AuthenticationIdentityId" };
@@ -66,7 +67,7 @@ function validateTimestamp(value: string): string {
   return value;
 }
 
-function validateLocale(value: string): Locale {
+export function locale(value: string): Locale {
   if (value !== "en" && value !== "es") throw new InvalidIdentityStateError("Locale is not supported.");
   return value;
 }
@@ -135,7 +136,7 @@ export function reconstructUser(state: UserState): User {
   return Object.freeze({
     id: createIdentifier<UserId>(state.id, "User ID"),
     status,
-    locale: validateLocale(state.locale),
+    locale: locale(state.locale),
     authenticationIdentities: Object.freeze(identities),
     createdAt: validateTimestamp(state.createdAt),
     updatedAt: validateTimestamp(state.updatedAt),
@@ -144,4 +145,22 @@ export function reconstructUser(state: UserState): User {
 
 export function userId(value: string): UserId {
   return createIdentifier<UserId>(value, "User ID");
+}
+
+export function activateUserFromEmailVerification(
+  user: User,
+  authority: EmailVerificationAuthority,
+  timestamp: string,
+): User {
+  if (!isEmailVerificationAuthority(authority) || user.status !== "pending_verification" || authority.userId !== user.id) {
+    throw new InvalidIdentityStateError("User cannot be activated by this verification.");
+  }
+  let matched = false;
+  const identities = user.authenticationIdentities.map((identity) => {
+    if (identity.id !== authority.authenticationIdentityId) return identity;
+    matched = true;
+    return { ...identity, emailVerified: true, updatedAt: timestamp };
+  });
+  if (!matched) throw new InvalidIdentityStateError("Verification identity does not belong to the User.");
+  return reconstructUser({ ...user, status: "active", authenticationIdentities: identities, updatedAt: timestamp });
 }
