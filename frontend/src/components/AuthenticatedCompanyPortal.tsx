@@ -186,6 +186,7 @@ export function AuthenticatedCompanyPortal({ csrf, email, onPassword, onLogout }
   };
 
   const selectedProfile = useMemo(() => state.profiles.find((profile) => profile.id === state.selectedProfileId) ?? null, [state.profiles, state.selectedProfileId]);
+  const selectedCompany = useMemo(() => state.companies.find((company) => company.id === state.selectedCompanyId) ?? null, [state.companies, state.selectedCompanyId]);
 
   return <div className="authenticated-portal">
     <PortalHeader />
@@ -194,7 +195,7 @@ export function AuthenticatedCompanyPortal({ csrf, email, onPassword, onLogout }
     <main className="authenticated-main">
       <WorkspaceMembershipPortal csrf={csrf} workspaces={state.workspaces} selectedWorkspace={state.selectedWorkspace} pendingWorkspaceId={state.pendingWorkspaceId} loading={state.workspacesLoading} error={state.workspaceError} onSelectWorkspace={(id) => void selectWorkspace(id)} onWorkspacesChanged={() => void loadWorkspaces()} onActiveWorkspaceLeft={() => { abortTenant(); dispatch({ type: "workspaceCleared" }); }}/>
       <AuthenticatedCompanySelector companies={state.companies} selectedCompanyId={state.selectedCompanyId} workspaceSelected={canCreateCompany(state)} loading={state.companiesLoading} error={state.companyError} creating={state.companyCreating} onCreate={createCompany} onCompanySelected={(id) => void selectCompany(id)} onRetry={() => { if (state.selectedWorkspace) void loadCompanies(state.selectedWorkspace, state.workspaceGeneration); }}/>
-      <AssistantProfilesPanel companySelected={state.selectedCompanyId !== null} profiles={state.profiles} selectedProfile={selectedProfile} transientArchivedProfile={state.transientArchivedProfile} loading={state.profilesLoading} error={state.profileError} formMode={state.formMode} submitting={state.submitting} transitionTarget={state.transitionTarget} onSelectProfile={(id) => void selectProfile(id)} onOpenCreate={() => dispatch({ type: "formOpened", mode: "create" })} onOpenEdit={() => dispatch({ type: "formOpened", mode: "edit" })} onCloseForm={() => dispatch({ type: "formClosed" })} onSubmitForm={(input) => void submitProfile(input)} onTransition={(profile, target) => void transitionProfile(profile, target)} onRetry={reloadProfiles}/>
+      <AssistantProfilesPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} workspaceRole={state.selectedWorkspace?.role ?? null} companyId={state.selectedCompanyId} companyName={selectedCompany?.name ?? null} companySelected={state.selectedCompanyId !== null} profiles={state.profiles} selectedProfile={selectedProfile} transientArchivedProfile={state.transientArchivedProfile} loading={state.profilesLoading} error={state.profileError} formMode={state.formMode} submitting={state.submitting} transitionTarget={state.transitionTarget} onSelectProfile={(id) => void selectProfile(id)} onOpenCreate={() => dispatch({ type: "formOpened", mode: "create" })} onOpenEdit={() => dispatch({ type: "formOpened", mode: "edit" })} onCloseForm={() => dispatch({ type: "formClosed" })} onSubmitForm={(input) => void submitProfile(input)} onTransition={(profile, target) => void transitionProfile(profile, target)} onRetry={reloadProfiles}/>
     </main>
   </div>;
 }

@@ -26,6 +26,7 @@ export const translationKeys = [
   "profiles.tone.professional", "profiles.tone.friendly", "profiles.tone.concise", "profiles.tone.empathetic",
   "profiles.status.draft", "profiles.status.ready", "profiles.status.disabled", "profiles.status.archived",
   "profiles.action.ready", "profiles.action.draft", "profiles.action.disable", "profiles.action.archive", "profiles.action.restore",
+  "preview.title", "preview.context", "preview.readyRequired", "preview.messageLabel", "preview.placeholder", "preview.limit", "preview.send", "preview.sending", "preview.responding", "preview.answer", "preview.fallback", "preview.profileUnavailable", "preview.companyUnavailable", "preview.knowledgeUnavailable", "preview.temporarilyUnavailable", "preview.invalid",
 ] as const;
 
 export type TranslationKey = typeof translationKeys[number];
@@ -51,6 +52,7 @@ const es: TranslationDictionary = {
   "profiles.tone.professional": "Profesional", "profiles.tone.friendly": "Amable", "profiles.tone.concise": "Conciso", "profiles.tone.empathetic": "Empático",
   "profiles.status.draft": "Borrador", "profiles.status.ready": "Listo", "profiles.status.disabled": "Deshabilitado", "profiles.status.archived": "Archivado",
   "profiles.action.ready": "Marcar como listo", "profiles.action.draft": "Volver a borrador", "profiles.action.disable": "Deshabilitar", "profiles.action.archive": "Archivar", "profiles.action.restore": "Restaurar a borrador",
+  "preview.title": "Vista previa del asistente", "preview.context": "Probando {profileName} para {companyName}.", "preview.readyRequired": "Marcá el perfil como listo antes de probarlo.", "preview.messageLabel": "Mensaje de prueba", "preview.placeholder": "Escribí una pregunta real de un cliente…", "preview.limit": "{count}/2000 caracteres", "preview.send": "Probar respuesta", "preview.sending": "Enviando…", "preview.responding": "El asistente está preparando una respuesta…", "preview.answer": "Respuesta", "preview.fallback": "Respuesta alternativa segura", "preview.profileUnavailable": "El perfil ya no está listo para probar.", "preview.companyUnavailable": "La empresa todavía no está lista para la vista previa.", "preview.knowledgeUnavailable": "La empresa todavía no tiene conocimiento disponible.", "preview.temporarilyUnavailable": "La vista previa no está disponible temporalmente. Intentá nuevamente.", "preview.invalid": "Ingresá un mensaje válido de hasta 2000 caracteres.",
 };
 
 const en: TranslationDictionary = {
@@ -73,6 +75,7 @@ const en: TranslationDictionary = {
   "profiles.tone.professional": "Professional", "profiles.tone.friendly": "Friendly", "profiles.tone.concise": "Concise", "profiles.tone.empathetic": "Empathetic",
   "profiles.status.draft": "Draft", "profiles.status.ready": "Ready", "profiles.status.disabled": "Disabled", "profiles.status.archived": "Archived",
   "profiles.action.ready": "Mark ready", "profiles.action.draft": "Return to draft", "profiles.action.disable": "Disable", "profiles.action.archive": "Archive", "profiles.action.restore": "Restore to draft",
+  "preview.title": "Assistant preview", "preview.context": "Testing {profileName} for {companyName}.", "preview.readyRequired": "Mark the Profile ready before previewing it.", "preview.messageLabel": "Test message", "preview.placeholder": "Enter a real customer question…", "preview.limit": "{count}/2000 characters", "preview.send": "Preview response", "preview.sending": "Sending…", "preview.responding": "The assistant is preparing a response…", "preview.answer": "Response", "preview.fallback": "Safe fallback response", "preview.profileUnavailable": "The Profile is no longer ready for preview.", "preview.companyUnavailable": "The company is not ready for preview yet.", "preview.knowledgeUnavailable": "The company does not have Knowledge available yet.", "preview.temporarilyUnavailable": "Preview is temporarily unavailable. Try again.", "preview.invalid": "Enter a valid message of up to 2000 characters.",
 };
 
 export const translations: Record<Locale, TranslationDictionary> = { es, en };

@@ -1,6 +1,7 @@
 import type { AtlasAgent } from "../agents/atlas.js";
 import type { CompanyRepositoryPort, KnowledgeRepositoryPort } from "../application/ports/repositories.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
+import { AnswerGenerationUnavailableError } from "../assistant/application/assistantExecution.js";
 
 export type ChatResult =
   | { kind: "answered"; answer: string }
@@ -9,6 +10,7 @@ export type ChatResult =
   | { kind: "knowledge_not_found"; answer: string };
 
 const SAFE_RESPONSE = "I don't have that information yet. I can connect you with a human agent.";
+const TEMPORARY_RESPONSE = "I'm temporarily unable to check that information. I can connect you with a human agent.";
 
 export class ChatService {
   public constructor(
@@ -29,6 +31,11 @@ export class ChatService {
     if (!companyKnowledge) {
       return { kind: "knowledge_not_found", answer: SAFE_RESPONSE };
     }
-    return { kind: "answered", answer: await this.agent.answer(message, companyKnowledge) };
+    try {
+      return { kind: "answered", answer: await this.agent.answer(message, companyKnowledge) };
+    } catch (error: unknown) {
+      if (error instanceof AnswerGenerationUnavailableError) return { kind: "answered", answer: TEMPORARY_RESPONSE };
+      throw error;
+    }
   }
 }

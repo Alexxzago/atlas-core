@@ -1,11 +1,13 @@
-import type { AssistantProfile, AssistantProfileStatus, ChatResponse, Company, CompanyInput, CompanyKnowledge, CompanyUpdate, CreateAssistantProfileInput, OnboardingResponse, SessionBootstrapResponse, UpdateAssistantProfileInput, WorkspaceSummary } from "../types/api";
+import type { AssistantPreviewResponse, AssistantProfile, AssistantProfileStatus, ChatResponse, Company, CompanyInput, CompanyKnowledge, CompanyUpdate, CreateAssistantProfileInput, OnboardingResponse, SessionBootstrapResponse, UpdateAssistantProfileInput, WorkspaceSummary } from "../types/api";
 
 export class ApiError extends Error {
   public readonly status: number;
+  public readonly code: string | null;
 
-  public constructor(status: number, message: string) {
+  public constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -29,13 +31,19 @@ async function request<T>(path: string, options?: RequestInit, recoveryAttempted
       if(recovered&&(method==="GET"||method==="HEAD"))return request<T>(path,options,true);
     }
     let message = response.statusText;
+    let code: string | null = null;
     try {
       const body = await response.json() as { error?: unknown };
       if (typeof body.error === "string") message = body.error;
+      else if (typeof body.error === "object" && body.error !== null) {
+        const detail = body.error as { code?: unknown; message?: unknown };
+        if (typeof detail.message === "string") message = detail.message;
+        if (typeof detail.code === "string") code = detail.code;
+      }
     } catch {
       // Use the HTTP status text when the response is not JSON.
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, code);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -81,4 +89,5 @@ export const atlasApi = {
   createAssistantProfile:(csrf:string,workspaceId:string,companyId:number,input:CreateAssistantProfileInput,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null}),
   updateAssistantProfile:(csrf:string,workspaceId:string,companyId:number,profileId:string,input:UpdateAssistantProfileInput,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}`,{method:"PATCH",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null}),
   transitionAssistantProfile:(csrf:string,workspaceId:string,companyId:number,profileId:string,targetStatus:AssistantProfileStatus,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}/transitions`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({targetStatus}),signal:signal??null}),
+  previewAssistantProfile:(csrf:string,workspaceId:string,companyId:number,profileId:string,message:string,signal?:AbortSignal):Promise<AssistantPreviewResponse>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}/preview`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({message}),signal:signal??null}),
 };

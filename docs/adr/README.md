@@ -33,3 +33,4 @@ Accepted ADRs are immutable except for spelling, formatting, or link corrections
 - [ADR-010: Company-Owned Assistant Profiles](ADR-010-company-owned-assistant-profiles.md)
 - [ADR-011: Zero-Cost Bootstrap Infrastructure Strategy](ADR-011-zero-cost-bootstrap-infrastructure-strategy.md)
 - [ADR-012: Session and CSRF Rehydration](ADR-012-session-and-csrf-rehydration.md)
+- [ADR-013: Provider-Neutral Assistant Execution Contract](ADR-013-provider-neutral-assistant-execution-contract.md)

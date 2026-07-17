@@ -98,3 +98,8 @@ export type UpdateAssistantProfileInput = Partial<CreateAssistantProfileInput>;
 export interface TransitionAssistantProfileInput {
   targetStatus: AssistantProfileStatus;
 }
+
+export interface AssistantPreviewResponse {
+  status: "answered" | "safe_fallback";
+  answer: string;
+}

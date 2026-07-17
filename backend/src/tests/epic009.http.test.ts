@@ -43,12 +43,13 @@ const user = reconstructUser({ id: "usr_test" as UserId, status: "active", local
 async function startServer(allowManage = true) {
   const service = new AssistantProfileService(new Profiles(), new FixedClock());
   const noop: RequestHandler = (_req, res) => { res.status(501).send(); };
+  const previewNotFound: RequestHandler = (_req, res) => { res.status(404).json({ error: "Resource not found." }); };
   const authentication = { cookieName: () => "atlas_dev_session", current: (raw: string) => raw === "valid" ? { userId: user.id } : null, validateCsrf: (raw: string, csrf: string) => raw === "valid" && csrf === "csrf" } as unknown as AuthenticationService;
   const users = { findById: () => user } as unknown as UserRepositoryPort;
   const authorization = { authorize: (_user: unknown, _workspace: string, permission: string) => { if (!allowManage && permission === "company:manage") throw new Error("denied"); return { userId: user.id, workspaceId: 1, workspacePublicId: "wsp_test", permission }; } } as unknown as AuthorizationService;
   const resolver = { resolve: () => context } as unknown as WorkspaceResolver;
   const app = express(); app.use(express.json());
-  app.use("/workspaces", createAuthorizedCompaniesRouter({ authentication, users, authorization, resolver, controllers: { list: () => noop, create: () => noop, get: () => noop, update: () => noop, delete: () => noop, onboard: () => noop }, assistantControllers: { list: (c) => createListAssistantProfilesController(service, c), create: (c) => createAssistantProfileController(service, c), get: (c) => createGetAssistantProfileController(service, c), update: (c) => createUpdateAssistantProfileController(service, c), transition: (c) => createTransitionAssistantProfileController(service, c) } }));
+  app.use("/workspaces", createAuthorizedCompaniesRouter({ authentication, users, authorization, resolver, controllers: { list: () => noop, create: () => noop, get: () => noop, update: () => noop, delete: () => noop, onboard: () => noop }, assistantControllers: { list: (c) => createListAssistantProfilesController(service, c), create: (c) => createAssistantProfileController(service, c), get: (c) => createGetAssistantProfileController(service, c), update: (c) => createUpdateAssistantProfileController(service, c), transition: (c) => createTransitionAssistantProfileController(service, c), preview: () => previewNotFound } }));
   const listener = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve, reject) => { listener.once("listening", resolve); listener.once("error", reject); });
   const address = listener.address() as AddressInfo, origin = `http://127.0.0.1:${address.port}`;
@@ -117,7 +118,7 @@ test("real Session, Membership, PermissionPolicy and WorkspaceResolver protect A
   const service = new AssistantProfileService(new AssistantProfileRepository(database), new SystemClock());
   const noop: RequestHandler = (_req, res) => { res.status(501).send(); };
   const app = express(); app.use(express.json());
-  app.use("/workspaces", createAuthorizedCompaniesRouter({ authentication, users, authorization: new RealAuthorizationService(memberships, workspaces), resolver: new RealWorkspaceResolver(workspaces), controllers: { list: () => noop, create: () => noop, get: () => noop, update: () => noop, delete: () => noop, onboard: () => noop }, assistantControllers: { list: (c) => createListAssistantProfilesController(service, c), create: (c) => createAssistantProfileController(service, c), get: (c) => createGetAssistantProfileController(service, c), update: (c) => createUpdateAssistantProfileController(service, c), transition: (c) => createTransitionAssistantProfileController(service, c) } }));
+  app.use("/workspaces", createAuthorizedCompaniesRouter({ authentication, users, authorization: new RealAuthorizationService(memberships, workspaces), resolver: new RealWorkspaceResolver(workspaces), controllers: { list: () => noop, create: () => noop, get: () => noop, update: () => noop, delete: () => noop, onboard: () => noop }, assistantControllers: { list: (c) => createListAssistantProfilesController(service, c), create: (c) => createAssistantProfileController(service, c), get: (c) => createGetAssistantProfileController(service, c), update: (c) => createUpdateAssistantProfileController(service, c), transition: (c) => createTransitionAssistantProfileController(service, c), preview: () => noop } }));
   const listener = app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve, reject) => { listener.once("listening", resolve); listener.once("error", reject); });
   const address = listener.address() as AddressInfo, origin = `http://127.0.0.1:${address.port}`;

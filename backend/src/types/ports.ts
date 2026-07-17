@@ -1,4 +1,5 @@
 import type { CompanyKnowledge } from "./companyKnowledge.js";
+import type { AssistantExecutionRequest, AssistantExecutionResult } from "../assistant/application/assistantExecution.js";
 
 export interface WebsiteScraper {
   scrape(url: string): Promise<{ markdown?: string }>;
@@ -9,7 +10,7 @@ export interface KnowledgeExtractor {
 }
 
 export interface AnswerGenerator {
-  generate(message: string, knowledge: CompanyKnowledge): Promise<string>;
+  execute(request: AssistantExecutionRequest): Promise<AssistantExecutionResult>;
 }
 
 export interface MarkdownDebugStore {

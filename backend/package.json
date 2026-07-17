@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test src/tests/epic004.test.ts src/tests/epic005.test.ts src/tests/epic007.test.ts src/tests/epic0081.test.ts src/tests/epic0082.test.ts src/tests/epic0083.test.ts src/tests/epic0084.test.ts src/tests/epic009.domain.test.ts src/tests/epic009.repository.test.ts src/tests/epic009.http.test.ts src/tests/epic0101.test.ts",
+    "test": "tsx --test src/tests/epic004.test.ts src/tests/epic005.test.ts src/tests/epic007.test.ts src/tests/epic0081.test.ts src/tests/epic0082.test.ts src/tests/epic0083.test.ts src/tests/epic0084.test.ts src/tests/epic009.domain.test.ts src/tests/epic009.repository.test.ts src/tests/epic009.http.test.ts src/tests/epic0101.test.ts src/tests/epic011.test.ts src/tests/epic011.http.test.ts",
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/index.ts"
   },

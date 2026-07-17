@@ -28,6 +28,15 @@ export class AssistantProfileReadyPolicy {
   }
 }
 
+export class AssistantProfileExecutionPolicy {
+  private readonly ready = new AssistantProfileReadyPolicy();
+
+  public assert(profile: AssistantProfile): void {
+    if (profile.status !== "ready") throw new AssistantProfilePolicyError("Assistant Profile is not executable.");
+    this.ready.assert(profile);
+  }
+}
+
 export class AssistantProfileLifecyclePolicy {
   private readonly ready = new AssistantProfileReadyPolicy();
 

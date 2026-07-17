@@ -358,3 +358,16 @@ test("bootstrap uses an empty POST body, same-origin credentials and AbortSignal
   globalThis.fetch=async(_input,init)=>{captured=init;return new Response(JSON.stringify({status:"authenticated",identity:{userId:"usr",email:"a@example.com",locale:"en",status:"active",idleExpiresAt:"2026-07-17T00:00:00Z",absoluteExpiresAt:"2026-07-17T01:00:00Z"},csrfToken:"csrf",csrfGeneration:2}),{status:200,headers:{"content-type":"application/json"}});};
   const controller=new AbortController();try{const result=await atlasApi.bootstrapSession(controller.signal);assert.equal(result.csrfGeneration,2);assert.equal(captured?.method,"POST");assert.equal(captured?.body,"{}");assert.equal(captured?.credentials,"same-origin");assert.equal(captured?.signal,controller.signal);}finally{globalThis.fetch=originalFetch;}
 });
+
+test("Assistant Preview sends only the message with CSRF and never replays the POST",async()=>{
+  const calls:Array<{url:string;init:RequestInit}> = [];
+  setAuthenticationRecovery(async()=>true);
+  globalThis.fetch=(async(input:RequestInfo|URL,init?:RequestInit)=>{calls.push({url:String(input),init:init??{}});return new Response(JSON.stringify({error:"expired"}),{status:401,headers:{"content-type":"application/json"}});}) as typeof fetch;
+  await assert.rejects(()=>atlasApi.previewAssistantProfile("csrf","wsp_one",7,"asp_00000000000000000000000000000000","Hello"),ApiError);
+  assert.equal(calls.length,1);
+  assert.equal(calls[0]?.url,"/api/workspaces/wsp_one/companies/7/assistant-profiles/asp_00000000000000000000000000000000/preview");
+  assert.equal(calls[0]?.init.method,"POST");
+  assert.equal(calls[0]?.init.body,JSON.stringify({message:"Hello"}));
+  assert.equal((calls[0]?.init.headers as Record<string,string>)["x-csrf-token"],"csrf");
+  setAuthenticationRecovery(null);
+});

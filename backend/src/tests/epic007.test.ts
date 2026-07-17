@@ -30,7 +30,7 @@ const knowledgeFixture: CompanyKnowledge = {
 
 class TrackingGenerator implements AnswerGenerator {
   public calls = 0;
-  public async generate(): Promise<string> { this.calls += 1; return "private answer"; }
+  public async execute(): Promise<import("../assistant/application/assistantExecution.js").AssistantExecutionResult> { this.calls += 1; return { outcome: "answered", answer: "private answer" }; }
 }
 
 class FakeDebugStore implements MarkdownDebugStore {

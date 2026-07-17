@@ -4,8 +4,15 @@ import { markReadyDisabled, missingReadyFields, visibleTransitions, type FormMod
 import type { AssistantProfile, AssistantProfileStatus, CreateAssistantProfileInput, UpdateAssistantProfileInput } from "../types/api";
 import { AssistantProfileForm } from "./AssistantProfileForm";
 import { AssistantStatusBadge } from "./AssistantStatusBadge";
+import { AssistantPreviewPanel } from "./AssistantPreviewPanel";
+import { previewAllowed } from "../state/assistantPreviewState";
 
 interface Props {
+  csrf: string;
+  workspaceId: string | null;
+  workspaceRole: string | null;
+  companyId: number | null;
+  companyName: string | null;
   companySelected: boolean;
   profiles: AssistantProfile[];
   selectedProfile: AssistantProfile | null;
@@ -62,6 +69,7 @@ export function AssistantProfilesPanel(props: Props): React.JSX.Element {
           <dl className="assistant-profile-summary"><div><dt>{t("profiles.field.businessRole")}</dt><dd>{selected.businessRole ?? t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.objective")}</dt><dd>{selected.objective ?? t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.audience")}</dt><dd>{selected.audience ?? t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.language")}</dt><dd>{selected.assistantLanguage.toUpperCase()}</dd></div><div><dt>{t("profiles.field.tone")}</dt><dd>{t(`profiles.tone.${selected.tone}`)}</dd></div><div><dt>{t("profiles.field.welcomeMessage")}</dt><dd>{selected.welcomeMessage ?? t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.fallbackMessage")}</dt><dd>{selected.fallbackMessage}</dd></div></dl>
           {missing.length > 0 && <div className="inline-message inline-message--warning" role="status"><strong>{t("profiles.readyWarning")}</strong><ul>{missing.map((field) => <li key={field}>{t(fieldKeys[field])}</li>)}</ul></div>}
           <div className="action-row"><button className="button button--secondary" type="button" disabled={selected.status === "archived" || props.submitting} onClick={props.onOpenEdit}>{t("common.edit")}</button>{visibleTransitions(selected.status).map((target) => <button key={target} className={`button ${target === "archived" ? "button--danger-quiet" : target === "ready" && missing.length === 0 ? "button--primary" : "button--secondary"}`} type="button" disabled={target === "ready" ? markReadyDisabled(selected, props.transitionTarget !== null) : props.transitionTarget !== null} onClick={() => transition(selected, target)}>{props.transitionTarget === target ? t("profiles.transitioning") : transitionLabel(target)}</button>)}</div>
+          {props.workspaceId && props.companyId && props.companyName && <AssistantPreviewPanel csrf={props.csrf} workspaceId={props.workspaceId} companyId={props.companyId} companyName={props.companyName} profile={selected} allowed={previewAllowed(props.workspaceRole)}/>} 
         </>}
       </div>}
     </div>

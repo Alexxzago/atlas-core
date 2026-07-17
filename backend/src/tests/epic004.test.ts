@@ -9,6 +9,7 @@ import { ChatService } from "../services/chatService.js";
 import { OnboardingError, OnboardingService } from "../services/onboardingService.js";
 import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 import type { AnswerGenerator, KnowledgeExtractor, MarkdownDebugStore, WebsiteScraper } from "../types/ports.js";
+import { AnswerGenerationUnavailableError } from "../assistant/application/assistantExecution.js";
 import { createWorkspaceContext, type WorkspaceContext } from "../types/workspaceContext.js";
 
 const alphaKnowledge: CompanyKnowledge = {
@@ -35,9 +36,9 @@ function createRepositories(): TestRepositories {
 
 class FakeAnswerGenerator implements AnswerGenerator {
   public receivedKnowledge: CompanyKnowledge | null = null;
-  public async generate(_message: string, knowledge: CompanyKnowledge): Promise<string> {
-    this.receivedKnowledge = knowledge;
-    return `Answer for ${knowledge.company.name}`;
+  public async execute(request: import("../assistant/application/assistantExecution.js").AssistantExecutionRequest): Promise<import("../assistant/application/assistantExecution.js").AssistantExecutionResult> {
+    this.receivedKnowledge = request.knowledge as CompanyKnowledge;
+    return { outcome: "answered", answer: `Answer for ${request.knowledge.company.name}` };
   }
 }
 
@@ -124,4 +125,13 @@ test("chat returns a controlled response when company knowledge is missing", asy
   const result = await new ChatService(companies, knowledge, new AtlasAgent(new FakeAnswerGenerator())).chat(context, company.id, "Hello");
   assert.equal(result.kind, "knowledge_not_found");
   assert.match(result.answer, /human agent/i);
+});
+
+test("chat preserves its released temporary answer when generation is unavailable", async () => {
+  const { companies, knowledge, context } = createRepositories();
+  const company = companies.create(context, { name: "Alpha", website: "https://alpha.test", status: "ready" });
+  knowledge.save(context, company.id, alphaKnowledge);
+  const unavailable: AnswerGenerator = { async execute() { throw new AnswerGenerationUnavailableError(); } };
+  const result = await new ChatService(companies, knowledge, new AtlasAgent(unavailable)).chat(context, company.id, "Hello");
+  assert.deepEqual(result, { kind: "answered", answer: "I'm temporarily unable to check that information. I can connect you with a human agent." });
 });

@@ -53,6 +53,8 @@ import{UserRepository}from"./repositories/userRepository.js";
 import{AssistantProfileRepository}from"./repositories/assistantProfileRepository.js";
 import{AssistantProfileService}from"./assistant/services/assistantProfileService.js";
 import{createAssistantProfileController,createGetAssistantProfileController,createListAssistantProfilesController,createTransitionAssistantProfileController,createUpdateAssistantProfileController}from"./controllers/assistantProfileController.js";
+import { AssistantPreviewService } from "./assistant/services/assistantPreviewService.js";
+import { createAssistantPreviewController } from "./controllers/assistantPreviewController.js";
 import { ExactRequestOriginPolicy } from "./identity/infrastructure/requestOriginPolicy.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -97,6 +99,7 @@ const workspaceAdministrationService=new WorkspaceAdministrationService(new Sqli
 export const authorizationService=new AuthorizationService(new MembershipRepository(database),workspaceRepository);
 export const authenticatedWorkspaceResolver=new WorkspaceResolver(workspaceRepository);
 const assistantProfileService=new AssistantProfileService(new AssistantProfileRepository(database),identityClock);
+const assistantPreviewService=new AssistantPreviewService(companyRepository,knowledgeRepository,new AssistantProfileRepository(database),agent);
 
 export const chatRouter = createChatRouter(createChatController(chatService, workspaceContext));
 export const companiesRouter = createCompaniesRouter({
@@ -116,4 +119,4 @@ export const identityRouter = createIdentityRouter({
   ...authenticationControllers,
 });
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService));
-export const authorizedCompaniesRouter=createAuthorizedCompaniesRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,controllers:{list:context=>createListCompaniesController(companyService,context),create:context=>createCompanyController(companyService,context),get:context=>createGetCompanyController(companyService,context),update:context=>createUpdateCompanyController(companyService,context),delete:context=>createDeleteCompanyController(companyService,context),onboard:context=>createOnboardingController(onboardingService,context)},assistantControllers:{list:context=>createListAssistantProfilesController(assistantProfileService,context),create:context=>createAssistantProfileController(assistantProfileService,context),get:context=>createGetAssistantProfileController(assistantProfileService,context),update:context=>createUpdateAssistantProfileController(assistantProfileService,context),transition:context=>createTransitionAssistantProfileController(assistantProfileService,context)}});
+export const authorizedCompaniesRouter=createAuthorizedCompaniesRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,controllers:{list:context=>createListCompaniesController(companyService,context),create:context=>createCompanyController(companyService,context),get:context=>createGetCompanyController(companyService,context),update:context=>createUpdateCompanyController(companyService,context),delete:context=>createDeleteCompanyController(companyService,context),onboard:context=>createOnboardingController(onboardingService,context)},assistantControllers:{list:context=>createListAssistantProfilesController(assistantProfileService,context),create:context=>createAssistantProfileController(assistantProfileService,context),get:context=>createGetAssistantProfileController(assistantProfileService,context),update:context=>createUpdateAssistantProfileController(assistantProfileService,context),transition:context=>createTransitionAssistantProfileController(assistantProfileService,context),preview:context=>createAssistantPreviewController(assistantPreviewService,context)}});
