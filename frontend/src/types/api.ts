@@ -44,6 +44,22 @@ export interface WorkspaceSummary {
   role: string;
 }
 
+export interface Identity {
+  userId: string;
+  email: string;
+  locale: string;
+  status: string;
+  idleExpiresAt: string;
+  absoluteExpiresAt: string;
+}
+
+export interface SessionBootstrapResponse {
+  status: "authenticated";
+  identity: Identity;
+  csrfToken: string;
+  csrfGeneration: number;
+}
+
 export type AssistantProfileStatus = "draft" | "ready" | "disabled" | "archived";
 export type AssistantTone = "professional" | "friendly" | "concise" | "empathetic";
 export type AssistantLanguage = "es" | "en";

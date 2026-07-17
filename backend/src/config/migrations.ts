@@ -323,6 +323,18 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 8,
+    name: "0008_session_csrf_generation",
+    checksumSource: "session-csrf-generation-v1|positive-generation|preserve-session-identifiers",
+    apply(database): void {
+      database.exec(`
+        ALTER TABLE sessions
+        ADD COLUMN csrf_generation INTEGER NOT NULL DEFAULT 1
+        CHECK (csrf_generation > 0);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

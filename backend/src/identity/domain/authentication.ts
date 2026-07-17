@@ -29,6 +29,7 @@ export interface Session {
   readonly digestVersion: "sha256-v1";
   readonly identifierDigest: string;
   readonly csrfDigest: string;
+  readonly csrfGeneration: number;
   readonly state: SessionState;
   readonly issuedAt: string;
   readonly lastSeenAt: string;

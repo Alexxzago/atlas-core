@@ -1,4 +1,4 @@
-import type { AssistantProfile, AssistantProfileStatus, ChatResponse, Company, CompanyInput, CompanyKnowledge, CompanyUpdate, CreateAssistantProfileInput, OnboardingResponse, UpdateAssistantProfileInput, WorkspaceSummary } from "../types/api";
+import type { AssistantProfile, AssistantProfileStatus, ChatResponse, Company, CompanyInput, CompanyKnowledge, CompanyUpdate, CreateAssistantProfileInput, OnboardingResponse, SessionBootstrapResponse, UpdateAssistantProfileInput, WorkspaceSummary } from "../types/api";
 
 export class ApiError extends Error {
   public readonly status: number;
@@ -9,13 +9,25 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+type AuthenticationRecovery = (method: string) => Promise<boolean>;
+let authenticationRecovery: AuthenticationRecovery | null = null;
+
+export function setAuthenticationRecovery(recovery: AuthenticationRecovery | null): void {
+  authenticationRecovery = recovery;
+}
+
+async function request<T>(path: string, options?: RequestInit, recoveryAttempted = false): Promise<T> {
   const response = await fetch(`/api${path}`, {
     ...options,
     credentials: "same-origin",
     headers: { "content-type": "application/json", ...options?.headers },
   });
   if (!response.ok) {
+    const method=(options?.method??"GET").toUpperCase();
+    if(response.status===401&&!recoveryAttempted&&authenticationRecovery&&path!=="/identity/session/bootstrap"){
+      const recovered=await authenticationRecovery(method);
+      if(recovered&&(method==="GET"||method==="HEAD"))return request<T>(path,options,true);
+    }
     let message = response.statusText;
     try {
       const body = await response.json() as { error?: unknown };
@@ -42,10 +54,11 @@ export const atlasApi = {
   getKnowledge: (companyId: number): Promise<CompanyKnowledge> => request(`/knowledge?companyId=${companyId}`),
   requestCredentialEnrollment:(email:string):Promise<void>=>request("/identity/credential-enrollment/request",{method:"POST",body:JSON.stringify({email})}),
   completeCredentialEnrollment:(proof:string,password:string,confirmation:string):Promise<void>=>request("/identity/credential-enrollment/complete",{method:"POST",body:JSON.stringify({proof,password,confirmation})}),
-  login:(email:string,password:string):Promise<{status:string;csrfToken:string}>=>request("/identity/login",{method:"POST",body:JSON.stringify({email,password})}),
+  login:(email:string,password:string):Promise<{status:string;csrfToken:string;csrfGeneration:number}>=>request("/identity/login",{method:"POST",body:JSON.stringify({email,password})}),
+  bootstrapSession:(signal?:AbortSignal):Promise<SessionBootstrapResponse>=>request("/identity/session/bootstrap",{method:"POST",body:"{}",signal:signal??null}),
   currentIdentity:():Promise<{userId:string;email:string;locale:string;status:string;workspaceAccess:"none";idleExpiresAt:string;absoluteExpiresAt:string}>=>request("/identity/me"),
   replacePassword:(csrf:string,currentPassword:string,newPassword:string,confirmation:string):Promise<void>=>request("/identity/password/replace",{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({currentPassword,newPassword,confirmation})}),
-  logout:(csrf:string):Promise<void>=>request("/identity/logout",{method:"POST",headers:{"x-csrf-token":csrf},body:"{}"}),
+  logout:(csrf:string):Promise<void>=>request("/identity/logout",{method:"POST",headers:{"x-csrf-token":csrf},body:"{}"},true),
   listWorkspaces:():Promise<WorkspaceSummary[]>=>request("/workspaces"),
   selectedWorkspace:():Promise<WorkspaceSummary|null>=>request("/workspaces/selected"),
   createWorkspace:(csrf:string,name:string):Promise<{workspace:{id:string;name:string}}>=>(request("/workspaces",{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({name})})),

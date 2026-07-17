@@ -7,7 +7,7 @@ import {
   type ProfileMutationContext, type ProfileMutationOperation, type RequestContext,
 } from "./authenticatedPortalState.ts";
 import type { AssistantProfile, Company, WorkspaceSummary } from "../types/api.ts";
-import { atlasApi } from "../api/atlasApi.ts";
+import { ApiError, atlasApi, setAuthenticationRecovery } from "../api/atlasApi.ts";
 
 const workspaceA: WorkspaceSummary = { id: "wsp_a", name: "Workspace A", role: "owner" };
 const workspaceB: WorkspaceSummary = { id: "wsp_b", name: "Workspace B", role: "owner" };
@@ -337,4 +337,24 @@ test("a transition conflict preserves Profile and status", () => {
 test("logout clears all authenticated Portal context", () => {
   const state = authenticatedPortalReducer(populated(), { type: "logout" });
   assert.equal(state.selectedWorkspace, null); assert.deepEqual(state.companies, []); assert.deepEqual(state.profiles, []);
+});
+
+test("operational 401 retries a GET once after successful bootstrap recovery",async()=>{
+  const originalFetch=globalThis.fetch;let calls=0,recoveries=0;
+  globalThis.fetch=async()=>{calls+=1;return calls===1?new Response(JSON.stringify({error:"expired"}),{status:401,headers:{"content-type":"application/json"}}):new Response("[]",{status:200,headers:{"content-type":"application/json"}});};
+  setAuthenticationRecovery(async method=>{recoveries+=1;assert.equal(method,"GET");return true;});
+  try{assert.deepEqual(await atlasApi.listWorkspaces(),[]);assert.equal(calls,2);assert.equal(recoveries,1);}finally{setAuthenticationRecovery(null);globalThis.fetch=originalFetch;}
+});
+
+test("operational 401 rehydrates but never retries a non-idempotent mutation",async()=>{
+  const originalFetch=globalThis.fetch;let calls=0,recoveries=0;
+  globalThis.fetch=async()=>{calls+=1;return new Response(JSON.stringify({error:"expired"}),{status:401,headers:{"content-type":"application/json"}});};
+  setAuthenticationRecovery(async method=>{recoveries+=1;assert.equal(method,"POST");return true;});
+  try{await assert.rejects(()=>atlasApi.createWorkspace("csrf","Workspace"),(error:unknown)=>error instanceof ApiError&&error.status===401);assert.equal(calls,1);assert.equal(recoveries,1);}finally{setAuthenticationRecovery(null);globalThis.fetch=originalFetch;}
+});
+
+test("bootstrap uses an empty POST body, same-origin credentials and AbortSignal",async()=>{
+  const originalFetch=globalThis.fetch;let captured:RequestInit|undefined;
+  globalThis.fetch=async(_input,init)=>{captured=init;return new Response(JSON.stringify({status:"authenticated",identity:{userId:"usr",email:"a@example.com",locale:"en",status:"active",idleExpiresAt:"2026-07-17T00:00:00Z",absoluteExpiresAt:"2026-07-17T01:00:00Z"},csrfToken:"csrf",csrfGeneration:2}),{status:200,headers:{"content-type":"application/json"}});};
+  const controller=new AbortController();try{const result=await atlasApi.bootstrapSession(controller.signal);assert.equal(result.csrfGeneration,2);assert.equal(captured?.method,"POST");assert.equal(captured?.body,"{}");assert.equal(captured?.credentials,"same-origin");assert.equal(captured?.signal,controller.signal);}finally{globalThis.fetch=originalFetch;}
 });

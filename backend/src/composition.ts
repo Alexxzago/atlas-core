@@ -53,6 +53,7 @@ import{UserRepository}from"./repositories/userRepository.js";
 import{AssistantProfileRepository}from"./repositories/assistantProfileRepository.js";
 import{AssistantProfileService}from"./assistant/services/assistantProfileService.js";
 import{createAssistantProfileController,createGetAssistantProfileController,createListAssistantProfilesController,createTransitionAssistantProfileController,createUpdateAssistantProfileController}from"./controllers/assistantProfileController.js";
+import { ExactRequestOriginPolicy } from "./identity/infrastructure/requestOriginPolicy.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -88,7 +89,9 @@ const resendVerificationService = new ResendEmailVerificationService(identityTra
   verificationLifetimeMilliseconds, verificationCooldownMilliseconds);
 const verifyEmailService = new VerifyEmailService(identityTransaction, verificationHashProvider, identityClock);
 const authenticationService=new AuthenticationService(new SqliteAuthenticationTransaction(database),randomProvider,new Sha256CredentialEnrollmentHashProvider(),new ScryptPasswordProvider(),new Sha256SessionIdentifierProvider(),identityClock,verificationDelivery,verificationOrigin,process.env.NODE_ENV==="production");
-const authenticationControllers=createAuthenticationControllers(authenticationService);
+const production=process.env.NODE_ENV==="production";
+const requestOriginPolicy=new ExactRequestOriginPolicy(production?[verificationOrigin]:[verificationOrigin,"http://localhost:5173"],production);
+const authenticationControllers=createAuthenticationControllers(authenticationService,requestOriginPolicy);
 const invitationDelivery=deliverySelection==="development"?new DevelopmentInvitationDelivery(process.env.NODE_ENV??"",message=>console.info(message)):new UnavailableInvitationDelivery();
 const workspaceAdministrationService=new WorkspaceAdministrationService(new SqliteWorkspaceAdministrationTransaction(database),new SecureInvitationProofProvider(),identityClock,invitationDelivery,verificationOrigin);
 export const authorizationService=new AuthorizationService(new MembershipRepository(database),workspaceRepository);
