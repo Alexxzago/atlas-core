@@ -98,3 +98,44 @@
 .auth-card input { min-height: 2.75rem; padding: .6rem; }
 .workspace-admin { display:grid; gap:1rem; margin-block:2rem; border-block:1px solid var(--color-border, #ddd); padding-block:1rem; }
 .workspace-admin form { display:flex; flex-wrap:wrap; gap:.75rem; align-items:end; }
+.authenticated-section { padding: var(--space-6); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+.authenticated-section > h2 { margin-block-end: var(--space-4); }
+.authenticated-section select, .authenticated-section input, .authenticated-section textarea { inline-size: 100%; min-block-size: 40px; padding: var(--space-3) var(--space-4); color: var(--color-text-primary); background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); }
+.authenticated-section textarea { min-block-size: 88px; resize: vertical; }
+.authenticated-section select:focus, .authenticated-section input:focus, .authenticated-section textarea:focus { border-color: var(--color-focus); }
+.authenticated-portal .workspace-create-row { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-4); margin-block-end: var(--space-5); }
+.authenticated-portal .workspace-administration { display: grid; gap: var(--space-4); margin-block-start: var(--space-6); padding-block-start: var(--space-5); border-block-start: 1px solid var(--color-border-subtle); }
+.authenticated-portal .workspace-administration ul { display: grid; gap: var(--space-3); padding-inline-start: var(--space-5); }
+.authenticated-portal .workspace-administration li { overflow-wrap: anywhere; }
+.authenticated-portal .workspace-administration li button, .authenticated-portal .workspace-administration li select { inline-size: auto; margin: var(--space-2); }
+.authenticated-portal .authenticated-company-create { display: grid; gap: var(--space-4); margin-block-end: var(--space-5); padding: var(--space-5); background: var(--color-surface-subtle); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); }
+.authenticated-portal .authenticated-company-create fieldset { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: var(--space-4); min-inline-size: 0; padding: 0; border: 0; }
+.authenticated-portal .assistant-profile-list { display: grid; gap: var(--space-2); }
+.authenticated-portal .assistant-profile-item { inline-size: 100%; min-block-size: 64px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-3); color: var(--color-text-primary); text-align: start; background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-md); cursor: pointer; }
+.authenticated-portal .assistant-profile-item:hover { background: var(--color-surface-subtle); }
+.authenticated-portal .assistant-profile-item.is-selected { background: var(--color-surface-selected); border-color: var(--color-selected-border); border-inline-start: 3px solid var(--color-action); }
+.authenticated-portal .assistant-profile-item > span:first-child { min-inline-size: 0; display: grid; }
+.authenticated-portal .assistant-profile-item strong, .authenticated-portal .assistant-profile-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.authenticated-portal .assistant-profile-detail { min-inline-size: 0; display: grid; gap: var(--space-5); padding: var(--space-5); background: var(--color-surface-subtle); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); }
+.authenticated-portal .assistant-profile-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); }
+.authenticated-portal .assistant-profile-summary div { min-inline-size: 0; display: grid; gap: var(--space-2); }
+.authenticated-portal .assistant-profile-summary dt { color: var(--color-text-secondary); font-size: 12px; font-weight: 600; }
+.authenticated-portal .assistant-profile-summary dd { overflow-wrap: anywhere; white-space: pre-wrap; }
+.authenticated-portal .assistant-status { inline-size: max-content; display: inline-flex; align-items: center; min-block-size: 24px; padding: 3px 8px; border: 1px solid; border-radius: var(--radius-pill); font-size: 12px; font-weight: 600; }
+.authenticated-portal .assistant-status--draft { color: var(--color-text-secondary); background: var(--color-surface-subtle); border-color: var(--color-border); }
+.authenticated-portal .assistant-status--ready { color: var(--color-success); background: var(--color-success-bg); border-color: var(--color-success-border); }
+.authenticated-portal .assistant-status--disabled { color: var(--color-warning); background: var(--color-warning-bg); border-color: var(--color-warning-border); }
+.authenticated-portal .assistant-status--archived { color: var(--color-error); background: var(--color-error-bg); border-color: var(--color-error-border); }
+.authenticated-portal .assistant-form { display: grid; gap: var(--space-5); padding: var(--space-5); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+.authenticated-portal .assistant-form-fields { min-inline-size: 0; padding: 0; border: 0; }
+.authenticated-portal .assistant-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); }
+.authenticated-portal .assistant-form-wide { grid-column: 1 / -1; }
+.authenticated-portal .archived-recovery { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-block-end: var(--space-5); padding: var(--space-5); background: var(--color-warning-bg); border: 1px solid var(--color-warning-border); border-radius: var(--radius-md); }
+@media (max-width: 767px) {
+  .authenticated-section { padding: var(--space-5); }
+  .authenticated-portal .workspace-create-row, .authenticated-portal .authenticated-company-create fieldset, .authenticated-portal .assistant-form-grid, .authenticated-portal .assistant-profile-summary { grid-template-columns: 1fr; }
+  .authenticated-portal .assistant-form-wide { grid-column: auto; }
+  .authenticated-portal .archived-recovery { align-items: stretch; flex-direction: column; }
+  .authenticated-portal .assistant-profile-detail .action-row { align-items: stretch; flex-direction: column; }
+  .authenticated-portal .assistant-profile-detail .action-row .button { inline-size: 100%; }
+}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { atlasApi } from "../api/atlasApi";
 import { useI18n } from "../i18n/I18nContext";
-import { WorkspaceMembershipPortal } from "./WorkspaceMembershipPortal";
+import { AuthenticatedCompanyPortal } from "./AuthenticatedCompanyPortal";
 
 type View = "login" | "request" | "check" | "enroll" | "invitation" | "authenticated" | "password";
 
@@ -23,7 +23,7 @@ export function AuthenticationPortal(): React.JSX.Element {
     try { await action(); } catch { setError(es ? "No pudimos completar la operación." : "We couldn't complete the operation."); }
   };
 
-  if (view === "authenticated" && identity) return <main className="auth-card"><h1>{es ? "Identidad autenticada" : "Authenticated identity"}</h1><p>{identity.email}</p><WorkspaceMembershipPortal csrf={csrf}/><button onClick={() => setView("password")}>{es ? "Cambiar contraseña" : "Replace password"}</button><button onClick={() => void submit(async () => { await atlasApi.logout(csrf); setCsrf(""); setIdentity(null); setView("login"); })}>{es ? "Cerrar sesión" : "Log out"}</button></main>;
+  if (view === "authenticated" && identity) return <AuthenticatedCompanyPortal csrf={csrf} email={identity.email} onPassword={() => setView("password")} onLogout={() => void submit(async () => { await atlasApi.logout(csrf); setCsrf(""); setIdentity(null); setView("login"); })}/>;
   if (view === "invitation") return <main className="auth-card"><h1>{es ? "Invitación al espacio" : "Workspace invitation"}</h1><button onClick={() => void submit(async () => { await atlasApi.acceptInvitation(csrf, proof()); history.replaceState({}, "", "/"); setView("authenticated"); })}>{es ? "Aceptar" : "Accept"}</button><button onClick={() => void submit(async () => { await atlasApi.rejectInvitation(csrf, proof()); history.replaceState({}, "", "/"); setView("authenticated"); })}>{es ? "Rechazar" : "Reject"}</button>{error && <p role="alert">{error}</p>}</main>;
   if (view === "password") return <AuthForm title={es ? "Cambiar contraseña" : "Replace password"} error={error} onSubmit={event => { event.preventDefault(); void submit(async () => { await atlasApi.replacePassword(csrf, String(new FormData(event.currentTarget).get("current") ?? ""), password, confirmation); setView("login"); }); }}><Password name="current" label={es ? "Contraseña actual" : "Current password"}/><Password value={password} onChange={setPassword} label={es ? "Nueva contraseña" : "New password"}/><Password value={confirmation} onChange={setConfirmation} label={es ? "Confirmación" : "Confirmation"}/><button>{es ? "Cambiar contraseña" : "Replace password"}</button></AuthForm>;
   if (view === "check") return <main className="auth-card"><h1>{es ? "Revisá tu correo" : "Check your email"}</h1><p>{es ? "Si la identidad es elegible, enviamos un enlace." : "If the identity is eligible, we sent a link."}</p><button onClick={() => setView("login")}>{es ? "Volver" : "Back"}</button></main>;

@@ -11,6 +11,12 @@
 .workspace-state { display: grid; place-items: center; max-inline-size: 960px; min-block-size: 360px; text-align: center; }
 .workspace-state h1 { margin-block-end: var(--space-3); }
 .mobile-company-switcher { display: none; }
+.authenticated-portal { min-block-size: 100vh; padding-block-start: var(--header-height); }
+.authenticated-portal .portal-header { position: fixed; inset-block-start: 0; inset-inline: 0; block-size: var(--header-height); }
+.authenticated-account { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); padding: var(--space-4) var(--space-7); background: var(--color-surface); border-block-end: 1px solid var(--color-border); }
+.authenticated-account span { color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.authenticated-main { display: grid; gap: var(--space-6); max-inline-size: 1200px; margin-inline: auto; padding: var(--space-7); }
+.assistant-profile-layout { display: grid; grid-template-columns: minmax(220px, 320px) minmax(0, 1fr); gap: var(--space-6); align-items: start; }
 
 @media (max-width: 767px) {
   :root { --header-height: 56px; }
@@ -26,4 +32,8 @@
   .workspace-state { min-block-size: 260px; }
   h1 { font-size: 20px; line-height: 28px; }
   input, textarea, select { font-size: 16px; }
+  .authenticated-account { flex-wrap: wrap; justify-content: flex-start; padding: var(--space-4) var(--space-5); }
+  .authenticated-account span { inline-size: 100%; }
+  .authenticated-main { padding: var(--space-5); }
+  .assistant-profile-layout { grid-template-columns: 1fr; }
 }

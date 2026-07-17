@@ -37,3 +37,48 @@ export interface ChatResponse {
   answer: string;
   status: ChatStatus;
 }
+
+export interface WorkspaceSummary {
+  id: string;
+  name: string;
+  role: string;
+}
+
+export type AssistantProfileStatus = "draft" | "ready" | "disabled" | "archived";
+export type AssistantTone = "professional" | "friendly" | "concise" | "empathetic";
+export type AssistantLanguage = "es" | "en";
+
+export interface AssistantProfile {
+  id: string;
+  name: string;
+  description: string | null;
+  businessRole: string | null;
+  objective: string | null;
+  audience: string | null;
+  tone: AssistantTone;
+  assistantLanguage: AssistantLanguage;
+  welcomeMessage: string | null;
+  fallbackMessage: string;
+  status: AssistantProfileStatus;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+}
+
+export interface CreateAssistantProfileInput {
+  name: string;
+  assistantLanguage: AssistantLanguage;
+  description?: string | null;
+  businessRole?: string | null;
+  objective?: string | null;
+  audience?: string | null;
+  tone?: AssistantTone;
+  welcomeMessage?: string | null;
+  fallbackMessage?: string;
+}
+
+export type UpdateAssistantProfileInput = Partial<CreateAssistantProfileInput>;
+
+export interface TransitionAssistantProfileInput {
+  targetStatus: AssistantProfileStatus;
+}

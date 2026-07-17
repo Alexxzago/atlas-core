@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
-    "test": "node --test --experimental-strip-types src/state/companyState.test.ts"
+    "test": "node --test --experimental-strip-types src/state/companyState.test.ts src/state/authenticatedPortalState.test.ts"
   },
   "dependencies": {
     "react": "^19.0.0",

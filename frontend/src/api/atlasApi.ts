@@ -1,8 +1,11 @@
-import type { ChatResponse, Company, CompanyInput, CompanyKnowledge, CompanyUpdate, OnboardingResponse } from "../types/api";
+import type { AssistantProfile, AssistantProfileStatus, ChatResponse, Company, CompanyInput, CompanyKnowledge, CompanyUpdate, CreateAssistantProfileInput, OnboardingResponse, UpdateAssistantProfileInput, WorkspaceSummary } from "../types/api";
 
 export class ApiError extends Error {
-  public constructor(public readonly status: number, message: string) {
+  public readonly status: number;
+
+  public constructor(status: number, message: string) {
     super(message);
+    this.status = status;
   }
 }
 
@@ -26,6 +29,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function segment(value: string | number): string { return encodeURIComponent(String(value)); }
+
 export const atlasApi = {
   listCompanies: (): Promise<Company[]> => request("/companies"),
   getCompany: (companyId: number): Promise<Company> => request(`/companies/${companyId}`),
@@ -41,12 +46,12 @@ export const atlasApi = {
   currentIdentity:():Promise<{userId:string;email:string;locale:string;status:string;workspaceAccess:"none";idleExpiresAt:string;absoluteExpiresAt:string}>=>request("/identity/me"),
   replacePassword:(csrf:string,currentPassword:string,newPassword:string,confirmation:string):Promise<void>=>request("/identity/password/replace",{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({currentPassword,newPassword,confirmation})}),
   logout:(csrf:string):Promise<void>=>request("/identity/logout",{method:"POST",headers:{"x-csrf-token":csrf},body:"{}"}),
-  listWorkspaces:():Promise<Array<{id:string;name:string;role:string}>>=>request("/workspaces"),
-  selectedWorkspace:():Promise<{id:string;name:string;role:string}|null>=>request("/workspaces/selected"),
+  listWorkspaces:():Promise<WorkspaceSummary[]>=>request("/workspaces"),
+  selectedWorkspace:():Promise<WorkspaceSummary|null>=>request("/workspaces/selected"),
   createWorkspace:(csrf:string,name:string):Promise<{workspace:{id:string;name:string}}>=>(request("/workspaces",{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({name})})),
-  selectWorkspace:(csrf:string,id:string):Promise<{id:string;name:string;role:string}>=>request(`/workspaces/${id}/select`,{method:"POST",headers:{"x-csrf-token":csrf},body:"{}"}),
-  listMemberships:(id:string):Promise<Array<{id:string;userId:string;role:string;status:string}>>=>request(`/workspaces/${id}/memberships`),
-  listInvitations:(id:string):Promise<Array<{id:string;recipient:string;role:string;status:string;expiresAt:string}>>=>request(`/workspaces/${id}/invitations`),
+  selectWorkspace:(csrf:string,id:string,signal?:AbortSignal):Promise<WorkspaceSummary>=>request(`/workspaces/${segment(id)}/select`,{method:"POST",headers:{"x-csrf-token":csrf},body:"{}",signal:signal??null}),
+  listMemberships:(id:string,signal?:AbortSignal):Promise<Array<{id:string;userId:string;role:string;status:string}>>=>request(`/workspaces/${id}/memberships`,{signal:signal??null}),
+  listInvitations:(id:string,signal?:AbortSignal):Promise<Array<{id:string;recipient:string;role:string;status:string;expiresAt:string}>>=>request(`/workspaces/${id}/invitations`,{signal:signal??null}),
   inviteMember:(csrf:string,id:string,email:string,role:string):Promise<void>=>request(`/workspaces/${id}/invitations`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({email,role})}),
   acceptInvitation:(csrf:string,proof:string):Promise<void>=>request("/workspaces/invitations/accept",{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({proof})}),
   rejectInvitation:(csrf:string,proof:string):Promise<void>=>request("/workspaces/invitations/reject",{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({proof})}),
@@ -55,4 +60,12 @@ export const atlasApi = {
   changeMembershipRole:(csrf:string,workspaceId:string,membershipId:string,role:string):Promise<void>=>request(`/workspaces/${workspaceId}/memberships/${membershipId}/role`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({role})}),
   changeMembershipStatus:(csrf:string,workspaceId:string,membershipId:string,action:"suspend"|"reactivate"|"remove"):Promise<void>=>request(`/workspaces/${workspaceId}/memberships/${membershipId}/${action}`,{method:"POST",headers:{"x-csrf-token":csrf},body:"{}"}),
   transferOwnership:(csrf:string,workspaceId:string,targetMembershipId:string,actorRole:string):Promise<void>=>request(`/workspaces/${workspaceId}/transfer-ownership`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({targetMembershipId,actorRole})}),
+  listWorkspaceCompanies:(workspaceId:string,signal?:AbortSignal):Promise<Company[]>=>request(`/workspaces/${segment(workspaceId)}/companies`,{signal:signal??null}),
+  createWorkspaceCompany:(csrf:string,workspaceId:string,input:CompanyInput,signal?:AbortSignal):Promise<Company>=>request(`/workspaces/${segment(workspaceId)}/companies`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null}),
+  getWorkspaceCompany:(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<Company>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}`,{signal:signal??null}),
+  listAssistantProfiles:(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<AssistantProfile[]>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles`,{signal:signal??null}),
+  getAssistantProfile:(workspaceId:string,companyId:number,profileId:string,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}`,{signal:signal??null}),
+  createAssistantProfile:(csrf:string,workspaceId:string,companyId:number,input:CreateAssistantProfileInput,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null}),
+  updateAssistantProfile:(csrf:string,workspaceId:string,companyId:number,profileId:string,input:UpdateAssistantProfileInput,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}`,{method:"PATCH",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null}),
+  transitionAssistantProfile:(csrf:string,workspaceId:string,companyId:number,profileId:string,targetStatus:AssistantProfileStatus,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}/transitions`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({targetStatus}),signal:signal??null}),
 };
