@@ -1,11 +1,10 @@
-import type { AtlasAgent } from "../../agents/atlas.js";
 import type { CompanyRepositoryPort, KnowledgeRepositoryPort } from "../../application/ports/repositories.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import { assistantProfileId } from "../domain/assistantProfile.js";
 import { AssistantProfileExecutionPolicy, AssistantProfilePolicyError } from "../domain/assistantProfilePolicies.js";
 import type { AssistantProfileRepositoryPort } from "../application/ports.js";
-import type { AssistantExecutionRequest, AssistantExecutionResult } from "../application/assistantExecution.js";
-import { freezeExecution } from "../../agents/atlas.js";
+import { buildAssistantExecution, type AssistantExecutionResult } from "../application/assistantExecution.js";
+import type { AssistantExecutionPort } from "../application/assistantExecutionPort.js";
 
 export class AssistantPreviewValidationError extends Error {}
 export class AssistantPreviewNotFoundError extends Error {}
@@ -20,7 +19,7 @@ export class AssistantPreviewService {
     private readonly companies: CompanyRepositoryPort,
     private readonly knowledge: KnowledgeRepositoryPort,
     private readonly profiles: AssistantProfileRepositoryPort,
-    private readonly agent: AtlasAgent,
+    private readonly execution: AssistantExecutionPort,
   ) {}
 
   public async preview(
@@ -44,20 +43,11 @@ export class AssistantPreviewService {
     if (company.status !== "ready") throw new AssistantPreviewCompanyNotReadyError();
     const companyKnowledge = this.knowledge.load(context, companyId);
     if (!companyKnowledge) throw new AssistantPreviewKnowledgeUnavailableError();
-    const request: AssistantExecutionRequest = freezeExecution({
+    return this.execution.execute(buildAssistantExecution(profile, {
       purpose: "preview",
-      behavior: {
-        businessRole: profile.businessRole!,
-        objective: profile.objective!,
-        audience: profile.audience,
-        tone: profile.tone,
-        assistantLanguage: profile.assistantLanguage,
-        fallbackMessage: profile.fallbackMessage,
-      },
       knowledge: companyKnowledge,
       message,
-    });
-    return this.agent.execute(request);
+    }));
   }
 }
 

@@ -111,3 +111,8 @@ export interface AssistantPreviewResponse {
   status: "answered" | "safe_fallback";
   answer: string;
 }
+
+export interface OperationalAssistantExecutionResponse {
+  status: "answered" | "safe_fallback";
+  answer: string;
+}

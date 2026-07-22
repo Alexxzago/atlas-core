@@ -7,10 +7,6 @@ import { KNOWLEDGE_EXTRACTION_PROMPT } from "./prompts.js";
 import type { KnowledgeFactExtractor } from "../knowledge/application/ports.js";
 import type { KnowledgeSourceKind } from "../knowledge/domain/knowledge.js";
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY!,
-});
-
 interface GeminiClient {
   readonly models: {
     generateContent(input: { model: string; contents: string; config?: { responseMimeType?: string; abortSignal?: AbortSignal } }): Promise<{ text?: string | undefined }>;
@@ -18,11 +14,13 @@ interface GeminiClient {
 }
 
 export class GeminiProvider implements AnswerGenerator, KnowledgeExtractor {
-  public constructor(private readonly client: GeminiClient = ai) {}
+  private client: GeminiClient | null;
+
+  public constructor(client: GeminiClient | null = null) { this.client = client; }
 
   public async execute(request: AssistantExecutionRequest): Promise<AssistantExecutionResult> {
     try {
-      const response = await this.client.models.generateContent({
+      const response = await this.gemini().models.generateContent({
         model: "gemini-3.5-flash",
         contents: answerPrompt(request),
       });
@@ -46,7 +44,7 @@ export class GeminiProvider implements AnswerGenerator, KnowledgeExtractor {
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      response = await this.client.models.generateContent({
+      response = await this.gemini().models.generateContent({
         model: "gemini-3.5-flash",
         contents: `${KNOWLEDGE_EXTRACTION_PROMPT}
 
@@ -87,6 +85,11 @@ ${markdown}`,
   }
 
   return JSON.parse(response.text) as unknown;
+  }
+
+  private gemini(): GeminiClient {
+    if (!this.client) this.client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+    return this.client;
   }
 }
 

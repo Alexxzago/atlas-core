@@ -1,4 +1,4 @@
-import type { AssistantPreviewResponse, AssistantProfile, AssistantProfileStatus, ChatResponse, Company, CompanyInput, CompanyKnowledge, CompanyUpdate, CreateAssistantProfileInput, KnowledgeIngestionResponse, KnowledgePublication, KnowledgeRevision, KnowledgeSource, OnboardingResponse, SessionBootstrapResponse, UpdateAssistantProfileInput, WorkspaceSummary } from "../types/api";
+import type { AssistantPreviewResponse, AssistantProfile, AssistantProfileStatus, ChatResponse, Company, CompanyInput, CompanyKnowledge, CompanyUpdate, CreateAssistantProfileInput, KnowledgeIngestionResponse, KnowledgePublication, KnowledgeRevision, KnowledgeSource, OnboardingResponse, OperationalAssistantExecutionResponse, SessionBootstrapResponse, UpdateAssistantProfileInput, WorkspaceSummary } from "../types/api";
 
 export class ApiError extends Error {
   public readonly status: number;
@@ -51,6 +51,13 @@ async function request<T>(path: string, options?: RequestInit, recoveryAttempted
 
 function segment(value: string | number): string { return encodeURIComponent(String(value)); }
 
+function operationalExecutionResponse(value: unknown): OperationalAssistantExecutionResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ApiError(502, "Assistant execution is temporarily unavailable.");
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).length !== 2 || (record.status !== "answered" && record.status !== "safe_fallback") || typeof record.answer !== "string" || Array.from(record.answer).length > 2_000) throw new ApiError(502, "Assistant execution is temporarily unavailable.");
+  return { status: record.status, answer: record.answer };
+}
+
 export const atlasApi = {
   listCompanies: (): Promise<Company[]> => request("/companies"),
   getCompany: (companyId: number): Promise<Company> => request(`/companies/${companyId}`),
@@ -90,6 +97,7 @@ export const atlasApi = {
   updateAssistantProfile:(csrf:string,workspaceId:string,companyId:number,profileId:string,input:UpdateAssistantProfileInput,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}`,{method:"PATCH",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null}),
   transitionAssistantProfile:(csrf:string,workspaceId:string,companyId:number,profileId:string,targetStatus:AssistantProfileStatus,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}/transitions`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({targetStatus}),signal:signal??null}),
   previewAssistantProfile:(csrf:string,workspaceId:string,companyId:number,profileId:string,message:string,signal?:AbortSignal):Promise<AssistantPreviewResponse>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}/preview`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({message}),signal:signal??null}),
+  executeAssistantProfile:async(csrf:string,workspaceId:string,companyId:number,profileId:string,message:string,signal?:AbortSignal):Promise<OperationalAssistantExecutionResponse>=>operationalExecutionResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant/executions`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({assistantProfileId:profileId,message}),signal:signal??null})),
   listKnowledgeSources:(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<KnowledgeSource[]>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/knowledge/sources`,{signal:signal??null}),
   getKnowledgeRevision:(workspaceId:string,companyId:number,sourceId:string,revisionId:string,signal?:AbortSignal):Promise<KnowledgeRevision>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/knowledge/sources/${segment(sourceId)}/revisions/${segment(revisionId)}`,{signal:signal??null}),
   getKnowledgePublication:(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<KnowledgePublication>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/knowledge/publication`,{signal:signal??null}),

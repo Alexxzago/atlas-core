@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
-    "test": "node --test --experimental-strip-types src/state/companyState.test.ts src/state/authenticatedPortalState.test.ts src/state/authenticationState.test.ts src/state/knowledgeState.test.ts && vitest run src/components/AssistantPreviewPanel.test.tsx src/components/CompanyKnowledgePanel.test.tsx"
+    "test": "node --test --experimental-strip-types src/state/companyState.test.ts src/state/authenticatedPortalState.test.ts src/state/authenticationState.test.ts src/state/knowledgeState.test.ts src/state/operationalAssistantExecutionState.test.ts && vitest run src/components/AssistantPreviewPanel.test.tsx src/components/CompanyKnowledgePanel.test.tsx src/components/OperationalAssistantExecutionPanel.test.tsx"
   },
   "dependencies": {
     "react": "^19.0.0",

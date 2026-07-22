@@ -1,4 +1,4 @@
-import { Router, raw, type Request, type RequestHandler } from "express";
+import { Router, json, raw, type Request, type RequestHandler } from "express";
 import type { UserRepositoryPort } from "../application/ports/repositories.js";
 import type { AuthenticationService } from "../identity/services/authenticationService.js";
 import type { UserId } from "../identity/domain/user.js";
@@ -24,6 +24,7 @@ interface ContextualAssistantControllers {
   update: (context: WorkspaceContext) => RequestHandler;
   transition: (context: WorkspaceContext) => RequestHandler;
   preview: (context: WorkspaceContext) => RequestHandler;
+  execution?: (context: WorkspaceContext) => RequestHandler;
 }
 
 interface AuthorizedCompanyDependencies {
@@ -74,7 +75,7 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
       if (changing) {
         const csrf = req.headers["x-csrf-token"];
         const fetchSite = req.headers["sec-fetch-site"];
-        if (!exactOrigin(req) || typeof csrf !== "string" || fetchSite === "same-site" || fetchSite === "cross-site"
+        if (!exactOrigin(req) || typeof csrf !== "string" || fetchSite !== "same-origin"
           || !dependencies.authentication.validateCsrf(raw, csrf)) throw new Error();
       }
       const user = dependencies.users.findById(identity.userId as UserId);
@@ -98,6 +99,23 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   router.patch("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId", authorize("company:manage", true, dependencies.assistantControllers.update));
   router.post("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/transitions", authorize("company:manage", true, dependencies.assistantControllers.transition));
   router.post("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/preview", authorize("assistant:preview", true, dependencies.assistantControllers.preview));
+  const operationalJson = json({ type: "application/json", limit: 8 * 1024 });
+  const operationalExecution = dependencies.assistantControllers.execution ? authorize("chat:use", true, (context) => (req, res, next) => {
+    if (!req.is("application/json")) {
+      res.status(415).json({ error: { code: "assistant_execution_media_type_unsupported", message: "Assistant execution requires application/json." } });
+      return;
+    }
+    operationalJson(req, res, (error?: unknown) => {
+      if (error) {
+        const type = typeof error === "object" && error !== null && "type" in error ? (error as { type?: unknown }).type : null;
+        if (type === "entity.too.large") { res.status(413).json({ error: { code: "assistant_execution_input_too_large", message: "Assistant execution input is too large." } }); return; }
+        res.status(400).json({ error: { code: "invalid_assistant_execution_request", message: "A valid Assistant Profile and message are required." } });
+        return;
+      }
+      dependencies.assistantControllers.execution!(context)(req, res, next);
+    });
+  }) : null;
+  if (operationalExecution) router.post("/:workspaceId/companies/:companyId/assistant/executions", operationalExecution);
   const k=dependencies.knowledgeControllers;
   if(k){
     const pdfBody=dependencies.pdfBodyParser??raw({type:"application/pdf",limit:"10mb"});

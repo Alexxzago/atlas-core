@@ -61,6 +61,11 @@ import { KnowledgeService as FrozenKnowledgeService } from "./knowledge/services
 import { SecurePublicUrlProvider } from "./knowledge/infrastructure/publicUrlProvider.js";
 import { WorkerPdfTextExtractor } from "./knowledge/infrastructure/pdfTextExtractor.js";
 import { createCompanyKnowledgeControllers } from "./controllers/companyKnowledgeController.js";
+import { createOperationalAssistantExecutionController } from "./controllers/operationalAssistantExecutionController.js";
+import { InMemoryOperationalExecutionBudget } from "./assistant/application/operationalExecutionBudget.js";
+import { OperationalAssistantExecutionService } from "./assistant/services/operationalAssistantExecutionService.js";
+import type { AssistantExecutionPort } from "./assistant/application/assistantExecutionPort.js";
+import type { AppRouters } from "./app.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -95,7 +100,6 @@ const workspaceAdministrationService=new WorkspaceAdministrationService(new Sqli
 export const authorizationService=new AuthorizationService(new MembershipRepository(database),workspaceRepository);
 export const authenticatedWorkspaceResolver=new WorkspaceResolver(workspaceRepository);
 const assistantProfileService=new AssistantProfileService(new AssistantProfileRepository(database),identityClock);
-const assistantPreviewService=new AssistantPreviewService(companyRepository,knowledgeRepository,new AssistantProfileRepository(database),agent);
 const companyKnowledgeService=new FrozenKnowledgeService(companyRepository,new CompanyKnowledgeRepository(database),new SecurePublicUrlProvider(),new WorkerPdfTextExtractor(),new GeminiKnowledgeFactExtractor(geminiProvider),identityClock);
 const companyKnowledgeControllers=createCompanyKnowledgeControllers(companyKnowledgeService);
 const onboardingService = new OnboardingService(companyRepository,knowledgeRepository,firecrawlProvider,geminiProvider,cleanMarkdown,new FileMarkdownDebugStore(resolve(repositoryRoot,"knowledge")),companyKnowledgeService);
@@ -118,4 +122,14 @@ export const identityRouter = createIdentityRouter({
   ...authenticationControllers,
 });
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService));
-export const authorizedCompaniesRouter=createAuthorizedCompaniesRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,controllers:{list:context=>createListCompaniesController(companyService,context),create:context=>createCompanyController(companyService,context),get:context=>createGetCompanyController(companyService,context),update:context=>createUpdateCompanyController(companyService,context),delete:context=>createDeleteCompanyController(companyService,context),onboard:(context,actor)=>createOnboardingController(onboardingService,context,actor)},assistantControllers:{list:context=>createListAssistantProfilesController(assistantProfileService,context),create:context=>createAssistantProfileController(assistantProfileService,context),get:context=>createGetAssistantProfileController(assistantProfileService,context),update:context=>createUpdateAssistantProfileController(assistantProfileService,context),transition:context=>createTransitionAssistantProfileController(assistantProfileService,context),preview:context=>createAssistantPreviewController(assistantPreviewService,context)},knowledgeControllers:companyKnowledgeControllers});
+function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
+  const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), execution);
+  const operational = new OperationalAssistantExecutionService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), execution, new InMemoryOperationalExecutionBudget());
+  return createAuthorizedCompaniesRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,controllers:{list:context=>createListCompaniesController(companyService,context),create:context=>createCompanyController(companyService,context),get:context=>createGetCompanyController(companyService,context),update:context=>createUpdateCompanyController(companyService,context),delete:context=>createDeleteCompanyController(companyService,context),onboard:(context,actor)=>createOnboardingController(onboardingService,context,actor)},assistantControllers:{list:context=>createListAssistantProfilesController(assistantProfileService,context),create:context=>createAssistantProfileController(assistantProfileService,context),get:context=>createGetAssistantProfileController(assistantProfileService,context),update:context=>createUpdateAssistantProfileController(assistantProfileService,context),transition:context=>createTransitionAssistantProfileController(assistantProfileService,context),preview:context=>createAssistantPreviewController(preview,context),execution:context=>createOperationalAssistantExecutionController(operational,context)},knowledgeControllers:companyKnowledgeControllers});
+}
+
+export const authorizedCompaniesRouter = createProductionAuthorizedCompaniesRouter(agent);
+
+export function createProductionAppRouters(execution: AssistantExecutionPort = agent): AppRouters {
+  return { authorizedCompaniesRouter: createProductionAuthorizedCompaniesRouter(execution), chatRouter, companiesRouter, identityRouter, knowledgeRouter, scrapeRouter, workspacesRouter };
+}

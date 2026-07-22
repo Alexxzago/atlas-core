@@ -1,10 +1,11 @@
 import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 import type { AnswerGenerator } from "../types/ports.js";
-import type { AssistantExecutionRequest, AssistantExecutionResult } from "../assistant/application/assistantExecution.js";
+import { freezeAssistantExecution, type AssistantExecutionRequest, type AssistantExecutionResult } from "../assistant/application/assistantExecution.js";
+import type { AssistantExecutionPort } from "../assistant/application/assistantExecutionPort.js";
 
 const LEGACY_FALLBACK = "I don't have that information yet. I can connect you with a human agent.";
 
-export class AtlasAgent {
+export class AtlasAgent implements AssistantExecutionPort {
   public constructor(private readonly answerGenerator: AnswerGenerator) {}
 
   public async answer(message: string, knowledge: CompanyKnowledge): Promise<string> {
@@ -17,7 +18,7 @@ export class AtlasAgent {
       return localAnswer;
     }
 
-    const result = await this.answerGenerator.execute(freezeExecution({
+    const result = await this.answerGenerator.execute(freezeAssistantExecution({
       purpose: "legacy_chat",
       behavior: {
         businessRole: "commercial assistant",
@@ -36,22 +37,4 @@ export class AtlasAgent {
   public execute(request: AssistantExecutionRequest): Promise<AssistantExecutionResult> {
     return this.answerGenerator.execute(request);
   }
-}
-
-export function freezeExecution(value: AssistantExecutionRequest): AssistantExecutionRequest {
-  const knowledge = Object.freeze({
-    company: Object.freeze({ ...value.knowledge.company }),
-    business: Object.freeze({
-      ...value.knowledge.business,
-      services: Object.freeze([...value.knowledge.business.services]),
-      locations: Object.freeze([...value.knowledge.business.locations]),
-    }),
-    faq: Object.freeze(value.knowledge.faq.map((item) => Object.freeze({ ...item }))),
-  });
-  return Object.freeze({
-    purpose: value.purpose,
-    behavior: Object.freeze({ ...value.behavior }),
-    knowledge,
-    message: value.message,
-  });
 }
