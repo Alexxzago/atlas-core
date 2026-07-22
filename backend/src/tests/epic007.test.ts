@@ -12,6 +12,7 @@ import { createOnboardingController } from "../controllers/onboarding.js";
 import { createDatabase } from "../config/database.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
 import { KnowledgeRepository } from "../repositories/knowledgeRepository.js";
+import { publishKnowledgeFixture } from "./knowledgeTestFixture.js";
 import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
 import { createCompaniesRouter } from "../routes/companies.js";
 import { ChatService } from "../services/chatService.js";
@@ -71,6 +72,8 @@ test("fresh database receives all migrations and the default workspace", () => {
     { id: 6, name: "0006_workspace_memberships_invitations" },
     { id: 7, name: "0007_assistant_profiles" },
     { id: 8, name: "0008_session_csrf_generation" },
+    { id: 9, name: "0009_company_knowledge_foundation" },
+    { id: 10, name: "0010_company_knowledge_runtime_cutover" },
   ]);
   assert.ok(migrations.every((migration) => migration.checksum.length === 64 && migration.applied_at.length > 0));
   assert.equal(new WorkspaceRepository(database).resolveDefault().key, "default");
@@ -105,9 +108,11 @@ test("legacy companies and knowledge are backfilled without changing identifiers
         FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
       );
       INSERT INTO companies (id, name, website, status)
-        VALUES (42, 'Legacy Company', 'https://legacy.test', 'ready');
+        VALUES (42, 'Legacy Compañía', 'https://legacy.test', 'ready');
+      INSERT INTO companies (id, name, website, status)
+        VALUES (43, 'Sin conocimiento', 'https://empty-legacy.test', 'processing');
       INSERT INTO company_knowledge (id, company_id, services_json, hours, locations_json, faq_json)
-        VALUES (7, 42, '["Legacy service"]', 'Legacy hours', '[]', '[]');
+        VALUES (7, 42, '["Servicio legado","Unicode 🚀"]', '', '["Buenos Aires"]', '[{"question":"¿Horario?","answer":"A confirmar"}]');
     `);
     legacy.close();
 
@@ -118,8 +123,11 @@ test("legacy companies and knowledge are backfilled without changing identifiers
 
     assert.equal(company?.id, 42);
     assert.equal(company?.workspaceId, context.workspaceId);
-    assert.deepEqual(knowledge?.business.services, ["Legacy service"]);
-    assert.equal((migrated.prepare("SELECT COUNT(*) AS count FROM company_knowledge").get() as { count: number }).count, 1);
+    assert.deepEqual(knowledge,{company:{name:"Legacy Compañía",website:"https://legacy.test",phone:"",email:""},business:{services:["Servicio legado","Unicode 🚀"],hours:"",locations:["Buenos Aires"]},faq:[{question:"¿Horario?",answer:"A confirmar"}]});
+    for(const table of["knowledge_sources","knowledge_source_revisions","company_knowledge_versions","company_knowledge_version_sources","company_knowledge_publications"])assert.equal((migrated.prepare(`SELECT COUNT(*) count FROM ${table}`).get()as{count:number}).count,1);
+    assert.equal((migrated.prepare("SELECT COUNT(*) count FROM company_knowledge_publications WHERE company_id=43").get()as{count:number}).count,0);
+    assert.equal((migrated.prepare("SELECT COUNT(*) AS count FROM company_knowledge_legacy").get() as { count: number }).count, 1);
+    assert.equal(migrated.prepare("SELECT 1 FROM sqlite_master WHERE name='company_knowledge' AND type='view'").get(),undefined);
     assert.deepEqual(migrated.prepare("PRAGMA foreign_key_check").all(), []);
     migrated.close();
   } finally {
@@ -135,7 +143,7 @@ test("an already migrated database restarts idempotently", () => {
     const restarted = createDatabase(path);
     const migrationCount = restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number };
     const workspaceCount = restarted.prepare("SELECT COUNT(*) AS count FROM workspaces WHERE key = 'default'").get() as { count: number };
-    assert.equal(migrationCount.count, 8);
+    assert.equal(migrationCount.count, 10);
     assert.equal(workspaceCount.count, 1);
     assert.deepEqual(restarted.prepare("PRAGMA foreign_key_check").all(), []);
     restarted.close();
@@ -148,13 +156,12 @@ test("company reads, updates, deletes, knowledge and listing are workspace isola
   const { database, companies, knowledge, workspaceA, workspaceB } = createWorkspacePair();
   const companyA = companies.create(workspaceA, { name: "Tenant A", website: "https://shared.test", status: "ready" });
   const companyB = companies.create(workspaceB, { name: "Tenant B", website: "https://shared.test", status: "ready" });
-  knowledge.save(workspaceA, companyA.id, knowledgeFixture);
+  publishKnowledgeFixture(database,workspaceA,companyA.id,knowledgeFixture);
 
   assert.equal(companies.findById(workspaceB, companyA.id), null);
   assert.equal(companies.update(workspaceB, companyA.id, { name: "Intrusion", website: companyA.website, phone: "", email: "", status: "ready" }), null);
   assert.equal(companies.delete(workspaceB, companyA.id), false);
   assert.equal(knowledge.load(workspaceB, companyA.id), null);
-  assert.equal(knowledge.delete(workspaceB, companyA.id), false);
   assert.equal(companies.findById(workspaceA, companyA.id)?.name, "Tenant A");
   assert.ok(knowledge.load(workspaceA, companyA.id));
   assert.deepEqual(companies.list(workspaceA).map((company) => company.id), [companyA.id]);
@@ -165,7 +172,7 @@ test("company reads, updates, deletes, knowledge and listing are workspace isola
 test("chat cannot answer with a company from another workspace", async () => {
   const { database, companies, knowledge, workspaceA, workspaceB } = createWorkspacePair();
   const company = companies.create(workspaceA, { name: "Tenant A", website: "https://a.test", status: "ready" });
-  knowledge.save(workspaceA, company.id, knowledgeFixture);
+  publishKnowledgeFixture(database,workspaceA,company.id,knowledgeFixture);
   const generator = new TrackingGenerator();
 
   const result = await new ChatService(companies, knowledge, new AtlasAgent(generator)).chat(workspaceB, company.id, "Private question");
@@ -178,7 +185,7 @@ test("chat cannot answer with a company from another workspace", async () => {
 test("onboarding cannot target or mutate a company from another workspace", async () => {
   const { database, companies, knowledge, workspaceA, workspaceB } = createWorkspacePair();
   const company = companies.create(workspaceA, { name: "Tenant A", website: "https://a.test", status: "ready" });
-  knowledge.save(workspaceA, company.id, knowledgeFixture);
+  publishKnowledgeFixture(database,workspaceA,company.id,knowledgeFixture);
   let scrapeCalls = 0;
   const scraper: WebsiteScraper = { async scrape(): Promise<{ markdown: string }> { scrapeCalls += 1; return { markdown: "private" }; } };
   const extractor: KnowledgeExtractor = { async extract(): Promise<unknown> { return knowledgeFixture; } };

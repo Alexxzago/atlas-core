@@ -19,4 +19,12 @@ app.use("/identity", identityRouter);
 app.use("/workspaces",workspacesRouter);
 app.use("/workspaces",authorizedCompaniesRouter);
 
+app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction): void => {
+  if (typeof error === "object" && error !== null && "type" in error && (error as { type?: unknown }).type === "entity.too.large") {
+    res.status(413).json({ error: { code: "knowledge_input_too_large", message: "Knowledge input is too large." } });
+    return;
+  }
+  next(error);
+});
+
 export default app;

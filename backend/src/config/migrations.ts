@@ -335,6 +335,114 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 9,
+    name: "0009_company_knowledge_foundation",
+    checksumSource: "knowledge-sources-v1|immutable-revisions-v1|published-versions-v1|single-current-publication-v1|legacy-backfill-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE knowledge_sources (
+          id TEXT PRIMARY KEY,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL CHECK(kind IN ('manual_text','public_url','pdf')),
+          origin TEXT NOT NULL CHECK(origin IN ('user','legacy_migration')),
+          name TEXT NOT NULL, normalized_name TEXT NOT NULL, locator TEXT,
+          status TEXT NOT NULL CHECK(status IN ('active','archived')),
+          version INTEGER NOT NULL CHECK(version > 0),
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT,
+          UNIQUE(company_id, normalized_name),
+          CHECK((kind='public_url' AND locator IS NOT NULL) OR (kind!='public_url' AND locator IS NULL)),
+          CHECK((status='archived' AND archived_at IS NOT NULL) OR (status='active' AND archived_at IS NULL))
+        );
+        CREATE INDEX idx_knowledge_sources_company_status_created ON knowledge_sources(company_id,status,created_at DESC,id DESC);
+
+        CREATE TABLE knowledge_source_revisions (
+          id TEXT PRIMARY KEY,
+          source_id TEXT NOT NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+          revision_number INTEGER NOT NULL CHECK(revision_number > 0),
+          status TEXT NOT NULL CHECK(status IN ('pending','ready','failed')),
+          media_type TEXT NOT NULL, content_digest TEXT, normalized_text TEXT, extracted_knowledge_json TEXT,
+          extractor_schema_version TEXT NOT NULL CHECK(extractor_schema_version='company-business-knowledge-v1'),
+          input_bytes INTEGER NOT NULL CHECK(input_bytes >= 0), normalized_bytes INTEGER, normalized_characters INTEGER,
+          page_count INTEGER, failure_code TEXT, created_at TEXT NOT NULL, completed_at TEXT,
+          UNIQUE(source_id,revision_number),
+          CHECK((status='pending' AND completed_at IS NULL AND failure_code IS NULL AND content_digest IS NULL AND extracted_knowledge_json IS NULL)
+             OR (status='failed' AND completed_at IS NOT NULL AND failure_code IS NOT NULL AND content_digest IS NULL AND normalized_text IS NULL AND extracted_knowledge_json IS NULL)
+             OR (status='ready' AND completed_at IS NOT NULL AND failure_code IS NULL AND content_digest IS NOT NULL AND extracted_knowledge_json IS NOT NULL))
+        );
+        CREATE UNIQUE INDEX idx_knowledge_revision_pending ON knowledge_source_revisions(source_id) WHERE status='pending';
+        CREATE INDEX idx_knowledge_revision_source_number ON knowledge_source_revisions(source_id,revision_number DESC);
+        CREATE TABLE company_knowledge_versions (
+          id TEXT PRIMARY KEY,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          version_number INTEGER NOT NULL CHECK(version_number > 0),
+          compiler_version TEXT NOT NULL CHECK(compiler_version='company-knowledge-compiler-v1'),
+          knowledge_json TEXT NOT NULL, snapshot_digest TEXT NOT NULL,
+          published_by_actor_id TEXT NOT NULL, published_at TEXT NOT NULL,
+          UNIQUE(company_id,version_number), UNIQUE(company_id,snapshot_digest)
+        );
+        CREATE INDEX idx_knowledge_versions_company_published ON company_knowledge_versions(company_id,published_at DESC,id DESC);
+
+        CREATE TABLE company_knowledge_version_sources (
+          knowledge_version_id TEXT NOT NULL REFERENCES company_knowledge_versions(id) ON DELETE CASCADE,
+          source_revision_id TEXT NOT NULL REFERENCES knowledge_source_revisions(id) ON DELETE CASCADE,
+          ordinal INTEGER NOT NULL CHECK(ordinal > 0),
+          PRIMARY KEY(knowledge_version_id,source_revision_id), UNIQUE(knowledge_version_id,ordinal)
+        );
+
+        CREATE TABLE company_knowledge_publications (
+          company_id INTEGER PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+          knowledge_version_id TEXT NOT NULL UNIQUE REFERENCES company_knowledge_versions(id) ON DELETE CASCADE,
+          publication_version INTEGER NOT NULL CHECK(publication_version > 0),
+          published_by_actor_id TEXT NOT NULL, published_at TEXT NOT NULL
+        );
+      `);
+
+      const rows = database.prepare(`
+        SELECT k.company_id,k.services_json,k.hours,k.locations_json,k.faq_json,k.updated_at,
+               c.name,c.website,c.phone,c.email
+        FROM company_knowledge k INNER JOIN companies c ON c.id=k.company_id ORDER BY k.company_id
+      `).all() as Array<Record<string, string | number>>;
+      for (const row of rows) {
+        const companyId = Number(row.company_id), sourceId = `ksrc_${createHash("sha256").update(`legacy-source:${companyId}`).digest("hex").slice(0,32)}`;
+        const revisionId = `ksrv_${createHash("sha256").update(`legacy-revision:${companyId}`).digest("hex").slice(0,32)}`;
+        const versionId = `kver_${createHash("sha256").update(`legacy-version:${companyId}`).digest("hex").slice(0,32)}`;
+        const extracted = JSON.stringify({ services: JSON.parse(String(row.services_json)), hours: String(row.hours), locations: JSON.parse(String(row.locations_json)), faq: JSON.parse(String(row.faq_json)) });
+        const knowledge = JSON.stringify({ company: { name: String(row.name), website: String(row.website), phone: String(row.phone), email: String(row.email) }, business: { services: JSON.parse(String(row.services_json)), hours: String(row.hours), locations: JSON.parse(String(row.locations_json)) }, faq: JSON.parse(String(row.faq_json)) });
+        const digest = createHash("sha256").update(`company-knowledge-compiler-v1\n${revisionId}\n${knowledge}`).digest("hex");
+        const publishedAt = String(row.updated_at);
+        database.prepare("INSERT INTO knowledge_sources VALUES(?,?,'manual_text','legacy_migration','Migrated knowledge','migrated knowledge',NULL,'active',1,?,?,NULL)").run(sourceId,companyId,publishedAt,publishedAt);
+        database.prepare("INSERT INTO knowledge_source_revisions VALUES(?,?,1,'ready','text/plain',?,NULL,?,'company-business-knowledge-v1',0,NULL,NULL,NULL,NULL,?,?)").run(revisionId,sourceId,createHash("sha256").update(extracted).digest("hex"),extracted,publishedAt,publishedAt);
+        database.prepare("INSERT INTO company_knowledge_versions VALUES(?,?,1,'company-knowledge-compiler-v1',?,?,'system:legacy-migration',?)").run(versionId,companyId,knowledge,digest,publishedAt);
+        database.prepare("INSERT INTO company_knowledge_version_sources VALUES(?,?,1)").run(versionId,revisionId);
+        database.prepare("INSERT INTO company_knowledge_publications VALUES(?,?,1,'system:legacy-migration',?)").run(companyId,versionId,publishedAt);
+      }
+      database.exec(`
+        ALTER TABLE company_knowledge RENAME TO company_knowledge_legacy;
+        CREATE VIEW company_knowledge AS SELECT id,company_id,services_json,hours,locations_json,faq_json,updated_at FROM company_knowledge_legacy;
+      `);
+    },
+  },
+  {
+    id: 10,
+    name: "0010_company_knowledge_runtime_cutover",
+    checksumSource: "drop-company-knowledge-view-v1|legacy-only-ready-null-text-insert-update-v1|preserve-knowledge-graph-v1",
+    apply(database): void {
+      database.exec(`
+        DROP VIEW IF EXISTS company_knowledge;
+        CREATE TRIGGER knowledge_ready_null_text_legacy_only
+        BEFORE INSERT ON knowledge_source_revisions
+        WHEN NEW.status='ready' AND NEW.normalized_text IS NULL
+             AND NOT EXISTS(SELECT 1 FROM knowledge_sources WHERE id=NEW.source_id AND origin='legacy_migration')
+        BEGIN SELECT RAISE(ABORT,'ready null text requires legacy migration origin'); END;
+        CREATE TRIGGER knowledge_ready_null_text_legacy_only_update
+        BEFORE UPDATE OF status,normalized_text,source_id ON knowledge_source_revisions
+        WHEN NEW.status='ready' AND NEW.normalized_text IS NULL
+             AND NOT EXISTS(SELECT 1 FROM knowledge_sources WHERE id=NEW.source_id AND origin='legacy_migration')
+        BEGIN SELECT RAISE(ABORT,'ready null text requires legacy migration origin'); END;
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {
@@ -352,7 +460,7 @@ function foreignKeyViolations(database: DatabaseSync): unknown[] {
   return database.prepare("PRAGMA foreign_key_check").all();
 }
 
-export function runMigrations(database: DatabaseSync): void {
+export function runMigrations(database: DatabaseSync, maximumMigrationId = Number.POSITIVE_INFINITY): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       id INTEGER PRIMARY KEY,
@@ -379,6 +487,7 @@ export function runMigrations(database: DatabaseSync): void {
 
   const appliedIds = new Set(appliedRows.map((row) => row.id));
   for (const migration of migrations) {
+    if (migration.id > maximumMigrationId) continue;
     if (appliedIds.has(migration.id)) continue;
     applyMigration(database, migration);
   }

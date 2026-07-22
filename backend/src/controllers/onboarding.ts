@@ -1,16 +1,17 @@
 import type { RequestHandler } from "express";
 import type { OnboardingService } from "../services/onboardingService.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
+import type { ActorContext } from "../knowledge/domain/actorContext.js";
 import {
   CompanyNotFoundError,
   CompanyValidationError,
   DuplicateWebsiteError,
 } from "../services/companyValidation.js";
 
-export function createOnboardingController(service: OnboardingService, context: WorkspaceContext): RequestHandler {
+export function createOnboardingController(service: OnboardingService, context: WorkspaceContext, actor?: ActorContext): RequestHandler {
   return async (req, res): Promise<void> => {
     try {
-      const result = await service.onboard(context, req.params.companyId, req.body?.url);
+      const result = await service.onboard(context, req.params.companyId, req.body?.url, actor);
       res.json(result);
     } catch (error: unknown) {
       if (error instanceof CompanyValidationError) {

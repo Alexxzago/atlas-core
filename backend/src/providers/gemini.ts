@@ -4,6 +4,8 @@ import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 import type { AnswerGenerator, KnowledgeExtractor } from "../types/ports.js";
 import { AnswerGenerationUnavailableError, type AssistantExecutionRequest, type AssistantExecutionResult } from "../assistant/application/assistantExecution.js";
 import { KNOWLEDGE_EXTRACTION_PROMPT } from "./prompts.js";
+import type { KnowledgeFactExtractor } from "../knowledge/application/ports.js";
+import type { KnowledgeSourceKind } from "../knowledge/domain/knowledge.js";
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY!,
@@ -11,7 +13,7 @@ const ai = new GoogleGenAI({
 
 interface GeminiClient {
   readonly models: {
-    generateContent(input: { model: string; contents: string; config?: { responseMimeType: string } }): Promise<{ text?: string | undefined }>;
+    generateContent(input: { model: string; contents: string; config?: { responseMimeType?: string; abortSignal?: AbortSignal } }): Promise<{ text?: string | undefined }>;
   };
 }
 
@@ -37,7 +39,8 @@ export class GeminiProvider implements AnswerGenerator, KnowledgeExtractor {
 
   public async extract(
   markdown: string,
-  website: string
+  website: string,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   let response;
 
@@ -54,6 +57,7 @@ WEBSITE CONTENT:
 ${markdown}`,
         config: {
           responseMimeType: "application/json",
+          ...(signal ? { abortSignal: signal } : {}),
         },
       });
 
@@ -74,7 +78,7 @@ ${markdown}`,
         `Gemini ocupado. Reintento ${attempt}/3 en ${delayMs} ms...`
       );
 
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await abortableDelay(delayMs, signal);
     }
   }
 
@@ -113,3 +117,25 @@ ${JSON.stringify(request.message)}`;
 }
 
 export const geminiProvider = new GeminiProvider();
+
+export class GeminiKnowledgeFactExtractor implements KnowledgeFactExtractor {
+  public constructor(private readonly provider: GeminiProvider) {}
+  public async extract(_kind: KnowledgeSourceKind, normalizedText: string, url: string | null, signal: AbortSignal): Promise<unknown> {
+    const value = await this.provider.extract(normalizedText, url ?? "", signal);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    const record = value as Record<string, unknown>, business = record.business;
+    if (!business || typeof business !== "object" || Array.isArray(business)) return value;
+    const fields = business as Record<string, unknown>;
+    return { services: fields.services, hours: fields.hours, locations: fields.locations, faq: record.faq };
+  }
+}
+
+function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(finish, milliseconds);
+    const abort = (): void => { clearTimeout(timer); signal?.removeEventListener("abort", abort); reject(signal?.reason ?? new DOMException("Aborted", "AbortError")); };
+    function finish(): void { signal?.removeEventListener("abort", abort); resolve(); }
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}

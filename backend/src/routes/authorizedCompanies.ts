@@ -1,4 +1,4 @@
-import { Router, type Request, type RequestHandler } from "express";
+import { Router, raw, type Request, type RequestHandler } from "express";
 import type { UserRepositoryPort } from "../application/ports/repositories.js";
 import type { AuthenticationService } from "../identity/services/authenticationService.js";
 import type { UserId } from "../identity/domain/user.js";
@@ -6,6 +6,7 @@ import type { Permission } from "../workspace/domain/membership.js";
 import { AuthorizationService } from "../workspace/services/authorizationService.js";
 import { WorkspaceResolver } from "../workspace/services/workspaceResolver.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
+import { createActorContext, type ActorContext } from "../knowledge/domain/actorContext.js";
 
 interface ContextualControllers {
   list: (context: WorkspaceContext) => RequestHandler;
@@ -13,7 +14,7 @@ interface ContextualControllers {
   get: (context: WorkspaceContext) => RequestHandler;
   update: (context: WorkspaceContext) => RequestHandler;
   delete: (context: WorkspaceContext) => RequestHandler;
-  onboard: (context: WorkspaceContext) => RequestHandler;
+  onboard: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
 }
 
 interface ContextualAssistantControllers {
@@ -32,6 +33,8 @@ interface AuthorizedCompanyDependencies {
   resolver: WorkspaceResolver;
   controllers: ContextualControllers;
   assistantControllers: ContextualAssistantControllers;
+  knowledgeControllers?: Record<string, (context: WorkspaceContext, actor: ActorContext) => RequestHandler>;
+  pdfBodyParser?: RequestHandler;
 }
 
 function rawCookie(req: Request, name: string): string | null {
@@ -60,8 +63,10 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   const authorize = (
     permission: Permission,
     changing: boolean,
-    controller: (context: WorkspaceContext) => RequestHandler,
+    controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler,
   ): RequestHandler => async (req, res, next): Promise<void> => {
+    res.setHeader("Cache-Control", "no-store, private");
+    res.setHeader("Pragma", "no-cache");
     try {
       const raw = rawCookie(req, dependencies.authentication.cookieName());
       const identity = raw ? dependencies.authentication.current(raw) : null;
@@ -76,7 +81,8 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
       if (!user) throw new Error();
       const decision = dependencies.authorization.authorize(user, workspaceId(req), permission);
       const context = dependencies.resolver.resolve(decision);
-      await controller(context)(req, res, next);
+      const actor = createActorContext({ userId: decision.userId, membershipId: decision.membershipId, role: decision.role, capabilities: decision.capabilities });
+      await controller(context, actor)(req, res, next);
     } catch { res.status(404).json({ error: "Resource not found." }); }
   };
 
@@ -92,5 +98,21 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   router.patch("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId", authorize("company:manage", true, dependencies.assistantControllers.update));
   router.post("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/transitions", authorize("company:manage", true, dependencies.assistantControllers.transition));
   router.post("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/preview", authorize("assistant:preview", true, dependencies.assistantControllers.preview));
+  const k=dependencies.knowledgeControllers;
+  if(k){
+    const pdfBody=dependencies.pdfBodyParser??raw({type:"application/pdf",limit:"10mb"});
+    router.get("/:workspaceId/companies/:companyId/knowledge/sources",authorize("knowledge:read",false,k.list!));
+    router.get("/:workspaceId/companies/:companyId/knowledge/sources/:sourceId/revisions/:revisionId",authorize("knowledge:read",false,k.revision!));
+    router.get("/:workspaceId/companies/:companyId/knowledge/publication",authorize("knowledge:read",false,k.publication!));
+    router.post("/:workspaceId/companies/:companyId/knowledge/sources/manual",authorize("knowledge:ingest",true,k.createManual!));
+    router.post("/:workspaceId/companies/:companyId/knowledge/sources/url",authorize("knowledge:ingest",true,k.createUrl!));
+    const authorizedPdf=(controller:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler)=>authorize("knowledge:ingest",true,(context,actor)=>(req,res,next)=>pdfBody(req,res,error=>error?next(error):controller(context,actor)(req,res,next)));
+    router.post("/:workspaceId/companies/:companyId/knowledge/sources/pdf",authorizedPdf(k.createPdf!));
+    router.post("/:workspaceId/companies/:companyId/knowledge/sources/:sourceId/revisions/manual",authorize("knowledge:ingest",true,k.reviseManual!));
+    router.post("/:workspaceId/companies/:companyId/knowledge/sources/:sourceId/revisions/url",authorize("knowledge:ingest",true,k.reviseUrl!));
+    router.post("/:workspaceId/companies/:companyId/knowledge/sources/:sourceId/revisions/pdf",authorizedPdf(k.revisePdf!));
+    router.post("/:workspaceId/companies/:companyId/knowledge/sources/:sourceId/archive",authorize("knowledge:archive",true,k.archive!));
+    router.post("/:workspaceId/companies/:companyId/knowledge/publication",authorize("knowledge:publish",true,k.publish!));
+  }
   return router;
 }

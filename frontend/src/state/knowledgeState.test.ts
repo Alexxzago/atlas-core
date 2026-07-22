@@ -1,0 +1,4 @@
+import assert from"node:assert/strict";import{test}from"node:test";import{initialKnowledgeState,knowledgeReducer}from"./knowledgeState.ts";
+const request={requestId:1,workspaceId:"wsp_a",companyId:1,generation:0};
+test("Knowledge state rejects stale tenant responses and clears selection on context change",()=>{let state=knowledgeReducer(initialKnowledgeState,{type:"loading",request});state=knowledgeReducer(state,{type:"select",revisionId:"ksrv_a",selected:true});assert.deepEqual(state.selectedRevisionIds,["ksrv_a"]);const stale=knowledgeReducer(state,{type:"loaded",request:{...request,workspaceId:"wsp_b"},sources:[],publication:null});assert.equal(stale.loading,true);const cleared=knowledgeReducer(state,{type:"contextChanged"});assert.deepEqual(cleared.sources,[]);assert.deepEqual(cleared.selectedRevisionIds,[]);assert.equal(cleared.generation,1);});
+

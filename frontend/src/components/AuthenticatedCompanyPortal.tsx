@@ -8,6 +8,7 @@ import { AssistantProfilesPanel } from "./AssistantProfilesPanel";
 import { AuthenticatedCompanySelector } from "./AuthenticatedCompanySelector";
 import { PortalHeader } from "./PortalHeader";
 import { WorkspaceMembershipPortal } from "./WorkspaceMembershipPortal";
+import { CompanyKnowledgePanel } from "./CompanyKnowledgePanel";
 
 interface Props { csrf: string; email: string; onPassword: () => void; onLogout: () => void }
 
@@ -195,6 +196,7 @@ export function AuthenticatedCompanyPortal({ csrf, email, onPassword, onLogout }
     <main className="authenticated-main">
       <WorkspaceMembershipPortal csrf={csrf} workspaces={state.workspaces} selectedWorkspace={state.selectedWorkspace} pendingWorkspaceId={state.pendingWorkspaceId} loading={state.workspacesLoading} error={state.workspaceError} onSelectWorkspace={(id) => void selectWorkspace(id)} onWorkspacesChanged={() => void loadWorkspaces()} onActiveWorkspaceLeft={() => { abortTenant(); dispatch({ type: "workspaceCleared" }); }}/>
       <AuthenticatedCompanySelector companies={state.companies} selectedCompanyId={state.selectedCompanyId} workspaceSelected={canCreateCompany(state)} loading={state.companiesLoading} error={state.companyError} creating={state.companyCreating} onCreate={createCompany} onCompanySelected={(id) => void selectCompany(id)} onRetry={() => { if (state.selectedWorkspace) void loadCompanies(state.selectedWorkspace, state.workspaceGeneration); }}/>
+      <CompanyKnowledgePanel csrf={csrf} workspaceId={state.selectedWorkspace?.id??null} companyId={state.selectedCompanyId} capabilities={state.selectedWorkspace?.capabilities??[]}/>
       <AssistantProfilesPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} workspaceRole={state.selectedWorkspace?.role ?? null} companyId={state.selectedCompanyId} companyName={selectedCompany?.name ?? null} companySelected={state.selectedCompanyId !== null} profiles={state.profiles} selectedProfile={selectedProfile} transientArchivedProfile={state.transientArchivedProfile} loading={state.profilesLoading} error={state.profileError} formMode={state.formMode} submitting={state.submitting} transitionTarget={state.transitionTarget} onSelectProfile={(id) => void selectProfile(id)} onOpenCreate={() => dispatch({ type: "formOpened", mode: "create" })} onOpenEdit={() => dispatch({ type: "formOpened", mode: "edit" })} onCloseForm={() => dispatch({ type: "formClosed" })} onSubmitForm={(input) => void submitProfile(input)} onTransition={(profile, target) => void transitionProfile(profile, target)} onRetry={reloadProfiles}/>
     </main>
   </div>;

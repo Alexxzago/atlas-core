@@ -23,9 +23,7 @@ export interface CompanyRepositoryPort {
 }
 
 export interface KnowledgeRepositoryPort {
-  save(context: WorkspaceContext, companyId: number, knowledge: CompanyKnowledge): boolean;
   load(context: WorkspaceContext, companyId: number): CompanyKnowledge | null;
-  delete(context: WorkspaceContext, companyId: number): boolean;
 }
 
 export interface WorkspaceRepositoryPort {

@@ -2,13 +2,16 @@ import type { CompanyRepositoryPort, KnowledgeRepositoryPort } from "../applicat
 import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 import type { KnowledgeExtractor, MarkdownDebugStore, WebsiteScraper } from "../types/ports.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
-import { validateCompanyKnowledge } from "./knowledgeBuilder.js";
 import {
   CompanyNotFoundError,
   DuplicateWebsiteError,
   normalizeWebsiteUrl,
   parseCompanyId,
 } from "./companyValidation.js";
+import type { KnowledgeService as FrozenKnowledgeService } from "../knowledge/services/knowledgeServices.js";
+import type { ActorContext } from "../knowledge/domain/actorContext.js";
+import { createSystemActorContext } from "../knowledge/domain/actorContext.js";
+import { KnowledgeDomainError } from "../knowledge/domain/knowledge.js";
 
 export class OnboardingError extends Error {}
 
@@ -25,78 +28,34 @@ export class OnboardingService {
     private readonly scraper: WebsiteScraper,
     private readonly extractor: KnowledgeExtractor,
     private readonly cleaner: (markdown: string) => string,
-    private readonly debugStore: MarkdownDebugStore
+    private readonly debugStore: MarkdownDebugStore,
+    private readonly frozenKnowledge?: FrozenKnowledgeService,
   ) {}
 
-  public async onboard(context: WorkspaceContext, companyIdValue: unknown, rawUrl: unknown): Promise<OnboardingResult> {
+  public async onboard(context: WorkspaceContext, companyIdValue: unknown, rawUrl: unknown, actor?: ActorContext): Promise<OnboardingResult> {
     const companyId = parseCompanyId(companyIdValue);
     const website = normalizeWebsiteUrl(rawUrl);
     const company = this.companies.findById(context, companyId);
     if (!company) throw new CompanyNotFoundError("Company was not found.");
+    const existingPublishedKnowledge = this.knowledge.load(context, companyId);
 
     const websiteOwner = this.companies.findByWebsite(context, website);
     if (websiteOwner && websiteOwner.id !== company.id) {
       throw new DuplicateWebsiteError("A company already uses this website.");
     }
+    if (!this.frozenKnowledge) throw new OnboardingError("Frozen Knowledge service is required.");
+    return this.frozenOnboard(context, company, website, actor??createSystemActorContext("legacy-onboarding"),existingPublishedKnowledge!==null);
+  }
 
-    const processingCompany = this.companies.update(context, company.id, {
-      ...company,
-      website,
-      status: "processing",
-    });
-    if (!processingCompany) throw new CompanyNotFoundError("Company was not found.");
-
-    try {
-      // A retry invalidates the previous snapshot. It must not be served as if
-      // it were knowledge refreshed by this onboarding attempt.
-      this.knowledge.delete(context, company.id);
-      const scrapeResult = await this.scraper.scrape(website);
-      if (!scrapeResult.markdown?.trim()) {
-        throw new Error("Website scraper returned no content.");
-      }
-
-      const cleanedMarkdown = this.cleaner(scrapeResult.markdown);
-      if (!cleanedMarkdown.trim()) {
-        throw new Error("Website content is empty after cleaning.");
-      }
-
-      await this.debugStore.save(company.id, cleanedMarkdown);
-      const extracted = await this.extractor.extract(cleanedMarkdown, website);
-      const validated = validateCompanyKnowledge(extracted);
-      const finalKnowledge: CompanyKnowledge = {
-        ...validated,
-        company: {
-          name: validated.company.name || processingCompany.name,
-          website,
-          phone: validated.company.phone || processingCompany.phone,
-          email: validated.company.email || processingCompany.email,
-        },
-      };
-
-      const updatedCompany = this.companies.update(context, company.id, {
-        name: finalKnowledge.company.name,
-        website,
-        phone: finalKnowledge.company.phone,
-        email: finalKnowledge.company.email,
-        status: "processing",
-      });
-      if (!updatedCompany) throw new Error("Company disappeared during onboarding.");
-      if (!this.knowledge.save(context, updatedCompany.id, finalKnowledge)) {
-        throw new Error("Company knowledge could not be saved in the workspace.");
-      }
-      this.companies.updateStatus(context, updatedCompany.id, "ready");
-
-      return { companyId: updatedCompany.id, status: "ready", knowledge: finalKnowledge };
-    } catch (error: unknown) {
-      try {
-        this.companies.updateStatus(context, company.id, "failed");
-      } catch (statusError: unknown) {
-        throw new OnboardingError("Onboarding failed and company status could not be updated.", {
-          cause: new AggregateError([error, statusError]),
-        });
-      }
-      throw new OnboardingError("Unable to onboard company.", { cause: error });
-    }
+  private async frozenOnboard(context:WorkspaceContext,company:import("../types/company.js").Company,website:string,actor:ActorContext,hadPublishedKnowledge:boolean):Promise<OnboardingResult>{
+    const updated=this.companies.update(context,company.id,{...company,website,status:company.status});if(!updated)throw new CompanyNotFoundError("Company was not found.");
+    try{
+      const sources=this.frozenKnowledge!.list(context,company.id);const existing=sources.find(item=>item.name==="Website onboarding"&&item.kind==="public_url"&&item.status==="active");
+      const result=existing?await this.frozenKnowledge!.revise(context,actor,company.id,existing.id,"public_url",{url:website,expectedSourceVersion:existing.version}):await this.frozenKnowledge!.create(context,actor,company.id,"public_url",{name:"Website onboarding",url:website});
+      let current=null;try{current=this.frozenKnowledge!.current(context,company.id);}catch(error:unknown){if(!(error instanceof KnowledgeDomainError)||error.code!=="knowledge_unavailable")throw error;}
+      const publication=this.frozenKnowledge!.publish(context,actor,company.id,{sourceRevisionIds:[result.revision.id],expectedKnowledgeVersionId:current?.id??null});
+      return{companyId:company.id,status:"ready",knowledge:publication.version!.knowledge};
+    }catch(error:unknown){if(!hadPublishedKnowledge)this.companies.updateStatus(context,company.id,"failed");throw new OnboardingError("Unable to onboard company.",{cause:error});}
   }
 
 }

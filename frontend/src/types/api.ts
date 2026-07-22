@@ -42,7 +42,15 @@ export interface WorkspaceSummary {
   id: string;
   name: string;
   role: string;
+  capabilities: Permission[];
 }
+export type Permission = "workspace:read"|"workspace:manage"|"company:read"|"company:manage"|"onboarding:run"|"chat:use"|"assistant:preview"|"knowledge:read"|"knowledge:ingest"|"knowledge:publish"|"knowledge:archive"|"membership:list"|"membership:invite"|"membership:manage"|"administrator:manage"|"owner:manage"|"owner:transfer";
+
+export type KnowledgeSourceKind="manual_text"|"public_url"|"pdf";
+export interface KnowledgeRevision { id:string;sourceId:string;revisionNumber:number;status:"pending"|"ready"|"failed";mediaType:string;normalizedText:string|null;extractedKnowledge:{services:string[];hours:string;locations:string[];faq:Array<{question:string;answer:string}>}|null;failureCode:string|null;createdAt:string;completedAt:string|null; }
+export interface KnowledgeSource { id:string;companyId:number;kind:KnowledgeSourceKind;name:string;locator:string|null;status:"active"|"archived";version:number;createdAt:string;updatedAt:string;archivedAt:string|null;latestRevision:KnowledgeRevision|null;includedRevisionId:string|null; }
+export interface KnowledgeIngestionResponse { source:KnowledgeSource;revision:KnowledgeRevision; }
+export interface KnowledgePublication { id:string;companyId:number;versionNumber:number;publicationVersion:number;knowledge:CompanyKnowledge;snapshotDigest:string;publishedByActorId:string;publishedAt:string;sourceRevisionIds:string[]; }
 
 export interface Identity {
   userId: string;

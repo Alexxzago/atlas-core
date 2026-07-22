@@ -14,6 +14,8 @@ import { OnboardingService } from "../services/onboardingService.js";
 import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 import type { KnowledgeExtractor, MarkdownDebugStore, WebsiteScraper } from "../types/ports.js";
 import { createWorkspaceContext, type WorkspaceContext } from "../types/workspaceContext.js";
+import type { DatabaseSync } from "node:sqlite";
+import { frozenKnowledgeFixtureService, publishKnowledgeFixture } from "./knowledgeTestFixture.js";
 
 const extractedKnowledge: CompanyKnowledge = {
   company: { name: "Extracted Company", website: "", phone: "+54 11", email: "info@example.test" },
@@ -30,6 +32,7 @@ interface TestContext {
   knowledge: KnowledgeRepository;
   context: WorkspaceContext;
   baseUrl: string;
+  database: DatabaseSync;
 }
 
 async function withApi(
@@ -54,7 +57,8 @@ async function withApi(
     scraper,
     extractor,
     (markdown) => markdown,
-    new FakeDebugStore()
+    new FakeDebugStore(),
+    frozenKnowledgeFixtureService(database,companies,scraper,extractor,markdown=>markdown)
   );
   const app = express();
   app.use(express.json());
@@ -74,7 +78,7 @@ async function withApi(
   const address = server.address() as AddressInfo;
 
   try {
-    await run({ companies, knowledge, context, baseUrl: `http://127.0.0.1:${address.port}` });
+    await run({ companies, knowledge, context, database, baseUrl: `http://127.0.0.1:${address.port}` });
   } finally {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
@@ -129,9 +133,9 @@ test("PATCH rejects a duplicate website", async () => {
 });
 
 test("DELETE removes the company and cascades related knowledge", async () => {
-  await withApi(async ({ companies, knowledge, context, baseUrl }) => {
+  await withApi(async ({ companies, knowledge, context, database, baseUrl }) => {
     const company = companies.create(context, { name: "Alpha", website: "https://alpha.test" });
-    knowledge.save(context, company.id, { ...extractedKnowledge, company: { ...extractedKnowledge.company, website: company.website } });
+    publishKnowledgeFixture(database,context,company.id,{ ...extractedKnowledge, company: { ...extractedKnowledge.company, website: company.website } });
     const response = await fetch(`${baseUrl}/companies/${company.id}`, { method: "DELETE" });
     assert.equal(response.status, 204);
     assert.equal(companies.findById(context, company.id), null);
@@ -140,7 +144,7 @@ test("DELETE removes the company and cascades related knowledge", async () => {
 });
 
 test("company-targeted onboarding updates the same company without creating another", async () => {
-  await withApi(async ({ companies, knowledge, context, baseUrl }) => {
+  await withApi(async ({ companies, knowledge, context, database, baseUrl }) => {
     const company = companies.create(context, { name: "Original", website: "https://old.test" });
     const response = await fetch(`${baseUrl}/companies/${company.id}/onboard`, {
       method: "POST",
@@ -180,9 +184,9 @@ test("failed onboarding returns a controlled error and exposes failed status", a
   const failedScraper: WebsiteScraper = {
     async scrape(): Promise<never> { throw new Error("SCRAPE_ALL_ENGINES_FAILED"); },
   };
-  await withApi(async ({ companies, knowledge, context, baseUrl }) => {
+  await withApi(async ({ companies, knowledge, context, database, baseUrl }) => {
     const company = companies.create(context, { name: "Ready", website: "https://ready.test", status: "ready" });
-    knowledge.save(context, company.id, { ...extractedKnowledge, company: { ...extractedKnowledge.company, website: company.website } });
+    publishKnowledgeFixture(database,context,company.id,{ ...extractedKnowledge, company: { ...extractedKnowledge.company, website: company.website } });
 
     const onboardingResponse = await fetch(`${baseUrl}/companies/${company.id}/onboard`, {
       method: "POST",
@@ -195,7 +199,7 @@ test("failed onboarding returns a controlled error and exposes failed status", a
 
     assert.equal(onboardingResponse.status, 500);
     assert.equal(errorBody.error, "Unable to onboard company.");
-    assert.equal(refreshed.status, "failed");
-    assert.equal(knowledge.load(context, company.id), null);
+    assert.equal(refreshed.status, "ready");
+    assert.ok(knowledge.load(context, company.id));
   }, { scraper: failedScraper });
 });

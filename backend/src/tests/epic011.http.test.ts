@@ -18,6 +18,7 @@ import { AssistantProfileRepository } from "../repositories/assistantProfileRepo
 import { CompanyRepository } from "../repositories/companyRepository.js";
 import { SqliteAuthenticationTransaction } from "../repositories/identityTransaction.js";
 import { KnowledgeRepository } from "../repositories/knowledgeRepository.js";
+import { publishKnowledgeFixture } from "./knowledgeTestFixture.js";
 import { MembershipRepository } from "../repositories/workspaceAdministrationRepository.js";
 import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
 import { UserRepository } from "../repositories/userRepository.js";
@@ -70,7 +71,7 @@ test("real Assistant Preview endpoint freezes authentication, authorization, HTT
   const otherCompany = companies.create(context, { name: "Other", website: "https://other.test", status: "ready" });
   const foreignCompany = companies.create(foreignContext, { name: "Foreign", website: "https://foreign.test", status: "ready" });
   const knowledgeValue = { company: { name: "Ready", website: "https://ready.test", phone: "", email: "" }, business: { services: ["Service"], hours: "Always", locations: ["Remote"] }, faq: [] };
-  for (const company of [readyCompany, processingCompany, otherCompany, foreignCompany]) knowledge.save(company.workspaceId === workspace.id ? context : foreignContext, company.id, { ...knowledgeValue, company: { ...knowledgeValue.company, name: company.name, website: company.website } });
+  for (const company of [readyCompany, otherCompany, foreignCompany]) publishKnowledgeFixture(database,company.workspaceId === workspace.id ? context : foreignContext, company.id, { ...knowledgeValue, company: { ...knowledgeValue.company, name: company.name, website: company.website } });
 
   const profileService = new AssistantProfileService(profiles, new SystemClock());
   let profileSequence = 0;

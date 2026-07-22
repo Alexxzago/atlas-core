@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test src/tests/epic004.test.ts src/tests/epic005.test.ts src/tests/epic007.test.ts src/tests/epic0081.test.ts src/tests/epic0082.test.ts src/tests/epic0083.test.ts src/tests/epic0084.test.ts src/tests/epic009.domain.test.ts src/tests/epic009.repository.test.ts src/tests/epic009.http.test.ts src/tests/epic0101.test.ts src/tests/epic011.test.ts src/tests/epic011.http.test.ts",
+    "test": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic004.test.ts src/tests/epic005.test.ts src/tests/epic007.test.ts src/tests/epic0081.test.ts src/tests/epic0082.test.ts src/tests/epic0083.test.ts src/tests/epic0084.test.ts src/tests/epic009.domain.test.ts src/tests/epic009.repository.test.ts src/tests/epic009.http.test.ts src/tests/epic0101.test.ts src/tests/epic011.test.ts src/tests/epic011.http.test.ts src/tests/epic012.test.ts src/tests/epic012.http.test.ts src/tests/epic012.http-matrix.test.ts src/tests/epic012.onboarding-evidence.test.ts src/tests/epic012.remediation.test.ts src/tests/epic012.url-security.test.ts src/tests/epic012.authorization-order.test.ts src/tests/epic012.pdf-hostile.test.ts src/tests/epic012.pdf-resource.test.ts src/tests/epic012.concurrency.test.ts",
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/index.ts"
   },
@@ -16,7 +16,8 @@
     "@google/genai": "^2.11.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "firecrawl": "^4.30.0"
+    "firecrawl": "^4.30.0",
+    "pdfjs-dist": "6.1.200"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
