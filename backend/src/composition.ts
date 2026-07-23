@@ -69,6 +69,8 @@ import type { AppRouters } from "./app.js";
 import { smtpConfiguration, SmtpEmailDelivery } from "./providers/smtpEmailDelivery.js";
 import { SqlitePlatformBootstrapTransaction } from "./repositories/platformBootstrapTransaction.js";
 import { PlatformBootstrapService } from "./identity/services/platformBootstrapService.js";
+import { AssistantExecutionRecordRepository } from "./repositories/assistantExecutionRecordRepository.js";
+import { OperationalAssistantRuntime } from "./assistant/services/operationalAssistantRuntime.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -136,8 +138,9 @@ export const identityRouter = createIdentityRouter({
 });
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));
 function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
-  const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), execution);
-  const operational = new OperationalAssistantExecutionService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), execution, new InMemoryOperationalExecutionBudget());
+  const runtime = new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), identityClock);
+  const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, "gemini");
+  const operational = new OperationalAssistantExecutionService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, new InMemoryOperationalExecutionBudget(), "gemini");
   return createAuthorizedCompaniesRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,controllers:{list:context=>createListCompaniesController(companyService,context),create:context=>createCompanyController(companyService,context),get:context=>createGetCompanyController(companyService,context),update:context=>createUpdateCompanyController(companyService,context),delete:context=>createDeleteCompanyController(companyService,context),onboard:(context,actor)=>createOnboardingController(onboardingService,context,actor)},assistantControllers:{list:context=>createListAssistantProfilesController(assistantProfileService,context),create:context=>createAssistantProfileController(assistantProfileService,context),get:context=>createGetAssistantProfileController(assistantProfileService,context),update:context=>createUpdateAssistantProfileController(assistantProfileService,context),transition:context=>createTransitionAssistantProfileController(assistantProfileService,context),preview:context=>createAssistantPreviewController(preview,context),execution:context=>createOperationalAssistantExecutionController(operational,context)},knowledgeControllers:companyKnowledgeControllers});
 }
 

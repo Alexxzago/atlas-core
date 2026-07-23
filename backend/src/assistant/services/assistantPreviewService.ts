@@ -1,10 +1,11 @@
 import type { CompanyRepositoryPort, KnowledgeRepositoryPort } from "../../application/ports/repositories.js";
+import type { CompanyKnowledgeVersion } from "../../knowledge/domain/knowledge.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import { assistantProfileId } from "../domain/assistantProfile.js";
 import { AssistantProfileExecutionPolicy, AssistantProfilePolicyError } from "../domain/assistantProfilePolicies.js";
 import type { AssistantProfileRepositoryPort } from "../application/ports.js";
-import { buildAssistantExecution, type AssistantExecutionResult } from "../application/assistantExecution.js";
-import type { AssistantExecutionPort } from "../application/assistantExecutionPort.js";
+import type { AssistantExecutionResult } from "../application/assistantExecution.js";
+import type { OperationalAssistantRuntime } from "./operationalAssistantRuntime.js";
 
 export class AssistantPreviewValidationError extends Error {}
 export class AssistantPreviewNotFoundError extends Error {}
@@ -17,9 +18,10 @@ export class AssistantPreviewService {
 
   public constructor(
     private readonly companies: CompanyRepositoryPort,
-    private readonly knowledge: KnowledgeRepositoryPort,
+    private readonly knowledge: KnowledgeRepositoryPort & { loadCurrentVersion(context: WorkspaceContext, companyId: number): CompanyKnowledgeVersion | null },
     private readonly profiles: AssistantProfileRepositoryPort,
-    private readonly execution: AssistantExecutionPort,
+    private readonly runtime: OperationalAssistantRuntime,
+    private readonly provider: string,
   ) {}
 
   public async preview(
@@ -41,13 +43,11 @@ export class AssistantPreviewService {
       throw error;
     }
     if (company.status !== "ready") throw new AssistantPreviewCompanyNotReadyError();
-    const companyKnowledge = this.knowledge.load(context, companyId);
-    if (!companyKnowledge) throw new AssistantPreviewKnowledgeUnavailableError();
-    return this.execution.execute(buildAssistantExecution(profile, {
-      purpose: "preview",
-      knowledge: companyKnowledge,
-      message,
-    }));
+    const knowledge = this.knowledge.loadCurrentVersion(context, companyId);
+    if (!knowledge) throw new AssistantPreviewKnowledgeUnavailableError();
+    return (await this.runtime.execute(company, profile, knowledge, message, {
+      purpose: "preview", provider: this.provider, fallbackOnUnavailable: false,
+    })).response;
   }
 }
 

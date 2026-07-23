@@ -462,6 +462,40 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 12,
+    name: "0012_operational_assistant_runtime",
+    checksumSource: "assistant-execution-records-v1|profile-runtime-snapshots-v1|published-knowledge-reference-v1|no-input-persistence",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE assistant_execution_records (
+          id TEXT PRIMARY KEY,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          assistant_profile_id TEXT NOT NULL REFERENCES assistant_profiles(id) ON DELETE CASCADE,
+          profile_snapshot_json TEXT NOT NULL,
+          knowledge_version_id TEXT NOT NULL REFERENCES company_knowledge_versions(id) ON DELETE CASCADE,
+          provider TEXT NOT NULL,
+          purpose TEXT NOT NULL CHECK (purpose IN ('preview', 'operational_execution')),
+          state TEXT NOT NULL CHECK (state IN ('started', 'answered', 'safe_fallback', 'failed')),
+          fallback_used INTEGER NOT NULL CHECK (fallback_used IN (0, 1)),
+          result TEXT,
+          input_tokens INTEGER CHECK (input_tokens IS NULL OR input_tokens >= 0),
+          output_tokens INTEGER CHECK (output_tokens IS NULL OR output_tokens >= 0),
+          error_code TEXT,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          duration_milliseconds INTEGER,
+          CHECK ((state = 'started' AND completed_at IS NULL AND duration_milliseconds IS NULL AND result IS NULL AND error_code IS NULL)
+            OR (state IN ('answered', 'safe_fallback') AND completed_at IS NOT NULL AND duration_milliseconds >= 0 AND result IS NOT NULL AND error_code IS NULL)
+            OR (state = 'failed' AND completed_at IS NOT NULL AND duration_milliseconds >= 0 AND result IS NULL AND error_code IS NOT NULL))
+        );
+        CREATE INDEX idx_assistant_execution_records_company_started
+          ON assistant_execution_records(company_id, started_at DESC, id DESC);
+        CREATE INDEX idx_assistant_execution_records_profile_started
+          ON assistant_execution_records(assistant_profile_id, started_at DESC, id DESC);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

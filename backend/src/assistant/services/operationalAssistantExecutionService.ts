@@ -1,11 +1,12 @@
 import type { CompanyRepositoryPort, KnowledgeRepositoryPort } from "../../application/ports/repositories.js";
+import type { CompanyKnowledgeVersion } from "../../knowledge/domain/knowledge.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
-import { AnswerGenerationUnavailableError, buildAssistantExecution, type AssistantExecutionResult } from "../application/assistantExecution.js";
-import type { AssistantExecutionPort } from "../application/assistantExecutionPort.js";
+import type { AssistantExecutionResult } from "../application/assistantExecution.js";
 import type { OperationalExecutionBudgetPort } from "../application/operationalExecutionBudget.js";
 import type { AssistantProfileRepositoryPort } from "../application/ports.js";
 import { assistantProfileId } from "../domain/assistantProfile.js";
 import { AssistantProfileExecutionPolicy, AssistantProfilePolicyError } from "../domain/assistantProfilePolicies.js";
+import type { OperationalAssistantRuntime } from "./operationalAssistantRuntime.js";
 
 export class OperationalAssistantExecutionValidationError extends Error {}
 export class OperationalAssistantExecutionNotFoundError extends Error {}
@@ -19,10 +20,11 @@ export class OperationalAssistantExecutionService {
 
   public constructor(
     private readonly companies: CompanyRepositoryPort,
-    private readonly knowledge: KnowledgeRepositoryPort,
+    private readonly knowledge: KnowledgeRepositoryPort & { loadCurrentVersion(context: WorkspaceContext, companyId: number): CompanyKnowledgeVersion | null },
     private readonly profiles: AssistantProfileRepositoryPort,
-    private readonly execution: AssistantExecutionPort,
+    private readonly runtime: OperationalAssistantRuntime,
     private readonly budget: OperationalExecutionBudgetPort,
+    private readonly provider: string,
   ) {}
 
   public async execute(context: WorkspaceContext, companyIdValue: unknown, input: unknown): Promise<AssistantExecutionResult> {
@@ -38,27 +40,18 @@ export class OperationalAssistantExecutionService {
       throw error;
     }
     if (company.status !== "ready") throw new OperationalAssistantCompanyNotReadyError();
-    const knowledge = this.knowledge.load(context, scopedCompanyId);
+    const knowledge = this.knowledge.loadCurrentVersion(context, scopedCompanyId);
     if (!knowledge) throw new OperationalAssistantKnowledgeUnavailableError();
     const lease = this.budget.acquire(context);
     if (!lease) throw new OperationalAssistantExecutionRateLimitedError();
     try {
-      const result = await this.execution.execute(buildAssistantExecution(profile, {
-        purpose: "operational_execution",
-        knowledge,
-        message: parsed.message,
-      }));
-      if (!result || typeof result !== "object" || result.outcome === "safe_fallback" || typeof result.answer !== "string" || !result.answer.trim()) return fallback(profile.fallbackMessage);
-      if (result.outcome !== "answered") return fallback(profile.fallbackMessage);
-      return { outcome: "answered", answer: result.answer };
-    } catch (error: unknown) {
-      if (error instanceof AnswerGenerationUnavailableError) return fallback(profile.fallbackMessage);
-      throw error;
+      return (await this.runtime.execute(company, profile, knowledge, parsed.message, {
+        purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
+      })).response;
     } finally { lease.release(); }
   }
 }
 
-function fallback(answer: string): AssistantExecutionResult { return { outcome: "safe_fallback", answer }; }
 function parseCompanyId(value: unknown): number { const parsed = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN; if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new OperationalAssistantExecutionNotFoundError(); return parsed; }
 function parseInput(value: unknown): { profileId: ReturnType<typeof assistantProfileId>; message: string } {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new OperationalAssistantExecutionValidationError();
