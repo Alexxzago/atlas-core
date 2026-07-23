@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
+import type { SynchronousDatabase } from "./synchronousDatabase.js";
 
 interface Migration {
   id: number;
   name: string;
   checksumSource: string;
   disableForeignKeys?: boolean;
-  apply(database: DatabaseSync): void;
+  apply(database: SynchronousDatabase): void;
 }
 
 interface MigrationRow {
@@ -451,16 +451,16 @@ function migrationChecksum(migration: Migration): string {
     .digest("hex");
 }
 
-function readCount(database: DatabaseSync, table: "companies" | "company_knowledge" | "companies_workspace_migration"): number {
+function readCount(database: SynchronousDatabase, table: "companies" | "company_knowledge" | "companies_workspace_migration"): number {
   const row = database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
   return row.count;
 }
 
-function foreignKeyViolations(database: DatabaseSync): unknown[] {
+function foreignKeyViolations(database: SynchronousDatabase): unknown[] {
   return database.prepare("PRAGMA foreign_key_check").all();
 }
 
-export function runMigrations(database: DatabaseSync, maximumMigrationId = Number.POSITIVE_INFINITY): void {
+export function runMigrations(database: SynchronousDatabase, maximumMigrationId = Number.POSITIVE_INFINITY): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       id INTEGER PRIMARY KEY,
@@ -497,7 +497,7 @@ export function runMigrations(database: DatabaseSync, maximumMigrationId = Numbe
   }
 }
 
-function applyMigration(database: DatabaseSync, migration: Migration): void {
+function applyMigration(database: SynchronousDatabase, migration: Migration): void {
   if (migration.disableForeignKeys) {
     database.exec("PRAGMA foreign_keys = OFF;");
     const state = database.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number };

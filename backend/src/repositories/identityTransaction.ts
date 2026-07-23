@@ -1,11 +1,11 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
 import type { AuthenticationRepositories, AuthenticationTransactionPort, IdentityRepositories, IdentityTransactionPort } from "../identity/application/ports.js";
 import { EmailVerificationRepository } from "./emailVerificationRepository.js";
 import { UserRepository } from "./userRepository.js";
 import { CredentialEnrollmentRepository, LoginThrottleRepository, PasswordCredentialRepository, SessionRepository } from "./authenticationRepository.js";
 
 export class SqliteIdentityTransaction implements IdentityTransactionPort {
-  public constructor(private readonly db: DatabaseSync) {}
+  public constructor(private readonly db: SynchronousDatabase) {}
 
   public execute<T>(operation: (repositories: IdentityRepositories) => T): T {
     if (this.db.isTransaction) throw new Error("Nested identity transactions are not supported.");
@@ -22,7 +22,7 @@ export class SqliteIdentityTransaction implements IdentityTransactionPort {
 }
 
 export class SqliteAuthenticationTransaction implements AuthenticationTransactionPort {
-  public constructor(private readonly db: DatabaseSync) {}
+  public constructor(private readonly db: SynchronousDatabase) {}
   public execute<T>(operation: (repositories: AuthenticationRepositories) => T): T {
     if (this.db.isTransaction) throw new Error("Nested authentication transactions are not supported.");
     this.db.exec("BEGIN IMMEDIATE;");

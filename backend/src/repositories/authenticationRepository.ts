@@ -1,10 +1,10 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
 import type { CredentialEnrollmentRepositoryPort, LoginThrottleRepositoryPort, PasswordCredentialRepositoryPort, SessionRepositoryPort } from "../identity/application/ports.js";
 import type { PasswordCredential, Session } from "../identity/domain/authentication.js";
 import type { CredentialEnrollment } from "../identity/domain/credentialEnrollment.js";
 
 export class PasswordCredentialRepository implements PasswordCredentialRepositoryPort {
-  public constructor(private readonly db: DatabaseSync) {}
+  public constructor(private readonly db: SynchronousDatabase) {}
   public findCurrent(authenticationIdentityId: string): PasswordCredential | null {
     const row=this.db.prepare("SELECT * FROM password_credentials WHERE authentication_identity_id = ? AND state = 'active'").get(authenticationIdentityId) as Record<string,unknown>|undefined;
     return row?{id:String(row.id),authenticationIdentityId:String(row.authentication_identity_id) as PasswordCredential["authenticationIdentityId"],state:row.state as PasswordCredential["state"],algorithm:"scrypt",algorithmVersion:"scrypt-v1",parameters:String(row.parameters),salt:String(row.salt),confirmation:String(row.confirmation),credentialVersion:Number(row.credential_version),createdAt:String(row.created_at),replacedAt:row.replaced_at as string|null,upgradedAt:row.upgraded_at as string|null}:null;
@@ -19,7 +19,7 @@ export class PasswordCredentialRepository implements PasswordCredentialRepositor
 }
 
 export class CredentialEnrollmentRepository implements CredentialEnrollmentRepositoryPort {
-  public constructor(private readonly db: DatabaseSync) {}
+  public constructor(private readonly db: SynchronousDatabase) {}
   public findCurrent(id: string): CredentialEnrollment | null { return this.map(this.db.prepare("SELECT * FROM credential_enrollments WHERE authentication_identity_id=? AND status='pending'").get(id)); }
   public findByDigest(digest: string): CredentialEnrollment | null { return this.map(this.db.prepare("SELECT * FROM credential_enrollments WHERE purpose='credential_enrollment' AND digest_version='sha256-v1' AND proof_digest=?").get(digest)); }
   public create(v: CredentialEnrollment): CredentialEnrollment { this.db.prepare(`INSERT INTO credential_enrollments (id,user_id,authentication_identity_id,purpose,digest_version,proof_digest,status,delivery_status,issued_at,expires_at,consumed_at,superseded_at,invalidated_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(v.id,v.userId,v.authenticationIdentityId,v.purpose,v.digestVersion,v.proofDigest,v.status,v.deliveryStatus,v.issuedAt,v.expiresAt,v.consumedAt,v.supersededAt,v.invalidatedAt,v.updatedAt); return v; }
@@ -29,7 +29,7 @@ export class CredentialEnrollmentRepository implements CredentialEnrollmentRepos
 }
 
 export class SessionRepository implements SessionRepositoryPort {
-  public constructor(private readonly db: DatabaseSync) {}
+  public constructor(private readonly db: SynchronousDatabase) {}
   public findByDigest(d:string):Session|null{return this.map(this.db.prepare("SELECT * FROM sessions WHERE digest_version='sha256-v1' AND identifier_digest=?").get(d));}
   public create(v:Session):Session{this.insert(v);return v;}
   public replace(id:string,state:Session["state"],next:Session):boolean{const changed=this.db.prepare("UPDATE sessions SET state='replaced',replaced_at=? WHERE id=? AND state=?").run(next.issuedAt,id,state).changes;if(changed!==1)return false;this.insert(next);return true;}
@@ -42,7 +42,7 @@ export class SessionRepository implements SessionRepositoryPort {
 }
 
 export class LoginThrottleRepository implements LoginThrottleRepositoryPort {
-  public constructor(private readonly db:DatabaseSync){}
+  public constructor(private readonly db:SynchronousDatabase){}
   public recordFailure(i:string,o:string,at:string,e:string):number{this.db.prepare(`INSERT INTO login_throttles(identity_key,origin_key,failure_count,first_failure_at,last_failure_at,expires_at) VALUES(?,?,1,?,?,?) ON CONFLICT(identity_key,origin_key) DO UPDATE SET failure_count=failure_count+1,last_failure_at=excluded.last_failure_at,expires_at=excluded.expires_at`).run(i,o,at,at,e);return Number((this.db.prepare("SELECT failure_count AS count FROM login_throttles WHERE identity_key=? AND origin_key=?").get(i,o) as {count:number}).count);}
   public isBlocked(i:string,o:string,n:string,m:number):boolean{const r=this.db.prepare("SELECT failure_count AS count FROM login_throttles WHERE identity_key=? AND origin_key=? AND expires_at>?").get(i,o,n) as {count:number}|undefined;return (r?.count??0)>=m;}
   public clear(i:string,o:string):void{this.db.prepare("DELETE FROM login_throttles WHERE identity_key=? AND origin_key=?").run(i,o);}

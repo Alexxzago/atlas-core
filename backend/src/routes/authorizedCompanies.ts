@@ -54,8 +54,11 @@ function workspaceId(req: Request): string {
 
 function exactOrigin(req: Request): boolean {
   try {
-    return typeof req.headers.origin === "string"
-      && new URL(req.headers.origin).origin === `${req.protocol}://${req.headers.host}`;
+    if (typeof req.headers.origin !== "string") return false;
+    const origin = new URL(req.headers.origin).origin;
+    const configured = (process.env.ATLAS_ALLOWED_ORIGINS ?? process.env.ATLAS_VERIFICATION_ORIGIN ?? "")
+      .split(",").map((value) => value.trim()).filter(Boolean);
+    return configured.length > 0 ? configured.some((value) => new URL(value).origin === origin) : origin === `${req.protocol}://${req.headers.host}`;
   } catch { return false; }
 }
 

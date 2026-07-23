@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
 import type { UserRepositoryPort } from "../application/ports/repositories.js";
 import type { NormalizedEmail } from "../identity/domain/email.js";
 import { reconstructUser, type User, type UserId, type UserState } from "../identity/domain/user.js";
@@ -62,7 +62,7 @@ function mapUser(row: UserRow, identities: AuthenticationIdentityRow[]): User {
 }
 
 export class UserRepository implements UserRepositoryPort {
-  public constructor(private readonly db: DatabaseSync) {}
+  public constructor(private readonly db: SynchronousDatabase) {}
 
   public findById(id: UserId): User | null {
     const row = this.db.prepare(`
