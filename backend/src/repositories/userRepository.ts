@@ -83,6 +83,10 @@ export class UserRepository implements UserRepositoryPort {
     return row ? mapUser(row, this.findAuthenticationIdentities(row.id)) : null;
   }
 
+  public count(): number {
+    return Number((this.db.prepare("SELECT COUNT(*) AS count FROM users").get() as { count: number }).count);
+  }
+
   public create(user: User): User {
     const ownsTransaction = !this.db.isTransaction;
     try {

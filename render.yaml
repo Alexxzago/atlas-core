@@ -17,6 +17,22 @@ services:
         sync: false
       - key: ATLAS_VERIFICATION_ORIGIN
         sync: false
+      - key: ATLAS_BOOTSTRAP_SECRET
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_REPLY_TO
+        sync: false
       - key: GEMINI_API_KEY
         sync: false
       - key: FIRECRAWL_API_KEY

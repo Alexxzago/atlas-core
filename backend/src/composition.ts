@@ -12,7 +12,7 @@ import {
 import { createKnowledgeController } from "./controllers/knowledgeController.js";
 import { createOnboardingController } from "./controllers/onboarding.js";
 import { createScrapeController } from "./controllers/scrapeController.js";
-import { createAuthenticationControllers, createRegistrationController, createResendVerificationController, createVerifyEmailController } from "./controllers/identityController.js";
+import { createAuthenticationControllers, createPlatformBootstrapControllers, createRegistrationController, createResendVerificationController, createVerifyEmailController } from "./controllers/identityController.js";
 import { database } from "./config/database.js";
 import { DevelopmentVerificationDelivery, UnavailableVerificationDelivery } from "./identity/infrastructure/developmentVerificationDelivery.js";
 import { ScryptPasswordProvider, SecureRandomProvider, Sha256CredentialEnrollmentHashProvider, Sha256SessionIdentifierProvider, Sha256VerificationHashProvider } from "./identity/infrastructure/securityProviders.js";
@@ -66,6 +66,9 @@ import { InMemoryOperationalExecutionBudget } from "./assistant/application/oper
 import { OperationalAssistantExecutionService } from "./assistant/services/operationalAssistantExecutionService.js";
 import type { AssistantExecutionPort } from "./assistant/application/assistantExecutionPort.js";
 import type { AppRouters } from "./app.js";
+import { smtpConfiguration, SmtpEmailDelivery } from "./providers/smtpEmailDelivery.js";
+import { SqlitePlatformBootstrapTransaction } from "./repositories/platformBootstrapTransaction.js";
+import { PlatformBootstrapService } from "./identity/services/platformBootstrapService.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -78,10 +81,16 @@ const identityTransaction = new SqliteIdentityTransaction(database);
 const randomProvider = new SecureRandomProvider();
 const verificationHashProvider = new Sha256VerificationHashProvider();
 const identityClock = new SystemClock();
+const production=process.env.NODE_ENV==="production";
+if (production && (process.env.ATLAS_BOOTSTRAP_SECRET?.length ?? 0) < 32) throw new Error("Production requires ATLAS_BOOTSTRAP_SECRET with at least 32 characters.");
 const deliverySelection = process.env.ATLAS_VERIFICATION_DELIVERY;
-const verificationDelivery = deliverySelection === "development"
-  ? new DevelopmentVerificationDelivery(process.env.NODE_ENV ?? "", (message) => console.info(message))
-  : new UnavailableVerificationDelivery();
+const useDevelopmentDelivery = !production && deliverySelection !== "smtp";
+const smtpDelivery = useDevelopmentDelivery
+  ? null
+  : new SmtpEmailDelivery(smtpConfiguration());
+const verificationDelivery = useDevelopmentDelivery
+  ? new DevelopmentVerificationDelivery(process.env.NODE_ENV ?? "development", (message) => console.info(message))
+  : smtpDelivery ?? new UnavailableVerificationDelivery();
 const verificationOrigin = process.env.ATLAS_VERIFICATION_ORIGIN ?? "http://localhost:3000";
 const verificationLifetimeMilliseconds = 24 * 60 * 60 * 1000;
 const verificationCooldownMilliseconds = 60 * 1000;
@@ -92,11 +101,13 @@ const resendVerificationService = new ResendEmailVerificationService(identityTra
   verificationLifetimeMilliseconds, verificationCooldownMilliseconds);
 const verifyEmailService = new VerifyEmailService(identityTransaction, verificationHashProvider, identityClock);
 const authenticationService=new AuthenticationService(new SqliteAuthenticationTransaction(database),randomProvider,new Sha256CredentialEnrollmentHashProvider(),new ScryptPasswordProvider(),new Sha256SessionIdentifierProvider(),identityClock,verificationDelivery,verificationOrigin,process.env.NODE_ENV==="production");
-const production=process.env.NODE_ENV==="production";
 const requestOriginPolicy=new ExactRequestOriginPolicy(production?[verificationOrigin]:[verificationOrigin,"http://localhost:5173"],production);
 const authenticationControllers=createAuthenticationControllers(authenticationService,requestOriginPolicy);
-const invitationDelivery=deliverySelection==="development"?new DevelopmentInvitationDelivery(process.env.NODE_ENV??"",message=>console.info(message)):new UnavailableInvitationDelivery();
+const invitationDelivery=useDevelopmentDelivery?new DevelopmentInvitationDelivery(process.env.NODE_ENV??"development",message=>console.info(message)):smtpDelivery??new UnavailableInvitationDelivery();
 const workspaceAdministrationService=new WorkspaceAdministrationService(new SqliteWorkspaceAdministrationTransaction(database),new SecureInvitationProofProvider(),identityClock,invitationDelivery,verificationOrigin);
+const platformBootstrapService = new PlatformBootstrapService(new SqlitePlatformBootstrapTransaction(database), randomProvider,
+  new ScryptPasswordProvider(), new Sha256SessionIdentifierProvider(), identityClock, process.env.ATLAS_BOOTSTRAP_SECRET ?? "");
+const platformBootstrapControllers = createPlatformBootstrapControllers(platformBootstrapService, authenticationService);
 export const authorizationService=new AuthorizationService(new MembershipRepository(database),workspaceRepository);
 export const authenticatedWorkspaceResolver=new WorkspaceResolver(workspaceRepository);
 const assistantProfileService=new AssistantProfileService(new AssistantProfileRepository(database),identityClock);
@@ -119,6 +130,8 @@ export const identityRouter = createIdentityRouter({
   register: createRegistrationController(registrationService),
   resend: createResendVerificationController(resendVerificationService),
   verify: createVerifyEmailController(verifyEmailService),
+  bootstrapStatus: platformBootstrapControllers.status,
+  platformBootstrap: platformBootstrapControllers.bootstrap,
   ...authenticationControllers,
 });
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService));

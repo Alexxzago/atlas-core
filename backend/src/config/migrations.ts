@@ -443,6 +443,25 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 11,
+    name: "0011_platform_bootstrap",
+    checksumSource: "platform-bootstrap-claim-v1|singleton-default-workspace|no-raw-setup-secret",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE platform_bootstrap (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          claimed_by_user_id TEXT,
+          claimed_at TEXT,
+          FOREIGN KEY (claimed_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+          CHECK ((claimed_by_user_id IS NULL AND claimed_at IS NULL)
+            OR (claimed_by_user_id IS NOT NULL AND claimed_at IS NOT NULL))
+        );
+        INSERT INTO platform_bootstrap (singleton, claimed_by_user_id, claimed_at)
+        VALUES (1, NULL, NULL);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

@@ -41,11 +41,13 @@ The import includes `schema_migrations`, tenant records, Knowledge versions/publ
 
 1. Create a Render Web Service from this GitHub repository and select the current branch.
 2. Render discovers `render.yaml`; confirm root directory `backend`, build command `npm ci && npm run build`, start command `npm start`, and health check `/health`.
-3. Add secret environment variables: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `ATLAS_VERIFICATION_ORIGIN`, `GEMINI_API_KEY`, and `FIRECRAWL_API_KEY` when their features are enabled.
+3. Add secret environment variables: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `ATLAS_VERIFICATION_ORIGIN`, `ATLAS_BOOTSTRAP_SECRET`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_REPLY_TO`, `GEMINI_API_KEY`, and `FIRECRAWL_API_KEY` when their features are enabled.
 4. Set non-secret variables: `NODE_ENV=production` and `DATABASE_PROVIDER=libsql`.
 5. Set `ATLAS_VERIFICATION_ORIGIN` to the final HTTPS Vercel origin, for example `https://atlas-portal.vercel.app`.
 6. Set `ATLAS_ALLOWED_ORIGINS` to that same exact origin. Multiple explicit origins are comma-separated only when required.
 7. Deploy, then check `https://YOUR-RENDER-HOST/health` and `https://YOUR-RENDER-HOST/ready`.
+
+`ATLAS_BOOTSTRAP_SECRET` must be a unique secret of at least 32 characters. It authorizes the one-time initial platform claim and must never be sent to browsers, logs, or email. SMTP values configure Nodemailer: `SMTP_SECURE=true` normally uses port 465; `SMTP_SECURE=false` normally uses port 587. `SMTP_FROM` and `SMTP_REPLY_TO` are the sender and support reply address. Production startup fails if the bootstrap secret or any SMTP variable is missing or invalid.
 
 Render free services can sleep after inactivity and their local filesystem is ephemeral. Atlas production data is therefore only in Turso. The first request after sleep can be slow.
 
@@ -60,7 +62,8 @@ Render free services can sleep after inactivity and their local filesystem is ep
 
 ## Smoke Test
 
-1. Open the Vercel HTTPS URL and register/login using the normal portal flow.
+1. Before regular registration, obtain `GET /identity/bootstrap/status` through the same origin. If it returns `{"initialized":false}`, call `POST /identity/bootstrap` exactly once from a trusted operator tool with `x-atlas-bootstrap-secret`, the administrator email, locale, password, and confirmation. Confirm it returns `201`, an authenticated session cookie, and then `{"initialized":true}`. Remove the secret from the operator tool after use.
+2. Open the Vercel HTTPS URL and register/login using the normal portal flow. Confirm verification, credential enrollment, and workspace invitation emails arrive through SMTP.
 2. Create a Workspace and Company, then ingest and publish Knowledge.
 3. Create a ready Assistant Profile and execute an operational request.
 4. Record the Company name and published Knowledge version.

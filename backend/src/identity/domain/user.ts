@@ -98,6 +98,24 @@ export function createPendingUser(input: PendingUserInput): User {
   });
 }
 
+export function createVerifiedUser(input: PendingUserInput): User {
+  return reconstructUser({
+    id: input.userId,
+    status: "active",
+    locale: input.locale,
+    authenticationIdentities: [{
+      id: input.authenticationIdentityId,
+      email: input.email,
+      normalizedEmail: normalizeEmail(createEmailAddress(input.email)),
+      emailVerified: true,
+      createdAt: input.timestamp,
+      updatedAt: input.timestamp,
+    }],
+    createdAt: input.timestamp,
+    updatedAt: input.timestamp,
+  });
+}
+
 export function reconstructUser(state: UserState): User {
   if (state.authenticationIdentities.length === 0) {
     throw new InvalidIdentityStateError("User requires an authentication identity.");

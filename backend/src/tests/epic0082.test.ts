@@ -325,7 +325,7 @@ test("migration 4 upgrades migration-3 identity data and rejects checksum tamper
     const upgraded = createDatabase(path);
     assert.equal(new UserRepository(upgraded).findById(userId("preserved-user"))?.locale, "es");
     assert.equal((upgraded.prepare("SELECT COUNT(*) AS count FROM workspaces WHERE key = 'default'").get() as { count: number }).count, 1);
-    assert.equal((upgraded.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 10);
+    assert.equal((upgraded.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 11);
     upgraded.prepare("UPDATE schema_migrations SET checksum = ? WHERE id = 4").run("tampered");
     upgraded.close();
     assert.throws(() => createDatabase(path), /checksum mismatch/i);

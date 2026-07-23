@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic004.test.ts src/tests/epic005.test.ts src/tests/epic007.test.ts src/tests/epic0081.test.ts src/tests/epic0082.test.ts src/tests/epic0083.test.ts src/tests/epic0084.test.ts src/tests/epic009.domain.test.ts src/tests/epic009.repository.test.ts src/tests/epic009.http.test.ts src/tests/epic0101.test.ts src/tests/epic011.test.ts src/tests/epic011.http.test.ts src/tests/epic012.test.ts src/tests/epic012.http.test.ts src/tests/epic012.http-matrix.test.ts src/tests/epic012.onboarding-evidence.test.ts src/tests/epic012.remediation.test.ts src/tests/epic012.url-security.test.ts src/tests/epic012.authorization-order.test.ts src/tests/epic012.pdf-hostile.test.ts src/tests/epic012.pdf-resource.test.ts src/tests/epic012.concurrency.test.ts src/tests/epic013.test.ts src/tests/epic013.http.test.ts src/tests/epic013.composition.test.ts src/tests/epic014.persistence.test.ts",
+    "test": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic004.test.ts src/tests/epic005.test.ts src/tests/epic007.test.ts src/tests/epic0081.test.ts src/tests/epic0082.test.ts src/tests/epic0083.test.ts src/tests/epic0084.test.ts src/tests/epic009.domain.test.ts src/tests/epic009.repository.test.ts src/tests/epic009.http.test.ts src/tests/epic0101.test.ts src/tests/epic011.test.ts src/tests/epic011.http.test.ts src/tests/epic012.test.ts src/tests/epic012.http.test.ts src/tests/epic012.http-matrix.test.ts src/tests/epic012.onboarding-evidence.test.ts src/tests/epic012.remediation.test.ts src/tests/epic012.url-security.test.ts src/tests/epic012.authorization-order.test.ts src/tests/epic012.pdf-hostile.test.ts src/tests/epic012.pdf-resource.test.ts src/tests/epic012.concurrency.test.ts src/tests/epic013.test.ts src/tests/epic013.http.test.ts src/tests/epic013.composition.test.ts src/tests/epic014.persistence.test.ts src/tests/epic015.bootstrap.test.ts src/tests/smtpEmailDelivery.test.ts",
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -17,9 +17,11 @@
   "dependencies": {
     "@google/genai": "^2.11.0",
     "@libsql/client": "^0.15.15",
+    "@types/nodemailer": "^8.0.1",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "firecrawl": "^4.30.0",
+    "nodemailer": "^9.0.3",
     "pdfjs-dist": "6.1.200"
   },
   "devDependencies": {

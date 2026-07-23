@@ -8,6 +8,7 @@ import { AuthenticationConflict, AuthenticationFailure, type AuthenticationServi
 import { PasswordPolicyError } from "../identity/domain/authentication.js";
 import type { RequestOriginPolicy } from "../identity/infrastructure/requestOriginPolicy.js";
 import { EffectiveRequestAuthorityResolver } from "../identity/infrastructure/requestOriginPolicy.js";
+import { PlatformBootstrapConflict, PlatformBootstrapError, type PlatformBootstrapService } from "../identity/services/platformBootstrapService.js";
 
 function registrationInput(body: unknown): { email: string; locale: Locale } {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new InvalidEmailAddressError();
@@ -81,5 +82,43 @@ export function createVerifyEmailController(service: VerifyEmailService): Reques
     } catch {
       response.status(503).json({ error: "Verification is temporarily unavailable." });
     }
+  };
+}
+
+function bootstrapInput(body: unknown, setupSecret: unknown): { email: string; locale: string; password: string; confirmation: string; setupSecret: string } {
+  const input = record(body);
+  if (Object.keys(input).some((key) => key !== "email" && key !== "locale" && key !== "password" && key !== "confirmation")
+    || typeof input.email !== "string" || (input.locale !== "en" && input.locale !== "es")
+    || typeof input.password !== "string" || typeof input.confirmation !== "string" || typeof setupSecret !== "string") {
+    throw new PlatformBootstrapError();
+  }
+  return { email: input.email, locale: input.locale, password: input.password, confirmation: input.confirmation, setupSecret };
+}
+
+export function createPlatformBootstrapControllers(service: PlatformBootstrapService, authentication: AuthenticationService): Record<"status" | "bootstrap", RequestHandler> {
+  return {
+    status: (request, response) => {
+      if (Object.keys(request.query).length !== 0) { response.status(400).json({ error: "Invalid request." }); return; }
+      try {
+        response.setHeader("Cache-Control", "no-store, private");
+        response.json({ initialized: service.initialized() });
+      } catch {
+        response.status(503).json({ error: "Bootstrap status is temporarily unavailable." });
+      }
+    },
+    bootstrap: async (request, response) => {
+      try {
+        const input = bootstrapInput(request.body, request.headers["x-atlas-bootstrap-secret"]);
+        const grant = await service.bootstrap(input);
+        response.setHeader("set-cookie", cookieValue(authentication, {
+          rawIdentifier: grant.rawSessionIdentifier, csrfToken: grant.csrfToken, csrfGeneration: grant.csrfGeneration, absoluteExpiresAt: grant.absoluteExpiresAt,
+        }));
+        response.status(201).json({ status: "initialized", csrfToken: grant.csrfToken, csrfGeneration: grant.csrfGeneration });
+      } catch (error: unknown) {
+        if (error instanceof PlatformBootstrapConflict) { response.status(409).json({ error: "Atlas is already initialized." }); return; }
+        if (error instanceof PlatformBootstrapError || error instanceof PasswordPolicyError || error instanceof InvalidEmailAddressError) { response.status(400).json({ error: "Invalid bootstrap request." }); return; }
+        response.status(503).json({ error: "Bootstrap is temporarily unavailable." });
+      }
+    },
   };
 }

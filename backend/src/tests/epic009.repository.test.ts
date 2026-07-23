@@ -28,7 +28,7 @@ test("migration 7 creates the constrained indexed schema without bootstrap profi
     { id: 5, checksum: "17e9c535141a010e24e6a0368c271b4450a8d6d910c5f4993c3c83685f298892" },
     { id: 6, checksum: "a4106984a62fab22793896040603f215ae21e628689a68632bf009c65b6b4423" },
   ]);
-  assert.equal((db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 10);
+  assert.equal((db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 11);
   assert.equal((db.prepare("SELECT COUNT(*) AS count FROM assistant_profiles").get() as { count: number }).count, 0);
   const indexes = db.prepare("PRAGMA index_list(assistant_profiles)").all() as Array<{ name: string }>;
   assert.ok(indexes.some((index) => index.name === "idx_assistant_profiles_company_status_created"));
@@ -60,7 +60,7 @@ test("migration 7 upgrades schema 6 data, restarts safely, cascades, and rolls b
     upgraded.close();
 
     const restarted = createDatabase(path);
-    assert.equal((restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 10);
+    assert.equal((restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 11);
     restarted.exec("DROP TABLE assistant_profiles; DELETE FROM schema_migrations WHERE id=7; CREATE TABLE migration_7_blocker(id INTEGER); CREATE INDEX idx_assistant_profiles_company_status_created ON migration_7_blocker(id);");
     restarted.close();
     assert.throws(() => createDatabase(path));
