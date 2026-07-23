@@ -13,3 +13,11 @@ Permitir que una empresa conecte su WhatsApp y tenga un asistente inteligente ca
 - Hacer seguimiento automático.
 
 Versión inicial enfocada en inmobiliarias.
+
+## Documentation
+
+- Vision → docs/VISION.md
+- Architecture → docs/ATLAS_V1_ARCHITECTURE.md
+- Engineering Rules → docs/ATLAS_ENGINEERING_PROMPT.md
+- MVP → docs/MVP.md
+- Production Roadmap → docs/roadmap/ROADMAP_PRODUCCION_MVP.md

@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
 import { randomUUID } from "node:crypto";
 import type { WorkspaceRepositoryPort } from "../application/ports/repositories.js";
 import { database } from "../config/database.js";
@@ -17,7 +17,7 @@ function mapWorkspace(row: WorkspaceRow): Workspace {
 }
 
 export class WorkspaceRepository implements WorkspaceRepositoryPort {
-  public constructor(private readonly db: DatabaseSync) {}
+  public constructor(private readonly db: SynchronousDatabase) {}
 
   public findById(workspaceId: number): Workspace | null {
     const row = this.db.prepare(`

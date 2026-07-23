@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
 import type { AssistantProfileRepositoryPort, CreateAssistantProfileResult, ListActiveAssistantProfilesResult, UpdateAssistantProfileResult } from "../assistant/application/ports.js";
 import { reconstructAssistantProfile, type AssistantProfile, type AssistantProfileId, type AssistantLanguage, type AssistantProfileStatus, type AssistantTone } from "../assistant/domain/assistantProfile.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
@@ -57,7 +57,7 @@ function isNameConflict(error: unknown): boolean {
 }
 
 export class AssistantProfileRepository implements AssistantProfileRepositoryPort {
-  public constructor(private readonly db: DatabaseSync) {}
+  public constructor(private readonly db: SynchronousDatabase) {}
 
   public listActive(context: WorkspaceContext, companyId: number): ListActiveAssistantProfilesResult {
     const visible = this.db.prepare("SELECT 1 FROM companies WHERE workspace_id = ? AND id = ?")

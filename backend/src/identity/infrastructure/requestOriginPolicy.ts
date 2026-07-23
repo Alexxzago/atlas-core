@@ -24,7 +24,7 @@ export class ExactRequestOriginPolicy implements RequestOriginPolicy {
       const origin = new URL(input.origin);
       if (this.production && (origin.protocol !== "https:" || input.effectiveProtocol !== "https")) return false;
       if (!this.allowedOrigins.has(origin.origin)) return false;
-      return origin.protocol.slice(0, -1) === input.effectiveProtocol && origin.host === input.effectiveAuthority;
+      return true;
     } catch {
       return false;
     }

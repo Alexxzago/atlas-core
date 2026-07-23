@@ -13,13 +13,14 @@ export class ApiError extends Error {
 
 type AuthenticationRecovery = (method: string) => Promise<boolean>;
 let authenticationRecovery: AuthenticationRecovery | null = null;
+const apiBaseUrl = (import.meta.env?.VITE_ATLAS_API_BASE_URL ?? "/api").replace(/\/$/, "");
 
 export function setAuthenticationRecovery(recovery: AuthenticationRecovery | null): void {
   authenticationRecovery = recovery;
 }
 
 async function request<T>(path: string, options?: RequestInit, recoveryAttempted = false): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
     ...options,
     credentials: "same-origin",
     headers: { "content-type": "application/json", ...options?.headers },

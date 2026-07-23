@@ -4,9 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic004.test.ts src/tests/epic005.test.ts src/tests/epic007.test.ts src/tests/epic0081.test.ts src/tests/epic0082.test.ts src/tests/epic0083.test.ts src/tests/epic0084.test.ts src/tests/epic009.domain.test.ts src/tests/epic009.repository.test.ts src/tests/epic009.http.test.ts src/tests/epic0101.test.ts src/tests/epic011.test.ts src/tests/epic011.http.test.ts src/tests/epic012.test.ts src/tests/epic012.http.test.ts src/tests/epic012.http-matrix.test.ts src/tests/epic012.onboarding-evidence.test.ts src/tests/epic012.remediation.test.ts src/tests/epic012.url-security.test.ts src/tests/epic012.authorization-order.test.ts src/tests/epic012.pdf-hostile.test.ts src/tests/epic012.pdf-resource.test.ts src/tests/epic012.concurrency.test.ts src/tests/epic013.test.ts src/tests/epic013.http.test.ts src/tests/epic013.composition.test.ts",
+    "test": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic004.test.ts src/tests/epic005.test.ts src/tests/epic007.test.ts src/tests/epic0081.test.ts src/tests/epic0082.test.ts src/tests/epic0083.test.ts src/tests/epic0084.test.ts src/tests/epic009.domain.test.ts src/tests/epic009.repository.test.ts src/tests/epic009.http.test.ts src/tests/epic0101.test.ts src/tests/epic011.test.ts src/tests/epic011.http.test.ts src/tests/epic012.test.ts src/tests/epic012.http.test.ts src/tests/epic012.http-matrix.test.ts src/tests/epic012.onboarding-evidence.test.ts src/tests/epic012.remediation.test.ts src/tests/epic012.url-security.test.ts src/tests/epic012.authorization-order.test.ts src/tests/epic012.pdf-hostile.test.ts src/tests/epic012.pdf-resource.test.ts src/tests/epic012.concurrency.test.ts src/tests/epic013.test.ts src/tests/epic013.http.test.ts src/tests/epic013.composition.test.ts src/tests/epic014.persistence.test.ts",
     "typecheck": "tsc --noEmit",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +16,7 @@
   "type": "module",
   "dependencies": {
     "@google/genai": "^2.11.0",
+    "@libsql/client": "^0.15.15",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "firecrawl": "^4.30.0",
