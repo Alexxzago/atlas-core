@@ -20,11 +20,18 @@ export interface AssistantExecutionKnowledge {
   readonly faq: readonly Readonly<{ question: string; answer: string }>[];
 }
 
+export interface AssistantConversationHistoryEntry {
+  readonly direction: "inbound" | "outbound";
+  readonly content: string;
+  readonly createdAt: string;
+}
+
 export interface AssistantExecutionRequest {
   readonly purpose: "preview" | "legacy_chat" | "operational_execution";
   readonly behavior: Readonly<AssistantExecutionBehavior>;
   readonly knowledge: Readonly<AssistantExecutionKnowledge>;
   readonly message: string;
+  readonly history?: readonly AssistantConversationHistoryEntry[];
 }
 
 export type AssistantExecutionResult = Readonly<
@@ -66,5 +73,6 @@ export function freezeAssistantExecution(value: AssistantExecutionRequest): Assi
     behavior: Object.freeze({ ...value.behavior }),
     knowledge,
     message: value.message,
+    history: Object.freeze((value.history ?? []).map((entry) => Object.freeze({ ...entry }))),
   });
 }

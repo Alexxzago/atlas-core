@@ -71,6 +71,9 @@ import { SqlitePlatformBootstrapTransaction } from "./repositories/platformBoots
 import { PlatformBootstrapService } from "./identity/services/platformBootstrapService.js";
 import { ConversationRepository } from "./repositories/conversationRepository.js";
 import { ConversationService } from "./conversation/services/conversationService.js";
+import { AssistantExecutionRecordRepository } from "./repositories/assistantExecutionRecordRepository.js";
+import { OperationalAssistantRuntime } from "./assistant/services/operationalAssistantRuntime.js";
+import { InMemoryConversationTurnLock, OperationalConversationTurnService } from "./assistant/services/operationalConversationTurnService.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -114,6 +117,7 @@ export const authorizationService=new AuthorizationService(new MembershipReposit
 export const authenticatedWorkspaceResolver=new WorkspaceResolver(workspaceRepository);
 const assistantProfileService=new AssistantProfileService(new AssistantProfileRepository(database),identityClock);
 export const conversationService = new ConversationService(new ConversationRepository(database), identityClock);
+export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock), new InMemoryConversationTurnLock(), "gemini", 20);
 const companyKnowledgeService=new FrozenKnowledgeService(companyRepository,new CompanyKnowledgeRepository(database),new SecurePublicUrlProvider(),new WorkerPdfTextExtractor(),new GeminiKnowledgeFactExtractor(geminiProvider),identityClock);
 const companyKnowledgeControllers=createCompanyKnowledgeControllers(companyKnowledgeService);
 const onboardingService = new OnboardingService(companyRepository,knowledgeRepository,firecrawlProvider,geminiProvider,cleanMarkdown,new FileMarkdownDebugStore(resolve(repositoryRoot,"knowledge")),companyKnowledgeService);
@@ -139,8 +143,9 @@ export const identityRouter = createIdentityRouter({
 });
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));
 function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
-  const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), execution);
-  const operational = new OperationalAssistantExecutionService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), execution, new InMemoryOperationalExecutionBudget());
+  const runtime = new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), identityClock);
+  const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, "gemini");
+  const operational = new OperationalAssistantExecutionService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, new InMemoryOperationalExecutionBudget(), "gemini");
   return createAuthorizedCompaniesRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,controllers:{list:context=>createListCompaniesController(companyService,context),create:context=>createCompanyController(companyService,context),get:context=>createGetCompanyController(companyService,context),update:context=>createUpdateCompanyController(companyService,context),delete:context=>createDeleteCompanyController(companyService,context),onboard:(context,actor)=>createOnboardingController(onboardingService,context,actor)},assistantControllers:{list:context=>createListAssistantProfilesController(assistantProfileService,context),create:context=>createAssistantProfileController(assistantProfileService,context),get:context=>createGetAssistantProfileController(assistantProfileService,context),update:context=>createUpdateAssistantProfileController(assistantProfileService,context),transition:context=>createTransitionAssistantProfileController(assistantProfileService,context),preview:context=>createAssistantPreviewController(preview,context),execution:context=>createOperationalAssistantExecutionController(operational,context)},knowledgeControllers:companyKnowledgeControllers});
 }
 

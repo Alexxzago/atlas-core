@@ -5,6 +5,7 @@ import express, { type RequestHandler } from "express";
 import type { AssistantExecutionRequest, AssistantExecutionResult } from "../assistant/application/assistantExecution.js";
 import { AnswerGenerationUnavailableError } from "../assistant/application/assistantExecution.js";
 import { AssistantPreviewService } from "../assistant/services/assistantPreviewService.js";
+import { OperationalAssistantRuntime } from "../assistant/services/operationalAssistantRuntime.js";
 import { AssistantProfileService } from "../assistant/services/assistantProfileService.js";
 import { AtlasAgent } from "../agents/atlas.js";
 import { createDatabase } from "../config/database.js";
@@ -15,6 +16,7 @@ import { SecureRandomProvider, ScryptPasswordProvider, Sha256CredentialEnrollmen
 import { SystemClock } from "../identity/infrastructure/systemClock.js";
 import { AuthenticationService } from "../identity/services/authenticationService.js";
 import { AssistantProfileRepository } from "../repositories/assistantProfileRepository.js";
+import { AssistantExecutionRecordRepository } from "../repositories/assistantExecutionRecordRepository.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
 import { SqliteAuthenticationTransaction } from "../repositories/identityTransaction.js";
 import { KnowledgeRepository } from "../repositories/knowledgeRepository.js";
@@ -88,7 +90,7 @@ test("real Assistant Preview endpoint freezes authentication, authorization, HTT
   const foreignProfile = createProfile(foreignCompany.id, true);
 
   const generator = new ControlledGenerator();
-  const previewService = new AssistantPreviewService(companies, knowledge, profiles, new AtlasAgent(generator));
+  const previewService = new AssistantPreviewService(companies, knowledge, profiles, new OperationalAssistantRuntime(new AtlasAgent(generator), new AssistantExecutionRecordRepository(database), new SystemClock()), "test");
   const noop: RequestHandler = (_req, res) => { res.status(501).send(); };
   const app = express(); app.use(express.json());
   app.use("/workspaces", createAuthorizedCompaniesRouter({ authentication, users, authorization: new AuthorizationService(memberships, workspaces), resolver: new WorkspaceResolver(workspaces), controllers: { list: () => noop, create: () => noop, get: () => noop, update: () => noop, delete: () => noop, onboard: () => noop }, assistantControllers: { list: () => noop, create: () => noop, get: () => noop, update: () => noop, transition: () => noop, preview: (trusted) => createAssistantPreviewController(previewService, trusted) } }));

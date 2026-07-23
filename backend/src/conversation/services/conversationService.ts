@@ -70,7 +70,7 @@ export class ConversationService {
     if (!sender || sender.conversationId !== current.id) throw new ConversationNotFoundError("Conversation participant was not found.");
     const message = reconstructConversationMessage({
       id: conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`), conversationId: current.id, senderParticipantId: sender.id,
-      direction: input.direction, content: input.content, idempotencyKey: input.idempotencyKey, createdAt: this.clock.now(),
+      direction: input.direction, content: input.content, idempotencyKey: input.idempotencyKey, executionRecordId: input.executionRecordId, createdAt: this.clock.now(),
     });
     const created = this.conversations.createMessage(context, current.companyId, message);
     if (!created) throw new ConversationNotFoundError("Conversation was not found.");
@@ -108,12 +108,13 @@ function participantInput(value: unknown): { type: string; reference: string | n
   return { type: record.type, reference: record.reference === undefined ? null : record.reference };
 }
 
-function messageInput(value: unknown): { senderParticipantId: ReturnType<typeof conversationParticipantId>; direction: "inbound" | "outbound"; content: string; idempotencyKey: string | null } {
-  const record = inputRecord(value, new Set(["senderParticipantId", "direction", "content", "idempotencyKey"]));
+function messageInput(value: unknown): { senderParticipantId: ReturnType<typeof conversationParticipantId>; direction: "inbound" | "outbound"; content: string; idempotencyKey: string | null; executionRecordId: string | null } {
+  const record = inputRecord(value, new Set(["senderParticipantId", "direction", "content", "idempotencyKey", "executionRecordId"]));
   if (typeof record.senderParticipantId !== "string" || typeof record.direction !== "string" || typeof record.content !== "string") throw new ConversationValidationError("Message is invalid.");
   if (record.idempotencyKey !== undefined && record.idempotencyKey !== null && typeof record.idempotencyKey !== "string") throw new ConversationValidationError("Message idempotency key is invalid.");
+  if (record.executionRecordId !== undefined && record.executionRecordId !== null && typeof record.executionRecordId !== "string") throw new ConversationValidationError("Message execution record ID is invalid.");
   try {
-    return { senderParticipantId: conversationParticipantId(record.senderParticipantId), direction: conversationMessageDirection(record.direction), content: record.content, idempotencyKey: record.idempotencyKey === undefined ? null : record.idempotencyKey };
+    return { senderParticipantId: conversationParticipantId(record.senderParticipantId), direction: conversationMessageDirection(record.direction), content: record.content, idempotencyKey: record.idempotencyKey === undefined ? null : record.idempotencyKey, executionRecordId: record.executionRecordId === undefined ? null : record.executionRecordId };
   } catch { throw new ConversationValidationError("Message is invalid."); }
 }
 

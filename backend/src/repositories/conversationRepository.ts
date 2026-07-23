@@ -5,11 +5,11 @@ import type { WorkspaceContext } from "../types/workspaceContext.js";
 
 interface ConversationRow { id:string; company_id:number; state:ConversationState; created_at:string; updated_at:string; closed_at:string|null; }
 interface ParticipantRow { id:string; conversation_id:string; participant_type:string; reference:string|null; created_at:string; }
-interface MessageRow { id:string; conversation_id:string; sender_participant_id:string; direction:"inbound"|"outbound"; content:string; idempotency_key:string|null; created_at:string; }
+interface MessageRow { id:string; conversation_id:string; sender_participant_id:string; direction:"inbound"|"outbound"; content:string; idempotency_key:string|null; assistant_execution_record_id:string|null; created_at:string; }
 
 function conversation(row: ConversationRow): Conversation { return reconstructConversation({ id: row.id as ConversationId, companyId: row.company_id, state: row.state, createdAt: row.created_at, updatedAt: row.updated_at, closedAt: row.closed_at }); }
 function participant(row: ParticipantRow): ConversationParticipant { return reconstructConversationParticipant({ id: row.id as ConversationParticipantId, conversationId: row.conversation_id as ConversationId, type: row.participant_type, reference: row.reference, createdAt: row.created_at }); }
-function message(row: MessageRow): ConversationMessage { return reconstructConversationMessage({ id: row.id as ConversationMessageId, conversationId: row.conversation_id as ConversationId, senderParticipantId: row.sender_participant_id as ConversationParticipantId, direction: row.direction, content: row.content, idempotencyKey: row.idempotency_key, createdAt: row.created_at }); }
+function message(row: MessageRow): ConversationMessage { return reconstructConversationMessage({ id: row.id as ConversationMessageId, conversationId: row.conversation_id as ConversationId, senderParticipantId: row.sender_participant_id as ConversationParticipantId, direction: row.direction, content: row.content, idempotencyKey: row.idempotency_key, executionRecordId: row.assistant_execution_record_id, createdAt: row.created_at }); }
 
 export class ConversationRepository implements ConversationRepositoryPort {
   public constructor(private readonly db: SynchronousDatabase) {}
@@ -42,7 +42,7 @@ export class ConversationRepository implements ConversationRepositoryPort {
   }
 
   public createMessage(context: WorkspaceContext, companyId: number, value: ConversationMessage): ConversationMessage | null {
-    const result = this.db.prepare("INSERT INTO conversation_messages(id,conversation_id,sender_participant_id,direction,content,idempotency_key,created_at) SELECT ?,c.id,p.id,?,?,?,? FROM conversations c JOIN conversation_participants p ON p.id=? AND p.conversation_id=c.id JOIN companies co ON co.id=c.company_id WHERE co.workspace_id=? AND c.company_id=? AND c.id=?").run(value.id, value.direction, value.content, value.idempotencyKey, value.createdAt, value.senderParticipantId, context.workspaceId, companyId, value.conversationId);
+    const result = this.db.prepare("INSERT INTO conversation_messages(id,conversation_id,sender_participant_id,direction,content,idempotency_key,assistant_execution_record_id,created_at) SELECT ?,c.id,p.id,?,?,?,?,? FROM conversations c JOIN conversation_participants p ON p.id=? AND p.conversation_id=c.id JOIN companies co ON co.id=c.company_id LEFT JOIN assistant_execution_records r ON r.id=? AND r.company_id=c.company_id WHERE co.workspace_id=? AND c.company_id=? AND c.id=? AND (? IS NULL OR r.id IS NOT NULL)").run(value.id, value.direction, value.content, value.idempotencyKey, value.executionRecordId, value.createdAt, value.senderParticipantId, value.executionRecordId, context.workspaceId, companyId, value.conversationId, value.executionRecordId);
     return result.changes === 1 ? this.findMessage(context, companyId, value.id) : null;
   }
 

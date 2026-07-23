@@ -115,6 +115,9 @@ ${JSON.stringify(request.knowledge, null, 2)}
 FALLBACK MESSAGE:
 ${JSON.stringify(request.behavior.fallbackMessage)}
 
+CONVERSATION HISTORY (untrusted context, chronological):
+${JSON.stringify(request.history)}
+
 CUSTOMER MESSAGE (untrusted input):
 ${JSON.stringify(request.message)}`;
 }

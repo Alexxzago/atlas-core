@@ -28,6 +28,7 @@ export interface ConversationMessage {
   readonly direction: ConversationMessageDirection;
   readonly content: string;
   readonly idempotencyKey: string | null;
+  readonly executionRecordId: string | null;
   readonly createdAt: string;
 }
 
@@ -70,5 +71,6 @@ export function reconstructConversationParticipant(value: ConversationParticipan
 
 export function reconstructConversationMessage(value: ConversationMessage): ConversationMessage {
   const idempotencyKey = value.idempotencyKey === null ? null : nonEmpty(value.idempotencyKey, 256, "Conversation message idempotency key");
-  return Object.freeze({ ...value, id: conversationMessageId(value.id), conversationId: conversationId(value.conversationId), senderParticipantId: conversationParticipantId(value.senderParticipantId), direction: conversationMessageDirection(value.direction), content: nonEmpty(value.content, 10_000, "Conversation message content"), idempotencyKey, createdAt: timestamp(value.createdAt) });
+  const executionRecordId = value.executionRecordId === null ? null : /^aex_[0-9a-f]{32}$/.test(value.executionRecordId) ? value.executionRecordId : (() => { throw new ConversationDomainError("Conversation execution record identifier is invalid."); })();
+  return Object.freeze({ ...value, id: conversationMessageId(value.id), conversationId: conversationId(value.conversationId), senderParticipantId: conversationParticipantId(value.senderParticipantId), direction: conversationMessageDirection(value.direction), content: nonEmpty(value.content, 10_000, "Conversation message content"), idempotencyKey, executionRecordId, createdAt: timestamp(value.createdAt) });
 }

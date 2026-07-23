@@ -31,7 +31,7 @@ function participant(conversationIdentifier: ReturnType<typeof conversationId>, 
 }
 
 function message(conversationIdentifier: ReturnType<typeof conversationId>, senderParticipantId: ReturnType<typeof conversationParticipantId>, id = conversationMessageId("cmsg_00000000000000000000000000000001")) {
-  return reconstructConversationMessage({ id, conversationId: conversationIdentifier, senderParticipantId, direction: "inbound", content: "Hello", idempotencyKey: null, createdAt });
+  return reconstructConversationMessage({ id, conversationId: conversationIdentifier, senderParticipantId, direction: "inbound", content: "Hello", idempotencyKey: null, executionRecordId: null, createdAt });
 }
 
 test("EPIC-016.2 persists neutral conversations, participants, and messages scoped to their Company", () => {

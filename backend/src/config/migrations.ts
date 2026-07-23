@@ -535,6 +535,21 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 14,
+    name: "0014_conversation_execution_record_link",
+    checksumSource: "conversation-outbound-execution-record-reference-v1",
+    apply(database): void {
+      database.exec(`
+        ALTER TABLE conversation_messages
+        ADD COLUMN assistant_execution_record_id TEXT
+          REFERENCES assistant_execution_records(id) ON DELETE SET NULL;
+        CREATE INDEX idx_conversation_messages_execution_record
+          ON conversation_messages(assistant_execution_record_id)
+          WHERE assistant_execution_record_id IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {
