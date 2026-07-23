@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
   authenticatedPortalReducer, canCreateCompany, initialAuthenticatedPortalState, markReadyDisabled,
   missingReadyFields, visibleTransitions, buildAssistantProfileInput, type AssistantProfileFormValues,
-  isCurrentIntent, shouldApplyWorkspaceRefresh, type AuthenticatedPortalState,
+  initialWorkspace, isCurrentIntent, shouldApplyWorkspaceRefresh, type AuthenticatedPortalState,
   type ProfileMutationContext, type ProfileMutationOperation, type RequestContext,
 } from "./authenticatedPortalState.ts";
 import type { AssistantProfile, Company, WorkspaceSummary } from "../types/api.ts";
@@ -56,6 +56,13 @@ test("a Workspace list failure leaves loading and exposes the error state", () =
 test("a successful Workspace create refresh can incorporate the server list without selecting it", () => {
   const state = authenticatedPortalReducer(initialAuthenticatedPortalState, { type: "workspacesLoaded", workspaces: [workspaceA] });
   assert.equal(state.workspacesLoading, false); assert.deepEqual(state.workspaces, [workspaceA]); assert.equal(state.selectedWorkspace, null);
+});
+
+test("a persisted valid Workspace is restored and a sole active Workspace is selected automatically", () => {
+  assert.equal(initialWorkspace([workspaceA, workspaceB], workspaceB)?.id, workspaceB.id);
+  assert.equal(initialWorkspace([workspaceA], null)?.id, workspaceA.id);
+  assert.equal(initialWorkspace([workspaceA], { ...workspaceB })?.id, workspaceA.id);
+  assert.equal(initialWorkspace([workspaceA, workspaceB], null), null);
 });
 
 test("Workspace create uses the relative proxy with same-origin credentials and CSRF", async () => {

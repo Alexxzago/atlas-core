@@ -134,7 +134,7 @@ export const identityRouter = createIdentityRouter({
   platformBootstrap: platformBootstrapControllers.bootstrap,
   ...authenticationControllers,
 });
-export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService));
+export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));
 function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
   const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), execution);
   const operational = new OperationalAssistantExecutionService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), execution, new InMemoryOperationalExecutionBudget());

@@ -19,6 +19,20 @@ import { RegistrationService } from "../identity/services/registrationService.js
 import { ResendEmailVerificationService } from "../identity/services/resendEmailVerificationService.js";
 import { VerifyEmailService } from "../identity/services/verifyEmailService.js";
 import { InMemoryVerificationDelivery } from "../identity/infrastructure/testingAdapters.js";
+import { createWorkspaceAdministrationControllers } from "../controllers/workspaceAdministrationController.js";
+import { createCompanyController, createDeleteCompanyController, createGetCompanyController, createListCompaniesController, createUpdateCompanyController } from "../controllers/companyController.js";
+import { CompanyRepository } from "../repositories/companyRepository.js";
+import { UserRepository } from "../repositories/userRepository.js";
+import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
+import { MembershipRepository } from "../repositories/workspaceAdministrationRepository.js";
+import { SqliteWorkspaceAdministrationTransaction } from "../repositories/workspaceAdministrationTransaction.js";
+import { createWorkspacesRouter } from "../routes/workspaces.js";
+import { createAuthorizedCompaniesRouter } from "../routes/authorizedCompanies.js";
+import { WorkspaceAdministrationService } from "../workspace/services/workspaceAdministrationService.js";
+import { AuthorizationService } from "../workspace/services/authorizationService.js";
+import { WorkspaceResolver } from "../workspace/services/workspaceResolver.js";
+import { SecureInvitationProofProvider } from "../workspace/infrastructure/invitationProviders.js";
+import { CompanyService } from "../services/companyService.js";
 
 const secret = "bootstrap-secret-that-is-longer-than-thirty-two-characters";
 
@@ -107,6 +121,47 @@ test("bootstrap status and creation endpoint expose only initialized state and i
     assert.equal((await fetch(`${url}/bootstrap`, { method: "POST", headers: { "content-type": "application/json", "x-atlas-bootstrap-secret": secret }, body: JSON.stringify({ email: "second@example.com", locale: "en", password: "second administrator password", confirmation: "second administrator password" }) })).status, 409);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    database.close();
+  }
+});
+
+test("bootstrap owner keeps the default Workspace through login, proxy-origin selection, companies, and Workspace creation", async () => {
+  const { database, authentication, bootstrap, clock } = setup();
+  const initial = await bootstrap.bootstrap({ email: "owner@example.com", locale: "en", password: "first administrator password", confirmation: "first administrator password", setupSecret: secret });
+  const login = await authentication.login("owner@example.com", "first administrator password", "127.0.0.1");
+  const workspaces = new WorkspaceRepository(database);
+  const memberships = new MembershipRepository(database);
+  const workspaceAdministration = new WorkspaceAdministrationService(new SqliteWorkspaceAdministrationTransaction(database), new SecureInvitationProofProvider(), clock, { async deliver() { return "accepted" as const; } }, "https://portal.example.test");
+  const policy = new ExactRequestOriginPolicy(["https://portal.example.test"], false);
+  const previousAllowedOrigins = process.env.ATLAS_ALLOWED_ORIGINS;
+  process.env.ATLAS_ALLOWED_ORIGINS = "https://portal.example.test";
+  const companies = new CompanyService(new CompanyRepository(database));
+  const unavailable = (_request: express.Request, response: express.Response): void => { response.status(501).end(); };
+  const app = express();
+  app.use(express.json());
+  app.use("/workspaces", createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministration, authentication, policy)));
+  app.use("/workspaces", createAuthorizedCompaniesRouter({ authentication, users: new UserRepository(database), authorization: new AuthorizationService(memberships, workspaces), resolver: new WorkspaceResolver(workspaces), controllers: { list: (context) => createListCompaniesController(companies, context), create: (context) => createCompanyController(companies, context), get: (context) => createGetCompanyController(companies, context), update: (context) => createUpdateCompanyController(companies, context), delete: (context) => createDeleteCompanyController(companies, context), onboard: () => unavailable }, assistantControllers: { list: () => unavailable, create: () => unavailable, get: () => unavailable, update: () => unavailable, transition: () => unavailable, preview: () => unavailable } }));
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => { server.once("listening", resolve); server.once("error", reject); });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const headers = { "content-type": "application/json", cookie: `${authentication.cookieName()}=${encodeURIComponent(login.rawIdentifier)}`, origin: "https://portal.example.test", "sec-fetch-site": "same-origin", "x-csrf-token": login.csrfToken };
+  try {
+    assert.ok(authentication.current(initial.rawSessionIdentifier));
+    const listed = await fetch(`${base}/workspaces`, { headers });
+    assert.equal(listed.status, 200);
+    const [defaultWorkspace] = await listed.json() as Array<{ id: string; role: string }>;
+    assert.ok(defaultWorkspace); assert.equal(defaultWorkspace.role, "owner");
+    assert.deepEqual(await (await fetch(`${base}/workspaces/selected`, { headers })).json(), defaultWorkspace);
+    assert.equal((await fetch(`${base}/workspaces/${defaultWorkspace.id}/select`, { method: "POST", headers, body: "{}" })).status, 200);
+    assert.deepEqual(await (await fetch(`${base}/workspaces/${defaultWorkspace.id}/companies`, { headers })).json(), []);
+    assert.equal((await fetch(`${base}/workspaces/${defaultWorkspace.id}/companies`, { method: "POST", headers, body: JSON.stringify({ name: "Default Company", website: "https://default-company.test" }) })).status, 201);
+    assert.equal((await fetch(`${base}/workspaces`, { method: "POST", headers, body: JSON.stringify({ name: "Another Workspace" }) })).status, 201);
+    assert.equal((await fetch(`${base}/workspaces/wsp_missing/select`, { method: "POST", headers, body: "{}" })).status, 404);
+    assert.equal((await fetch(`${base}/workspaces/wsp_missing/companies`, { headers })).status, 404);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    if (previousAllowedOrigins === undefined) delete process.env.ATLAS_ALLOWED_ORIGINS;
+    else process.env.ATLAS_ALLOWED_ORIGINS = previousAllowedOrigins;
     database.close();
   }
 });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import { ApiError, atlasApi } from "../api/atlasApi";
 import { useI18n } from "../i18n/I18nContext";
-import { authenticatedPortalReducer, canCreateCompany, initialAuthenticatedPortalState, isCurrentIntent,
+import { authenticatedPortalReducer, canCreateCompany, initialAuthenticatedPortalState, initialWorkspace, isCurrentIntent,
   type ProfileMutationContext, type ProfileMutationOperation, type RequestContext } from "../state/authenticatedPortalState";
 import type { AssistantProfile, AssistantProfileStatus, CompanyInput, CreateAssistantProfileInput, UpdateAssistantProfileInput, WorkspaceSummary } from "../types/api";
 import { AssistantProfilesPanel } from "./AssistantProfilesPanel";
@@ -19,6 +19,7 @@ export function AuthenticatedCompanyPortal({ csrf, email, onPassword, onLogout }
   const [state, dispatch] = useReducer(authenticatedPortalReducer, initialAuthenticatedPortalState);
   const sequence = useRef(0);
   const workspaceSelectionIntent = useRef(0);
+  const initialWorkspaceResolved = useRef(false);
   const companySelectionIntent = useRef(0);
   const workspaceAbort = useRef<AbortController | null>(null);
   const companiesAbort = useRef<AbortController | null>(null);
@@ -74,6 +75,17 @@ export function AuthenticatedCompanyPortal({ csrf, email, onPassword, onLogout }
       dispatch({ type: "workspaceSelectionNotFound", request });
     }
   };
+
+  useEffect(() => {
+    if (state.workspacesLoading || state.workspaceError || initialWorkspaceResolved.current) return;
+    initialWorkspaceResolved.current = true;
+    void (async () => {
+      let persisted: WorkspaceSummary | null = null;
+      try { persisted = await atlasApi.selectedWorkspace(); } catch { /* The single-workspace fallback remains safe. */ }
+      const workspace = initialWorkspace(state.workspaces, persisted);
+      if (workspace) await selectWorkspace(workspace.id);
+    })();
+  }, [state.workspacesLoading, state.workspaceError, state.workspaces]);
 
   const loadProfiles = async (workspaceId: string, companyId: number, generation: number): Promise<void> => {
     profilesAbort.current?.abort(); const controller = new AbortController(); profilesAbort.current = controller;

@@ -167,6 +167,11 @@ export function canCreateCompany(state: AuthenticatedPortalState): boolean {
   return state.selectedWorkspace !== null;
 }
 
+export function initialWorkspace(workspaces: WorkspaceSummary[], persisted: WorkspaceSummary | null): WorkspaceSummary | null {
+  const current = persisted && workspaces.find((workspace) => workspace.id === persisted.id);
+  return current ?? (workspaces.length === 1 ? workspaces[0] ?? null : null);
+}
+
 export function authenticatedPortalReducer(state: AuthenticatedPortalState, action: Action): AuthenticatedPortalState {
   switch (action.type) {
     case "workspacesLoaded": return { ...state, workspaces: action.workspaces, workspacesLoading: false, workspaceError: false };
