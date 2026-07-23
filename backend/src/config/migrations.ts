@@ -462,6 +462,79 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 12,
+    name: "0012_operational_assistant_runtime",
+    checksumSource: "assistant-execution-records-v1|profile-runtime-snapshots-v1|published-knowledge-reference-v1|no-input-persistence",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE assistant_execution_records (
+          id TEXT PRIMARY KEY,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          assistant_profile_id TEXT NOT NULL REFERENCES assistant_profiles(id) ON DELETE CASCADE,
+          profile_snapshot_json TEXT NOT NULL,
+          knowledge_version_id TEXT NOT NULL REFERENCES company_knowledge_versions(id) ON DELETE CASCADE,
+          provider TEXT NOT NULL,
+          purpose TEXT NOT NULL CHECK (purpose IN ('preview', 'operational_execution')),
+          state TEXT NOT NULL CHECK (state IN ('started', 'answered', 'safe_fallback', 'failed')),
+          fallback_used INTEGER NOT NULL CHECK (fallback_used IN (0, 1)),
+          result TEXT,
+          input_tokens INTEGER CHECK (input_tokens IS NULL OR input_tokens >= 0),
+          output_tokens INTEGER CHECK (output_tokens IS NULL OR output_tokens >= 0),
+          error_code TEXT,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          duration_milliseconds INTEGER,
+          CHECK ((state = 'started' AND completed_at IS NULL AND duration_milliseconds IS NULL AND result IS NULL AND error_code IS NULL)
+            OR (state IN ('answered', 'safe_fallback') AND completed_at IS NOT NULL AND duration_milliseconds >= 0 AND result IS NOT NULL AND error_code IS NULL)
+            OR (state = 'failed' AND completed_at IS NOT NULL AND duration_milliseconds >= 0 AND result IS NULL AND error_code IS NOT NULL))
+        );
+        CREATE INDEX idx_assistant_execution_records_company_started
+          ON assistant_execution_records(company_id, started_at DESC, id DESC);
+        CREATE INDEX idx_assistant_execution_records_profile_started
+          ON assistant_execution_records(assistant_profile_id, started_at DESC, id DESC);
+      `);
+    },
+  },
+  {
+    id: 13,
+    name: "0013_conversation_domain_foundation",
+    checksumSource: "company-conversations-v1|neutral-participants-v1|neutral-messages-v1|nullable-idempotency-key-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE conversations (
+          id TEXT PRIMARY KEY,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          state TEXT NOT NULL CHECK (state IN ('open','closed')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          closed_at TEXT,
+          CHECK ((state='open' AND closed_at IS NULL) OR (state='closed' AND closed_at IS NOT NULL))
+        );
+        CREATE INDEX idx_conversations_company_created ON conversations(company_id,created_at DESC,id DESC);
+
+        CREATE TABLE conversation_participants (
+          id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          participant_type TEXT NOT NULL,
+          reference TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_conversation_participants_conversation_created ON conversation_participants(conversation_id,created_at,id);
+
+        CREATE TABLE conversation_messages (
+          id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          sender_participant_id TEXT NOT NULL REFERENCES conversation_participants(id) ON DELETE CASCADE,
+          direction TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
+          content TEXT NOT NULL,
+          idempotency_key TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_conversation_messages_conversation_created ON conversation_messages(conversation_id,created_at,id);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

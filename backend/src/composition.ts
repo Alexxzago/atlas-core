@@ -69,6 +69,8 @@ import type { AppRouters } from "./app.js";
 import { smtpConfiguration, SmtpEmailDelivery } from "./providers/smtpEmailDelivery.js";
 import { SqlitePlatformBootstrapTransaction } from "./repositories/platformBootstrapTransaction.js";
 import { PlatformBootstrapService } from "./identity/services/platformBootstrapService.js";
+import { ConversationRepository } from "./repositories/conversationRepository.js";
+import { ConversationService } from "./conversation/services/conversationService.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -111,6 +113,7 @@ const platformBootstrapControllers = createPlatformBootstrapControllers(platform
 export const authorizationService=new AuthorizationService(new MembershipRepository(database),workspaceRepository);
 export const authenticatedWorkspaceResolver=new WorkspaceResolver(workspaceRepository);
 const assistantProfileService=new AssistantProfileService(new AssistantProfileRepository(database),identityClock);
+export const conversationService = new ConversationService(new ConversationRepository(database), identityClock);
 const companyKnowledgeService=new FrozenKnowledgeService(companyRepository,new CompanyKnowledgeRepository(database),new SecurePublicUrlProvider(),new WorkerPdfTextExtractor(),new GeminiKnowledgeFactExtractor(geminiProvider),identityClock);
 const companyKnowledgeControllers=createCompanyKnowledgeControllers(companyKnowledgeService);
 const onboardingService = new OnboardingService(companyRepository,knowledgeRepository,firecrawlProvider,geminiProvider,cleanMarkdown,new FileMarkdownDebugStore(resolve(repositoryRoot,"knowledge")),companyKnowledgeService);
