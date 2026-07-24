@@ -3,6 +3,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://atlas-backend-tuph.onrender.com/:path*"
+    },
+    {
+      "source": "/chat/:path*",
+      "destination": "/index.html"
     }
   ]
 }
