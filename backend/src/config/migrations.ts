@@ -572,6 +572,32 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 16,
+    name: "0016_web_chat_sessions",
+    checksumSource: "anonymous-web-chat-session-v1|opaque-token-digest-v1|conversation-participant-binding-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE web_chat_sessions (
+          id TEXT PRIMARY KEY,
+          web_chat_connection_id TEXT NOT NULL REFERENCES web_chat_connections(id) ON DELETE RESTRICT,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE RESTRICT,
+          visitor_participant_id TEXT NOT NULL REFERENCES conversation_participants(id) ON DELETE RESTRICT,
+          responder_participant_id TEXT NOT NULL REFERENCES conversation_participants(id) ON DELETE RESTRICT,
+          token_digest TEXT NOT NULL UNIQUE,
+          state TEXT NOT NULL CHECK (state IN ('active','expired','closed')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_web_chat_sessions_connection ON web_chat_sessions(web_chat_connection_id);
+        CREATE INDEX idx_web_chat_sessions_conversation ON web_chat_sessions(conversation_id);
+        CREATE INDEX idx_web_chat_sessions_expires ON web_chat_sessions(expires_at);
+        CREATE INDEX idx_web_chat_sessions_state_expires ON web_chat_sessions(state,expires_at);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

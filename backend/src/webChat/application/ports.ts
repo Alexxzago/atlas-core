@@ -7,4 +7,5 @@ export interface WebChatConnectionRepositoryPort {
   listByCompany(context: WorkspaceContext, companyId: number): WebChatConnection[];
   updateStatus(context: WorkspaceContext, companyId: number, connectionId: WebChatConnectionId, status: WebChatConnectionStatus, updatedAt: string): WebChatConnection | null;
   findActiveByPublicId(publicId: WebChatConnectionPublicId): WebChatConnection | null;
+  findActiveById(connectionId: WebChatConnectionId): WebChatConnection | null;
 }

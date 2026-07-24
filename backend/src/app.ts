@@ -1,7 +1,7 @@
 import express, { type Router } from "express";
 import healthRouter from "./routes/health.js";
 
-export interface AppRouters { readonly authorizedCompaniesRouter: Router; readonly chatRouter: Router; readonly companiesRouter: Router; readonly identityRouter: Router; readonly knowledgeRouter: Router; readonly scrapeRouter: Router; readonly workspacesRouter: Router; }
+export interface AppRouters { readonly authorizedCompaniesRouter: Router; readonly chatRouter: Router; readonly companiesRouter: Router; readonly identityRouter: Router; readonly knowledgeRouter: Router; readonly publicWebChatRouter: Router; readonly scrapeRouter: Router; readonly workspacesRouter: Router; }
 export interface AppOptions { readonly production?: boolean; readonly trustedLocalMode?: boolean; }
 
 function operationalPath(url: string): boolean { return /^\/workspaces\/[^/]+\/companies\/[^/]+\/assistant\/executions\/?(?:\?.*)?$/i.test(url); }
@@ -14,6 +14,7 @@ export function createApp(routers: AppRouters, options: AppOptions = {}): expres
   app.get("/", (_req, res) => { res.send("Atlas Core is running."); });
   app.use(healthRouter);
   app.use(routers.scrapeRouter);
+  app.use("/public/web-chat", routers.publicWebChatRouter);
   const trustedLocalMode = options.trustedLocalMode ?? (!Boolean(options.production) && process.env.ATLAS_TRUSTED_LOCAL_MODE === "true");
   if (trustedLocalMode) { app.use(routers.knowledgeRouter); app.use(routers.chatRouter); app.use("/companies", routers.companiesRouter); }
   app.use("/identity", routers.identityRouter);

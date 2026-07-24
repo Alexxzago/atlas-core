@@ -33,4 +33,5 @@ export class WebChatConnectionRepository implements WebChatConnectionRepositoryP
     const row = this.db.prepare("SELECT wcc.* FROM web_chat_connections wcc JOIN workspaces w ON w.id=wcc.workspace_id JOIN companies c ON c.id=wcc.company_id AND c.workspace_id=w.id JOIN assistant_profiles p ON p.id=wcc.assistant_profile_id AND p.company_id=c.id WHERE wcc.public_id=? AND wcc.status='active'").get(publicId) as Row | undefined;
     return row ? connection(row) : null;
   }
+  public findActiveById(id: WebChatConnectionId): WebChatConnection | null { const row=this.db.prepare("SELECT wcc.* FROM web_chat_connections wcc JOIN workspaces w ON w.id=wcc.workspace_id JOIN companies c ON c.id=wcc.company_id AND c.workspace_id=w.id JOIN assistant_profiles p ON p.id=wcc.assistant_profile_id AND p.company_id=c.id WHERE wcc.id=? AND wcc.status='active'").get(id) as Row|undefined; return row?connection(row):null; }
 }

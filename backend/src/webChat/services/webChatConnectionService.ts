@@ -66,12 +66,26 @@ export class WebChatConnectionService {
 
   public resolveActiveByPublicId(publicIdValue: unknown): WebChatConnection | null {
     if (typeof publicIdValue !== "string") return null;
-    try { return this.connections.findActiveByPublicId(webChatConnectionPublicId(publicIdValue)); }
+    try { return this.active(this.connections.findActiveByPublicId(webChatConnectionPublicId(publicIdValue))); }
+    catch { return null; }
+  }
+
+  public resolveActiveById(connectionIdValue: unknown): WebChatConnection | null {
+    if (typeof connectionIdValue !== "string") return null;
+    try { return this.active(this.connections.findActiveById(webChatConnectionId(connectionIdValue))); }
     catch { return null; }
   }
 
   private company(context: WorkspaceContext, id: number): void {
     if (!this.companies.findById(context, id)) throw new WebChatConnectionNotFoundError("Company was not found.");
+  }
+
+  private active(connection: WebChatConnection | null): WebChatConnection | null {
+    if (!connection) return null;
+    const profile = this.profiles.findById({ workspaceId: connection.workspaceId, workspaceKey: "public" }, connection.companyId, connection.assistantProfileId);
+    if (!profile) return null;
+    try { this.profilePolicy.assert(profile); return connection; }
+    catch { return null; }
   }
 
   private assertExecutable(profile: Parameters<AssistantProfileExecutionPolicy["assert"]>[0]): void {
