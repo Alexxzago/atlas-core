@@ -27,6 +27,13 @@ interface ContextualAssistantControllers {
   execution?: (context: WorkspaceContext) => RequestHandler;
 }
 
+interface ContextualWebChatConnectionControllers {
+  list: (context: WorkspaceContext) => RequestHandler;
+  create: (context: WorkspaceContext) => RequestHandler;
+  get: (context: WorkspaceContext) => RequestHandler;
+  update: (context: WorkspaceContext) => RequestHandler;
+}
+
 interface AuthorizedCompanyDependencies {
   authentication: AuthenticationService;
   users: UserRepositoryPort;
@@ -34,6 +41,7 @@ interface AuthorizedCompanyDependencies {
   resolver: WorkspaceResolver;
   controllers: ContextualControllers;
   assistantControllers: ContextualAssistantControllers;
+  webChatConnectionControllers?: ContextualWebChatConnectionControllers;
   knowledgeControllers?: Record<string, (context: WorkspaceContext, actor: ActorContext) => RequestHandler>;
   pdfBodyParser?: RequestHandler;
 }
@@ -119,6 +127,13 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     });
   }) : null;
   if (operationalExecution) router.post("/:workspaceId/companies/:companyId/assistant/executions", operationalExecution);
+  const webChat = dependencies.webChatConnectionControllers;
+  if (webChat) {
+    router.get("/:workspaceId/companies/:companyId/web-chat-connections", authorize("company:read", false, webChat.list));
+    router.post("/:workspaceId/companies/:companyId/web-chat-connections", authorize("company:manage", true, webChat.create));
+    router.get("/:workspaceId/companies/:companyId/web-chat-connections/:connectionId", authorize("company:read", false, webChat.get));
+    router.patch("/:workspaceId/companies/:companyId/web-chat-connections/:connectionId", authorize("company:manage", true, webChat.update));
+  }
   const k=dependencies.knowledgeControllers;
   if(k){
     const pdfBody=dependencies.pdfBodyParser??raw({type:"application/pdf",limit:"10mb"});

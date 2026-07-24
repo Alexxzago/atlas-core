@@ -550,6 +550,28 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 15,
+    name: "0015_web_chat_connections",
+    checksumSource: "web-chat-connection-binding-v1|opaque-public-id-v1|active-inactive-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE web_chat_connections (
+          id TEXT PRIMARY KEY,
+          public_id TEXT NOT NULL UNIQUE,
+          workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          assistant_profile_id TEXT NOT NULL REFERENCES assistant_profiles(id) ON DELETE CASCADE,
+          status TEXT NOT NULL CHECK (status IN ('active','inactive')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_web_chat_connections_workspace ON web_chat_connections(workspace_id,id);
+        CREATE INDEX idx_web_chat_connections_company_created ON web_chat_connections(company_id,created_at DESC,id DESC);
+        CREATE INDEX idx_web_chat_connections_profile ON web_chat_connections(assistant_profile_id);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {
