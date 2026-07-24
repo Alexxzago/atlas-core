@@ -5,12 +5,13 @@ export interface AppRouters { readonly authorizedCompaniesRouter: Router; readon
 export interface AppOptions { readonly production?: boolean; readonly trustedLocalMode?: boolean; }
 
 function operationalPath(url: string): boolean { return /^\/workspaces\/[^/]+\/companies\/[^/]+\/assistant\/executions\/?(?:\?.*)?$/i.test(url); }
+function publicMessagePath(url: string): boolean { return /^\/public\/web-chat\/[^/]+\/messages\/?(?:\?.*)?$/i.test(url); }
 
 export function createApp(routers: AppRouters, options: AppOptions = {}): express.Express {
   const app = express();
   if (options.production) app.set("trust proxy", 1);
   app.set("etag", false);
-  app.use(express.json({ type: (req) => !(req.method === "POST" && operationalPath(req.url ?? "")) }));
+  app.use(express.json({ type: (req) => !(req.method === "POST" && (operationalPath(req.url ?? "") || publicMessagePath(req.url ?? ""))) }));
   app.get("/", (_req, res) => { res.send("Atlas Core is running."); });
   app.use(healthRouter);
   app.use(routers.scrapeRouter);

@@ -30,18 +30,24 @@ export class PublicWebChatSessionService {
   }
 
   public state(connectionPublicId: unknown, rawToken: string | null): { state: "active"; expiresAt: string } {
-    const connection = this.connections.resolveActiveByPublicId(connectionPublicId), resolved = rawToken ? this.resolve(rawToken, true) : null;
-    if (!connection || !resolved || resolved.connectionId !== connection.id) throw new PublicWebChatSessionUnavailableError();
-    return { state: "active", expiresAt: resolved.context.expiresAt };
+    const context = this.resolveSessionForConnection(connectionPublicId, rawToken);
+    if (!context) throw new PublicWebChatSessionUnavailableError();
+    return { state: "active", expiresAt: context.expiresAt };
   }
 
   public close(connectionPublicId: unknown, rawToken: string | null): void {
-    const connection = this.connections.resolveActiveByPublicId(connectionPublicId), resolved = rawToken ? this.resolve(rawToken, false) : null;
-    if (!connection || !resolved || resolved.connectionId !== connection.id) throw new PublicWebChatSessionUnavailableError();
-    this.sessions.updateState(resolved.session.id, "active", "closed", this.clock.now());
+    if (typeof connectionPublicId !== "string" || !rawToken || !/^[A-Za-z0-9_-]{43}$/.test(rawToken)) throw new PublicWebChatSessionUnavailableError();
+    const session = this.sessions.findForCloseByTokenDigest(digest(rawToken), connectionPublicId);
+    if (!session) throw new PublicWebChatSessionUnavailableError();
+    this.sessions.updateState(session.id, "active", "closed", this.clock.now());
   }
 
   public resolveSession(rawToken: string): ResolvedPublicWebChatSession | null { const resolved = this.resolve(rawToken, true); return resolved?.context ?? null; }
+
+  public resolveSessionForConnection(connectionPublicId: unknown, rawToken: string | null): ResolvedPublicWebChatSession | null {
+    const connection = this.connections.resolveActiveByPublicId(connectionPublicId), resolved = rawToken ? this.resolve(rawToken, true) : null;
+    return connection && resolved && resolved.connectionId === connection.id ? resolved.context : null;
+  }
 
   private resolve(rawToken: string, touch: boolean): { session: WebChatSession; connectionId: string; context: ResolvedPublicWebChatSession } | null {
     if (!/^[A-Za-z0-9_-]{43}$/.test(rawToken)) return null;

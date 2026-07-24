@@ -79,6 +79,7 @@ import { WebChatConnectionService } from "./webChat/services/webChatConnectionSe
 import { createGetWebChatConnectionController, createListWebChatConnectionsController, createUpdateWebChatConnectionController, createWebChatConnectionController } from "./controllers/webChatConnectionController.js";
 import { WebChatSessionRepository } from "./repositories/webChatSessionRepository.js";
 import { PublicWebChatSessionService } from "./webChat/services/publicWebChatSessionService.js";
+import { PublicWebChatConversationService } from "./webChat/services/publicWebChatConversationService.js";
 import { createPublicWebChatRouter } from "./routes/publicWebChat.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -126,6 +127,7 @@ const webChatConnectionService = new WebChatConnectionService(companyRepository,
 export const conversationService = new ConversationService(new ConversationRepository(database), identityClock);
 const publicWebChatSessionService = new PublicWebChatSessionService(webChatConnectionService, conversationService, new WebChatSessionRepository(database), identityClock);
 export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock), new InMemoryConversationTurnLock(), "gemini", 20);
+const publicWebChatConversationService = new PublicWebChatConversationService(publicWebChatSessionService, operationalConversationTurnService);
 const companyKnowledgeService=new FrozenKnowledgeService(companyRepository,new CompanyKnowledgeRepository(database),new SecurePublicUrlProvider(),new WorkerPdfTextExtractor(),new GeminiKnowledgeFactExtractor(geminiProvider),identityClock);
 const companyKnowledgeControllers=createCompanyKnowledgeControllers(companyKnowledgeService);
 const onboardingService = new OnboardingService(companyRepository,knowledgeRepository,firecrawlProvider,geminiProvider,cleanMarkdown,new FileMarkdownDebugStore(resolve(repositoryRoot,"knowledge")),companyKnowledgeService);
@@ -149,7 +151,7 @@ export const identityRouter = createIdentityRouter({
   platformBootstrap: platformBootstrapControllers.bootstrap,
   ...authenticationControllers,
 });
-export const publicWebChatRouter = createPublicWebChatRouter(publicWebChatSessionService, production);
+export const publicWebChatRouter = createPublicWebChatRouter(publicWebChatSessionService, publicWebChatConversationService, production);
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));
 function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
   const runtime = new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), identityClock);
