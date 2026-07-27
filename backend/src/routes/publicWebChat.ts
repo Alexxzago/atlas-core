@@ -27,6 +27,7 @@ export function createPublicWebChatRouter(service: PublicWebChatSessionService, 
   });
   router.get("/:connectionPublicId/session", (request, response): void => { try { response.json(service.state(request.params.connectionPublicId, cookie(request, cookieName))); } catch { unavailable(response); } });
   router.delete("/:connectionPublicId/session", (request, response): void => { try { service.close(request.params.connectionPublicId, cookie(request, cookieName)); clear(response); response.status(204).end(); } catch { clear(response); unavailable(response); } });
+  router.get("/:connectionPublicId/messages", (request, response): void => { try { response.json(conversations.history(request.params.connectionPublicId, cookie(request, cookieName))); } catch { unavailable(response); } });
   router.post("/:connectionPublicId/messages", (request, response, next): void => {
     if (!request.is("application/json")) { response.status(415).json({ error: "Message is invalid." }); return; }
     if (!sameOrigin(request)) { unavailable(response); return; }

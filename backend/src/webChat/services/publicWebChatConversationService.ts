@@ -1,4 +1,5 @@
 import { OperationalConversationTurnInProgressError, type OperationalConversationTurnService } from "../../assistant/services/operationalConversationTurnService.js";
+import type { ConversationService } from "../../conversation/services/conversationService.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import type { PublicWebChatSessionService } from "./publicWebChatSessionService.js";
 
@@ -8,9 +9,18 @@ export class PublicWebChatConversationInProgressError extends Error {}
 export class PublicWebChatConversationRuntimeError extends Error {}
 
 export interface PublicWebChatConversationResult { readonly message: string; }
+export interface PublicWebChatHistoryResult { readonly messages: readonly { readonly direction: "inbound" | "outbound"; readonly content: string; readonly createdAt: string; }[]; }
 
 export class PublicWebChatConversationService {
-  public constructor(private readonly sessions: PublicWebChatSessionService, private readonly turns: OperationalConversationTurnService) {}
+  public constructor(private readonly sessions: PublicWebChatSessionService, private readonly turns: OperationalConversationTurnService, private readonly conversations: ConversationService) {}
+
+  public history(connectionPublicId: unknown, rawSessionToken: string | null): PublicWebChatHistoryResult {
+    const session = this.sessions.resolveSessionForConnection(connectionPublicId, rawSessionToken);
+    if (!session) throw new PublicWebChatConversationUnavailableError();
+    const context: WorkspaceContext = { workspaceId: session.workspaceId, workspaceKey: "public" };
+    return Object.freeze({ messages: Object.freeze(this.conversations.listMessages(context, session.companyId, session.conversationId)
+      .map(({ direction, content, createdAt }) => Object.freeze({ direction, content, createdAt }))) });
+  }
 
   public async sendMessage(connectionPublicId: unknown, rawSessionToken: string | null, contentValue: unknown): Promise<PublicWebChatConversationResult> {
     const content = messageContent(contentValue);

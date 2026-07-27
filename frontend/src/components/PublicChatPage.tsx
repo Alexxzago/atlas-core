@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { PublicWebChatApiError, publicWebChatApi } from "../api/publicWebChatApi";
+import { PublicWebChatApiError, publicWebChatApi, type PublicWebChatHistoryMessage } from "../api/publicWebChatApi";
 
 type ChatStatus = "initializing" | "ready" | "sending" | "unavailable" | "error" | "closed";
 type ChatMessage = { readonly localId: number; readonly role: "visitor" | "assistant"; readonly content: string; };
 
 const welcome: ChatMessage = { localId: 0, role: "assistant", content: "Hola, soy Atlas. ¿En qué puedo ayudarte?" };
+function historicalMessages(messages: readonly PublicWebChatHistoryMessage[]): readonly ChatMessage[] { return messages.map((message, index) => ({ localId: index + 1, role: message.direction === "inbound" ? "visitor" : "assistant", content: message.content })); }
 
 export function publicConnectionIdFromPath(pathname: string): string | null {
   const match = /^\/chat\/(wcp_[0-9a-f]{32})\/?$/i.exec(pathname);
@@ -21,7 +22,7 @@ function messageError(status: number): string {
 
 export function PublicChatPage({ connectionPublicId }: { readonly connectionPublicId: string }): React.JSX.Element {
   const [status, setStatus] = useState<ChatStatus>("initializing");
-  const [messages, setMessages] = useState<readonly ChatMessage[]>([welcome]);
+  const [messages, setMessages] = useState<readonly ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const nextLocalId = useRef(1);
@@ -30,9 +31,20 @@ export function PublicChatPage({ connectionPublicId }: { readonly connectionPubl
 
   useEffect(() => {
     let current = true;
-    void publicWebChatApi.startSession(connectionPublicId)
-      .then(() => { if (current) setStatus("ready"); })
-      .catch(() => { if (current) setStatus("unavailable"); });
+    void (async () => {
+      try {
+        await publicWebChatApi.startSession(connectionPublicId);
+        try {
+          const history = await publicWebChatApi.history(connectionPublicId);
+          if (!current) return;
+          const hydrated = historicalMessages(history.messages); nextLocalId.current = hydrated.length + 1;
+          setMessages(hydrated.length ? hydrated : [welcome]); setStatus("ready");
+        } catch {
+          if (!current) return;
+          setNotice("No pudimos restaurar los mensajes anteriores."); setStatus("ready");
+        }
+      } catch { if (current) setStatus("unavailable"); }
+    })();
     return () => { current = false; };
   }, [connectionPublicId]);
 

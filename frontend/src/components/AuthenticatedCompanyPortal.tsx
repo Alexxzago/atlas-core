@@ -9,6 +9,7 @@ import { AuthenticatedCompanySelector } from "./AuthenticatedCompanySelector";
 import { PortalHeader } from "./PortalHeader";
 import { WorkspaceMembershipPortal } from "./WorkspaceMembershipPortal";
 import { CompanyKnowledgePanel } from "./CompanyKnowledgePanel";
+import { WebChatConnectionsPanel } from "./WebChatConnectionsPanel";
 
 interface Props { csrf: string; email: string; onPassword: () => void; onLogout: () => void }
 
@@ -160,6 +161,17 @@ export function AuthenticatedCompanyPortal({ csrf, email, onPassword, onLogout }
 
   useEffect(() => { if (state.profileReloadRequested) reloadProfiles(); }, [state.profileReloadRequested, reloadProfiles]);
 
+  const refreshSelectedCompany = async (): Promise<void> => {
+    const workspace = state.selectedWorkspace, companyId = state.selectedCompanyId;
+    if (!workspace || !companyId) return;
+    try {
+      const company = await atlasApi.getWorkspaceCompany(workspace.id, companyId);
+      dispatch({ type: "companyRefreshed", workspaceId: workspace.id, company });
+    } catch {
+      // The publication succeeded; leave the existing Company DTO intact if its follow-up read fails.
+    }
+  };
+
   const submitProfile = async (input: CreateAssistantProfileInput | UpdateAssistantProfileInput): Promise<void> => {
     const workspace = state.selectedWorkspace, companyId = state.selectedCompanyId; if (!workspace || !companyId) return;
     mutationAbort.current?.abort(); const controller = new AbortController(); mutationAbort.current = controller;
@@ -208,8 +220,9 @@ export function AuthenticatedCompanyPortal({ csrf, email, onPassword, onLogout }
     <main className="authenticated-main">
       <WorkspaceMembershipPortal csrf={csrf} workspaces={state.workspaces} selectedWorkspace={state.selectedWorkspace} pendingWorkspaceId={state.pendingWorkspaceId} loading={state.workspacesLoading} error={state.workspaceError} onSelectWorkspace={(id) => void selectWorkspace(id)} onWorkspacesChanged={() => void loadWorkspaces()} onActiveWorkspaceLeft={() => { abortTenant(); dispatch({ type: "workspaceCleared" }); }}/>
       <AuthenticatedCompanySelector companies={state.companies} selectedCompanyId={state.selectedCompanyId} workspaceSelected={canCreateCompany(state)} loading={state.companiesLoading} error={state.companyError} creating={state.companyCreating} onCreate={createCompany} onCompanySelected={(id) => void selectCompany(id)} onRetry={() => { if (state.selectedWorkspace) void loadCompanies(state.selectedWorkspace, state.workspaceGeneration); }}/>
-      <CompanyKnowledgePanel csrf={csrf} workspaceId={state.selectedWorkspace?.id??null} companyId={state.selectedCompanyId} capabilities={state.selectedWorkspace?.capabilities??[]}/>
+      <CompanyKnowledgePanel csrf={csrf} workspaceId={state.selectedWorkspace?.id??null} companyId={state.selectedCompanyId} capabilities={state.selectedWorkspace?.capabilities??[]} onPublicationCompleted={refreshSelectedCompany}/>
       <AssistantProfilesPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} workspaceRole={state.selectedWorkspace?.role ?? null} capabilities={state.selectedWorkspace?.capabilities ?? []} companyId={state.selectedCompanyId} companyName={selectedCompany?.name ?? null} companySelected={state.selectedCompanyId !== null} profiles={state.profiles} selectedProfile={selectedProfile} transientArchivedProfile={state.transientArchivedProfile} loading={state.profilesLoading} error={state.profileError} formMode={state.formMode} submitting={state.submitting} transitionTarget={state.transitionTarget} onSelectProfile={(id) => void selectProfile(id)} onOpenCreate={() => dispatch({ type: "formOpened", mode: "create" })} onOpenEdit={() => dispatch({ type: "formOpened", mode: "edit" })} onCloseForm={() => dispatch({ type: "formClosed" })} onSubmitForm={(input) => void submitProfile(input)} onTransition={(profile, target) => void transitionProfile(profile, target)} onRetry={reloadProfiles}/>
+      <WebChatConnectionsPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} companyId={state.selectedCompanyId} companyStatus={selectedCompany?.status ?? null} profiles={state.profiles} capabilities={state.selectedWorkspace?.capabilities ?? []}/>
     </main>
   </div>;
 }
