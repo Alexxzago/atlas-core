@@ -3,6 +3,7 @@ import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import type { ConversationRepositoryPort } from "../application/ports.js";
 import {
   conversationId,
+  communicationChannel,
   conversationMessageDirection,
   conversationMessageId,
   conversationParticipantId,
@@ -23,11 +24,12 @@ export interface ConversationClock { now(): string; }
 export class ConversationService {
   public constructor(private readonly conversations: ConversationRepositoryPort, private readonly clock: ConversationClock) {}
 
-  public open(context: WorkspaceContext, companyIdValue: unknown): Conversation {
+  public open(context: WorkspaceContext, companyIdValue: unknown, channelValue: unknown = "internal"): Conversation {
     const companyId = parseCompanyId(companyIdValue);
+    const channel = parseChannel(channelValue);
     const now = this.clock.now();
     const conversation = reconstructConversation({
-      id: conversationId(`cnv_${randomUUID().replaceAll("-", "")}`), companyId, state: "open", createdAt: now, updatedAt: now, closedAt: null,
+      id: conversationId(`cnv_${randomUUID().replaceAll("-", "")}`), companyId, channel, state: "open", createdAt: now, updatedAt: now, closedAt: null,
     });
     const created = this.conversations.createConversation(context, conversation);
     if (!created) throw new ConversationNotFoundError("Company was not found.");
@@ -99,6 +101,12 @@ function parseConversationId(value: unknown): ReturnType<typeof conversationId> 
   if (typeof value !== "string") throw new ConversationValidationError("Conversation ID is invalid.");
   try { return conversationId(value); }
   catch { throw new ConversationValidationError("Conversation ID is invalid."); }
+}
+
+function parseChannel(value: unknown): ReturnType<typeof communicationChannel> {
+  if (typeof value !== "string") throw new ConversationValidationError("Conversation channel is invalid.");
+  try { return communicationChannel(value); }
+  catch { throw new ConversationValidationError("Conversation channel is invalid."); }
 }
 
 function participantInput(value: unknown): { type: string; reference: string | null } {

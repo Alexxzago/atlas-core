@@ -3,11 +3,11 @@ import type { ConversationRepositoryPort } from "../conversation/application/por
 import { reconstructConversation, reconstructConversationMessage, reconstructConversationParticipant, type Conversation, type ConversationId, type ConversationMessage, type ConversationMessageId, type ConversationParticipant, type ConversationParticipantId, type ConversationState } from "../conversation/domain/conversation.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 
-interface ConversationRow { id:string; company_id:number; state:ConversationState; created_at:string; updated_at:string; closed_at:string|null; }
+interface ConversationRow { id:string; company_id:number; channel:Conversation["channel"]; state:ConversationState; created_at:string; updated_at:string; closed_at:string|null; }
 interface ParticipantRow { id:string; conversation_id:string; participant_type:string; reference:string|null; created_at:string; }
 interface MessageRow { id:string; conversation_id:string; sender_participant_id:string; direction:"inbound"|"outbound"; content:string; idempotency_key:string|null; assistant_execution_record_id:string|null; created_at:string; }
 
-function conversation(row: ConversationRow): Conversation { return reconstructConversation({ id: row.id as ConversationId, companyId: row.company_id, state: row.state, createdAt: row.created_at, updatedAt: row.updated_at, closedAt: row.closed_at }); }
+function conversation(row: ConversationRow): Conversation { return reconstructConversation({ id: row.id as ConversationId, companyId: row.company_id, channel: row.channel, state: row.state, createdAt: row.created_at, updatedAt: row.updated_at, closedAt: row.closed_at }); }
 function participant(row: ParticipantRow): ConversationParticipant { return reconstructConversationParticipant({ id: row.id as ConversationParticipantId, conversationId: row.conversation_id as ConversationId, type: row.participant_type, reference: row.reference, createdAt: row.created_at }); }
 function message(row: MessageRow): ConversationMessage { return reconstructConversationMessage({ id: row.id as ConversationMessageId, conversationId: row.conversation_id as ConversationId, senderParticipantId: row.sender_participant_id as ConversationParticipantId, direction: row.direction, content: row.content, idempotencyKey: row.idempotency_key, executionRecordId: row.assistant_execution_record_id, createdAt: row.created_at }); }
 
@@ -24,7 +24,7 @@ export class ConversationRepository implements ConversationRepositoryPort {
   }
 
   public createConversation(context: WorkspaceContext, value: Conversation): Conversation | null {
-    const result = this.db.prepare("INSERT INTO conversations(id,company_id,state,created_at,updated_at,closed_at) SELECT ?,co.id,?,?,?,? FROM companies co WHERE co.workspace_id=? AND co.id=?").run(value.id, value.state, value.createdAt, value.updatedAt, value.closedAt, context.workspaceId, value.companyId);
+    const result = this.db.prepare("INSERT INTO conversations(id,company_id,channel,state,created_at,updated_at,closed_at) SELECT ?,co.id,?,?,?,?,? FROM companies co WHERE co.workspace_id=? AND co.id=?").run(value.id, value.channel, value.state, value.createdAt, value.updatedAt, value.closedAt, context.workspaceId, value.companyId);
     return result.changes === 1 ? this.findConversation(context, value.companyId, value.id) : null;
   }
 

@@ -21,7 +21,7 @@ export class PublicWebChatSessionService {
     }
     const rawToken = randomBytes(32).toString("base64url"), now = this.clock.now(), expiresAt = new Date(Date.parse(now) + this.lifetimeMilliseconds).toISOString();
     this.sessions.transaction(() => {
-      const conversation = this.conversations.open({ workspaceId: connection.workspaceId, workspaceKey: "public" }, connection.companyId);
+      const conversation = this.conversations.open({ workspaceId: connection.workspaceId, workspaceKey: "public" }, connection.companyId, "web_chat");
       const visitor = this.conversations.addParticipant({ workspaceId: connection.workspaceId, workspaceKey: "public" }, connection.companyId, conversation.id, { type: "anonymous_visitor", reference: null });
       const responder = this.conversations.addParticipant({ workspaceId: connection.workspaceId, workspaceKey: "public" }, connection.companyId, conversation.id, { type: "assistant", reference: connection.assistantProfileId });
       this.sessions.create(reconstructWebChatSession({ id: webChatSessionId(`wcs_${randomUUID().replaceAll("-", "")}`), webChatConnectionId: connection.id, conversationId: conversation.id, visitorParticipantId: visitor.id, responderParticipantId: responder.id, tokenDigest: digest(rawToken), state: "active", createdAt: now, updatedAt: now, expiresAt, lastSeenAt: now }));

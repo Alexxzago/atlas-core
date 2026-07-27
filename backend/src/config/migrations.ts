@@ -598,6 +598,123 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 17,
+    name: "0017_conversation_channel_metadata",
+    checksumSource: "conversation-channel-v1|internal-web-chat-whatsapp|existing-internal-default",
+    apply(database): void {
+      database.exec(`
+        ALTER TABLE conversations
+        ADD COLUMN channel TEXT NOT NULL DEFAULT 'internal'
+          CHECK (channel IN ('internal','web_chat','whatsapp'));
+        CREATE INDEX idx_conversations_company_channel_created
+          ON conversations(company_id,channel,created_at DESC,id DESC);
+      `);
+    },
+  },
+  {
+    id: 18,
+    name: "0018_whatsapp_connections_bindings",
+    checksumSource: "whatsapp-connection-v1|phone-number-global-unique|connection-wa-id-binding-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE whatsapp_connections (
+          id TEXT PRIMARY KEY,
+          workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          assistant_profile_id TEXT NOT NULL REFERENCES assistant_profiles(id) ON DELETE CASCADE,
+          phone_number_id TEXT NOT NULL UNIQUE,
+          whatsapp_business_account_id TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('active','inactive')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_whatsapp_connections_workspace ON whatsapp_connections(workspace_id,id);
+        CREATE INDEX idx_whatsapp_connections_company_created ON whatsapp_connections(company_id,created_at DESC,id DESC);
+        CREATE INDEX idx_whatsapp_connections_profile ON whatsapp_connections(assistant_profile_id);
+
+        CREATE TABLE whatsapp_conversation_bindings (
+          id TEXT PRIMARY KEY,
+          whatsapp_connection_id TEXT NOT NULL REFERENCES whatsapp_connections(id) ON DELETE CASCADE,
+          wa_id TEXT NOT NULL,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          customer_participant_id TEXT NOT NULL REFERENCES conversation_participants(id) ON DELETE CASCADE,
+          assistant_participant_id TEXT NOT NULL REFERENCES conversation_participants(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (whatsapp_connection_id,wa_id)
+        );
+        CREATE INDEX idx_whatsapp_conversation_bindings_conversation ON whatsapp_conversation_bindings(conversation_id);
+      `);
+    },
+  },
+  {
+    id: 19,
+    name: "0019_channel_provider_events_messages",
+    checksumSource: "channel-provider-event-v1|provider-message-record-v1|external-idempotency-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE channel_provider_events (
+          id TEXT PRIMARY KEY,
+          communication_channel TEXT NOT NULL CHECK (communication_channel IN ('internal','web_chat','whatsapp')),
+          transport_provider TEXT NOT NULL,
+          transport_connection_id TEXT NOT NULL,
+          external_event_id TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('claimed','processing','completed','failed')),
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          conversation_message_id TEXT REFERENCES conversation_messages(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (transport_provider,external_event_id)
+        );
+        CREATE INDEX idx_channel_provider_events_connection_state
+          ON channel_provider_events(transport_connection_id,state,created_at);
+
+        CREATE TABLE provider_message_records (
+          id TEXT PRIMARY KEY,
+          communication_channel TEXT NOT NULL CHECK (communication_channel IN ('internal','web_chat','whatsapp')),
+          transport_provider TEXT NOT NULL,
+          direction TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
+          transport_connection_id TEXT NOT NULL,
+          conversation_message_id TEXT NOT NULL REFERENCES conversation_messages(id) ON DELETE CASCADE,
+          external_message_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (transport_provider,external_message_id),
+          UNIQUE (transport_provider,transport_connection_id,conversation_message_id)
+        );
+        CREATE INDEX idx_provider_message_records_message ON provider_message_records(conversation_message_id);
+      `);
+    },
+  },
+  {
+    id: 20,
+    name: "0020_outbound_deliveries",
+    checksumSource: "outbound-delivery-v1|provider-message-connection-unique|lease-ready",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE outbound_deliveries (
+          id TEXT PRIMARY KEY,
+          provider_message_record_id TEXT NOT NULL REFERENCES provider_message_records(id) ON DELETE CASCADE,
+          transport_connection_id TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('pending','leased','accepted','retryable','permanent_failure','uncertain')),
+          attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
+          next_attempt_at TEXT NOT NULL,
+          lease_owner TEXT,
+          lease_expires_at TEXT,
+          safe_error_category TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK ((lease_owner IS NULL AND lease_expires_at IS NULL) OR (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)),
+          UNIQUE (provider_message_record_id,transport_connection_id)
+        );
+        CREATE INDEX idx_outbound_deliveries_ready
+          ON outbound_deliveries(state,next_attempt_at,id);
+        CREATE INDEX idx_outbound_deliveries_lease
+          ON outbound_deliveries(state,lease_expires_at,id);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

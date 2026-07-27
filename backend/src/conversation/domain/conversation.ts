@@ -3,10 +3,12 @@ export type ConversationParticipantId = string & { readonly __brand: "Conversati
 export type ConversationMessageId = string & { readonly __brand: "ConversationMessageId" };
 export type ConversationState = "open" | "closed";
 export type ConversationMessageDirection = "inbound" | "outbound";
+export type CommunicationChannel = "internal" | "web_chat" | "whatsapp";
 
 export interface Conversation {
   readonly id: ConversationId;
   readonly companyId: number;
+  readonly channel: CommunicationChannel;
   readonly state: ConversationState;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -55,12 +57,13 @@ export function conversationParticipantId(value: string): ConversationParticipan
 export function conversationMessageId(value: string): ConversationMessageId { return opaque<ConversationMessageId>(value, "cmsg"); }
 export function conversationState(value: string): ConversationState { if (value !== "open" && value !== "closed") throw new ConversationDomainError("Conversation state is invalid."); return value; }
 export function conversationMessageDirection(value: string): ConversationMessageDirection { if (value !== "inbound" && value !== "outbound") throw new ConversationDomainError("Conversation message direction is invalid."); return value; }
+export function communicationChannel(value: string): CommunicationChannel { if (value !== "internal" && value !== "web_chat" && value !== "whatsapp") throw new ConversationDomainError("Communication channel is invalid."); return value; }
 
 export function reconstructConversation(value: Conversation): Conversation {
   if (!Number.isSafeInteger(value.companyId) || value.companyId < 1) throw new ConversationDomainError("Conversation Company is invalid.");
   const state = conversationState(value.state), closedAt = value.closedAt === null ? null : timestamp(value.closedAt);
   if ((state === "closed") !== (closedAt !== null)) throw new ConversationDomainError("Conversation close state is invalid.");
-  return Object.freeze({ ...value, id: conversationId(value.id), state, createdAt: timestamp(value.createdAt), updatedAt: timestamp(value.updatedAt), closedAt });
+  return Object.freeze({ ...value, id: conversationId(value.id), channel: communicationChannel(value.channel), state, createdAt: timestamp(value.createdAt), updatedAt: timestamp(value.updatedAt), closedAt });
 }
 
 export function reconstructConversationParticipant(value: ConversationParticipant): ConversationParticipant {

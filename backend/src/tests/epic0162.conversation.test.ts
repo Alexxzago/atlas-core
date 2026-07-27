@@ -23,7 +23,7 @@ function setup() {
 }
 
 function conversation(companyId: number, id = conversationId("cnv_00000000000000000000000000000001"), state: "open" | "closed" = "open") {
-  return reconstructConversation({ id, companyId, state, createdAt, updatedAt: state === "open" ? createdAt : updatedAt, closedAt: state === "open" ? null : closedAt });
+  return reconstructConversation({ id, companyId, channel: "internal", state, createdAt, updatedAt: state === "open" ? createdAt : updatedAt, closedAt: state === "open" ? null : closedAt });
 }
 
 function participant(conversationIdentifier: ReturnType<typeof conversationId>, id = conversationParticipantId("cpt_00000000000000000000000000000001")) {
