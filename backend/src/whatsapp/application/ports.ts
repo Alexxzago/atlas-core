@@ -13,6 +13,7 @@ export interface WhatsAppConnectionRepositoryPort {
 
 export interface WhatsAppConversationRepositoryPort {
   findBinding(connectionId: WhatsAppConnectionId, waId: string): WhatsAppConversationBinding | null;
+  findBindingByConversation(context: WorkspaceContext, companyId: number, conversationId: import("../../conversation/domain/conversation.js").ConversationId): WhatsAppConversationBinding | null;
   createBinding(binding: WhatsAppConversationBinding): WhatsAppConversationBinding | null;
 }
 

@@ -93,6 +93,10 @@ import { AesGcmWhatsAppCredentialCipher } from "./whatsapp/infrastructure/aesGcm
 import { WhatsAppCredentialResolver } from "./whatsapp/services/WhatsAppCredentialResolver.js";
 import { WhatsAppConnectionRepository } from "./repositories/whatsappConnectionRepository.js";
 import { WhatsAppConnectionService } from "./whatsapp/services/WhatsAppConnectionService.js";
+import { WhatsAppOutboundDeliveryService } from "./whatsapp/services/WhatsAppOutboundDeliveryService.js";
+import { OperatorConversationMessagingService } from "./conversation/services/operatorConversationMessagingService.js";
+import { createOperatorConversationMessageController } from "./controllers/operatorConversationMessagingController.js";
+import { configureProductionConversationMessageController } from "./routes/authorizedCompanies.js";
 import { createActivateWhatsAppConnectionController, createConfigureWhatsAppCredentialsController, createDeactivateWhatsAppConnectionController, createGetWhatsAppConnectionController, createGetWhatsAppConnectionStatusController, createListWhatsAppConnectionsController, createUpdateWhatsAppConnectionController, createValidateWhatsAppConnectionController, createWhatsAppConnectionController } from "./controllers/WhatsAppConnectionController.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -170,7 +174,10 @@ export const identityRouter = createIdentityRouter({
   ...authenticationControllers,
 });
 export const publicWebChatRouter = createPublicWebChatRouter(publicWebChatSessionService, publicWebChatConversationService, production);
-const whatsAppWebhookRouter = createWhatsAppWebhookRouter(createWhatsAppWebhookControllers(new WhatsAppWebhookService({ appSecret: process.env.WHATSAPP_APP_SECRET ?? "", verifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? "" }, whatsAppConnectionService, new WhatsAppConversationRepository(database), new ChannelProviderEventRepository(database), conversationService, operationalConversationTurnService, identityClock, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), undefined, whatsAppCredentialResolver, (accessToken) => new WhatsAppCloudApiProvider(accessToken, process.env.WHATSAPP_GRAPH_API_VERSION ?? "v22.0"))));
+const whatsAppOutboundDeliveryService = new WhatsAppOutboundDeliveryService(new ConversationRepository(database), whatsAppConnections, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), whatsAppCredentialResolver, (accessToken) => new WhatsAppCloudApiProvider(accessToken, process.env.WHATSAPP_GRAPH_API_VERSION ?? "v22.0"), identityClock);
+const operatorConversationMessagingService = new OperatorConversationMessagingService(conversationService, new ConversationRepository(database), new ConversationRepository(database), new WhatsAppConversationRepository(database), whatsAppOutboundDeliveryService, identityClock);
+configureProductionConversationMessageController((context, actor) => createOperatorConversationMessageController(operatorConversationMessagingService, context, actor));
+const whatsAppWebhookRouter = createWhatsAppWebhookRouter(createWhatsAppWebhookControllers(new WhatsAppWebhookService({ appSecret: process.env.WHATSAPP_APP_SECRET ?? "", verifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? "" }, whatsAppConnectionService, new WhatsAppConversationRepository(database), new ChannelProviderEventRepository(database), conversationService, operationalConversationTurnService, identityClock, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), undefined, whatsAppCredentialResolver, (accessToken) => new WhatsAppCloudApiProvider(accessToken, process.env.WHATSAPP_GRAPH_API_VERSION ?? "v22.0"), new ConversationRepository(database), whatsAppOutboundDeliveryService)));
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));
 function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
   const runtime = new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), identityClock);

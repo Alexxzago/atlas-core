@@ -55,8 +55,12 @@ interface AuthorizedCompanyDependencies {
   webChatConnectionControllers?: ContextualWebChatConnectionControllers;
   whatsAppConnectionControllers?: ContextualWhatsAppConnectionControllers;
   knowledgeControllers?: Record<string, (context: WorkspaceContext, actor: ActorContext) => RequestHandler>;
+  conversationMessageController?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
   pdfBodyParser?: RequestHandler;
 }
+
+let productionConversationMessageController: ((context: WorkspaceContext, actor: ActorContext) => RequestHandler) | null = null;
+export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
 
 function rawCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -139,6 +143,8 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     });
   }) : null;
   if (operationalExecution) router.post("/:workspaceId/companies/:companyId/assistant/executions", operationalExecution);
+  const conversationMessageController = dependencies.conversationMessageController ?? productionConversationMessageController;
+  if (conversationMessageController) router.post("/:workspaceId/companies/:companyId/conversations/:conversationId/messages", authorize("conversation:message:send", true, conversationMessageController));
   const webChat = dependencies.webChatConnectionControllers;
   if (webChat) {
     router.get("/:workspaceId/companies/:companyId/web-chat-connections", authorize("company:read", false, webChat.list));
