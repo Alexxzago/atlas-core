@@ -781,6 +781,52 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 23,
+    name: "0023_conversation_controls",
+    checksumSource: "conversation-control-state-v1|lazy-default-control-v1|safe-conversation-projections-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE conversation_controls (
+          conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+          state TEXT NOT NULL CHECK (state IN ('automated','human_required','human_controlled')),
+          controlling_actor_id TEXT,
+          last_controlling_actor_id TEXT,
+          taken_at TEXT,
+          released_at TEXT,
+          last_operator_activity_at TEXT,
+          attention_reason TEXT CHECK (attention_reason IN ('customer_request','automation_failure','policy_escalation','operator_follow_up')),
+          resolved_at TEXT,
+          resolved_by TEXT,
+          version INTEGER NOT NULL CHECK (version >= 1),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK ((state = 'human_controlled' AND controlling_actor_id IS NOT NULL AND taken_at IS NOT NULL) OR (state IN ('automated','human_required') AND controlling_actor_id IS NULL)),
+          CHECK (released_at IS NULL OR controlling_actor_id IS NULL),
+          CHECK ((resolved_at IS NULL AND resolved_by IS NULL) OR (resolved_at IS NOT NULL AND resolved_by IS NOT NULL)),
+          CHECK (updated_at >= created_at),
+          CHECK (taken_at IS NULL OR taken_at >= created_at),
+          CHECK (released_at IS NULL OR (taken_at IS NOT NULL AND released_at >= taken_at)),
+          CHECK (last_operator_activity_at IS NULL OR last_operator_activity_at >= created_at),
+          CHECK (resolved_at IS NULL OR resolved_at >= created_at)
+        );
+        CREATE INDEX idx_conversation_controls_state_updated
+          ON conversation_controls(state,updated_at DESC,conversation_id DESC);
+      `);
+    },
+  },
+  {
+    id: 24,
+    name: "0024_operator_message_idempotency",
+    checksumSource: "conversation-message-scoped-idempotency-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE UNIQUE INDEX idx_conversation_messages_idempotency
+          ON conversation_messages(conversation_id,idempotency_key)
+          WHERE idempotency_key IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

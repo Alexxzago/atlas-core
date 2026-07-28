@@ -15,5 +15,6 @@ export interface ProviderMessageRecordRepositoryPort {
 export interface OutboundDeliveryRepositoryPort {
   create(delivery: OutboundDelivery): OutboundDelivery | null;
   findById(id: OutboundDeliveryId): OutboundDelivery | null;
+  findByProviderMessageRecordAndConnection(providerMessageRecordId: string, transportConnectionId: string): OutboundDelivery | null;
   updateState(id: OutboundDeliveryId, state: OutboundDelivery["state"], safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null;
 }

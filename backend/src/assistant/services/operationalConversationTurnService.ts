@@ -22,6 +22,15 @@ export interface OperationalConversationTurnResult {
   readonly executionRecordId: string;
 }
 
+export interface OperationalConversationTurnHooks {
+  readonly afterInbound?: (inbound: ConversationMessage) => void | Promise<void>;
+  readonly beforeRuntime?: (inbound: ConversationMessage) => boolean | Promise<boolean>;
+}
+
+export class OperationalConversationTurnSuppressedError extends Error {
+  public constructor(readonly inbound: ConversationMessage) { super("Conversation turn was suppressed."); }
+}
+
 export class InMemoryConversationTurnLock {
   private readonly active = new Set<string>();
 
@@ -49,21 +58,11 @@ export class OperationalConversationTurnService {
     if (!Number.isSafeInteger(historyLimit) || historyLimit < 1) throw new Error("Conversation history limit is invalid.");
   }
 
-  public async execute(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, input: unknown): Promise<OperationalConversationTurnResult> {
+  public async execute(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, input: unknown, hooks?: OperationalConversationTurnHooks): Promise<OperationalConversationTurnResult> {
     const scopedCompanyId = parseCompanyId(companyIdValue), conversationIdValueParsed = parseConversationId(conversationIdValue), parsed = turnInput(input);
     const company = this.companies.findById(context, scopedCompanyId);
     if (!company) throw new OperationalConversationTurnNotFoundError("Company was not found.");
     const conversation = this.conversations.validateOpen(context, scopedCompanyId, conversationIdValueParsed);
-    const profile = this.profiles.findById(context, scopedCompanyId, parsed.profileId);
-    if (!profile) throw new OperationalConversationTurnNotFoundError("Assistant Profile was not found.");
-    try { this.profilePolicy.assert(profile); }
-    catch (error: unknown) {
-      if (error instanceof AssistantProfilePolicyError) throw new OperationalConversationTurnProfileNotExecutableError("Assistant Profile is not executable.");
-      throw error;
-    }
-    if (company.status !== "ready") throw new OperationalConversationTurnNotFoundError("Company is not ready.");
-    const knowledge = this.knowledge.loadCurrentVersion(context, scopedCompanyId);
-    if (!knowledge) throw new OperationalConversationTurnKnowledgeUnavailableError("Published knowledge is unavailable.");
     const release = this.locks.acquire(context, conversation.id);
     if (!release) throw new OperationalConversationTurnInProgressError("Conversation turn is already in progress.");
     try {
@@ -71,7 +70,19 @@ export class OperationalConversationTurnService {
       const inbound = this.conversations.addMessage(context, scopedCompanyId, conversation.id, {
         senderParticipantId: parsed.inboundParticipantId, direction: "inbound", content: parsed.content,
       });
+      await hooks?.afterInbound?.(inbound);
+      const profile = this.profiles.findById(context, scopedCompanyId, parsed.profileId);
+      if (!profile) throw new OperationalConversationTurnNotFoundError("Assistant Profile was not found.");
+      try { this.profilePolicy.assert(profile); }
+      catch (error: unknown) {
+        if (error instanceof AssistantProfilePolicyError) throw new OperationalConversationTurnProfileNotExecutableError("Assistant Profile is not executable.");
+        throw error;
+      }
+      if (company.status !== "ready") throw new OperationalConversationTurnNotFoundError("Company is not ready.");
+      const knowledge = this.knowledge.loadCurrentVersion(context, scopedCompanyId);
+      if (!knowledge) throw new OperationalConversationTurnKnowledgeUnavailableError("Published knowledge is unavailable.");
       const history = historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit);
+      if (await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
       const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, history, {
         purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
       });
