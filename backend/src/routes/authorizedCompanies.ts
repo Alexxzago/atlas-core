@@ -38,6 +38,11 @@ interface ContextualWhatsAppConnectionControllers {
   create: (context: WorkspaceContext) => RequestHandler;
   get: (context: WorkspaceContext) => RequestHandler;
   update: (context: WorkspaceContext) => RequestHandler;
+  status?: (context: WorkspaceContext) => RequestHandler;
+  configureCredentials?: (context: WorkspaceContext) => RequestHandler;
+  validate?: (context: WorkspaceContext) => RequestHandler;
+  activate?: (context: WorkspaceContext) => RequestHandler;
+  deactivate?: (context: WorkspaceContext) => RequestHandler;
 }
 
 interface AuthorizedCompanyDependencies {
@@ -147,6 +152,11 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     router.post("/:workspaceId/companies/:companyId/whatsapp-connections", authorize("company:manage", true, whatsApp.create));
     router.get("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId", authorize("company:read", false, whatsApp.get));
     router.patch("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId", authorize("company:manage", true, whatsApp.update));
+    if (whatsApp.status) router.get("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/status", authorize("company:read", false, whatsApp.status));
+    if (whatsApp.configureCredentials) router.put("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/credentials", authorize("company:manage", true, whatsApp.configureCredentials));
+    if (whatsApp.validate) router.post("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/validation", authorize("company:manage", true, whatsApp.validate));
+    if (whatsApp.activate) router.post("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/activation", authorize("company:manage", true, whatsApp.activate));
+    if (whatsApp.deactivate) router.post("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/deactivation", authorize("company:manage", true, whatsApp.deactivate));
   }
   const k=dependencies.knowledgeControllers;
   if(k){
