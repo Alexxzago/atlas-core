@@ -2,8 +2,17 @@ import { Router } from "express";
 import { database } from "../config/database.js";
 
 const router = Router();
+let shuttingDown = false;
+
+export function setShuttingDown(value: boolean): void {
+  shuttingDown = value;
+}
 
 router.get("/health", (_req, res) => {
+  if (shuttingDown) {
+    res.status(503).json({ status: "shutting_down" });
+    return;
+  }
   res.json({
     status: "online",
     service: "Atlas Core",
@@ -12,6 +21,10 @@ router.get("/health", (_req, res) => {
 });
 
 router.get("/ready", (_req, res) => {
+  if (shuttingDown) {
+    res.status(503).json({ status: "shutting_down" });
+    return;
+  }
   try {
     database.prepare("SELECT 1 AS ready").get();
     res.json({ status: "ready", database: "available" });

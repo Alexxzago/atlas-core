@@ -4,6 +4,7 @@ import { AtlasAgent } from "../agents/atlas.js";
 import type { AssistantExecutionRequest, AssistantExecutionResult } from "../assistant/application/assistantExecution.js";
 import { assistantProfileId, reconstructAssistantProfile, type AssistantProfile } from "../assistant/domain/assistantProfile.js";
 import { AssistantPreviewKnowledgeUnavailableError, AssistantPreviewNotFoundError, AssistantPreviewService, AssistantPreviewValidationError, AssistantProfileNotExecutableError } from "../assistant/services/assistantPreviewService.js";
+import { OperationalAssistantRuntime } from "../assistant/services/operationalAssistantRuntime.js";
 import type { AssistantProfileRepositoryPort } from "../assistant/application/ports.js";
 import { GeminiProvider } from "../providers/gemini.js";
 import type { CompanyRepositoryPort, KnowledgeRepositoryPort } from "../application/ports/repositories.js";
@@ -13,6 +14,7 @@ import { PermissionPolicy } from "../workspace/domain/membership.js";
 
 const context = Object.freeze({ workspaceId: 1, workspaceKey: "one" });
 const knowledge = { company: { name: "Atlas", website: "https://atlas.test", phone: "", email: "" }, business: { services: ["Sales"], hours: "Always", locations: ["Remote"] }, faq: [{ question: "Exact?", answer: "Stored" }] };
+const knowledgeVersion = { id: "kver_00000000000000000000000000000000", companyId: 1, versionNumber: 1, compilerVersion: "company-knowledge-compiler-v1" as const, knowledge, snapshotDigest: "a".repeat(64), publishedByActorId: "system:test", publishedAt: "2026-07-18T00:00:00.000Z", sourceRevisionIds: [], publicationVersion: 1 };
 
 function profile(status: AssistantProfile["status"] = "ready"): AssistantProfile {
   return reconstructAssistantProfile({ id: assistantProfileId("asp_00000000000000000000000000000000"), companyId: 1, name: "Sales", normalizedName: "sales", description: "Administrative", businessRole: "Sales assistant", objective: "Qualify requests", audience: "Customers", tone: "friendly", assistantLanguage: "en", welcomeMessage: "Welcome", fallbackMessage: "Safe fallback", status, createdAt: "2026-07-18T00:00:00.000Z", updatedAt: "2026-07-18T00:00:00.000Z", archivedAt: status === "archived" ? "2026-07-18T00:00:00.000Z" : null });
@@ -25,10 +27,11 @@ class CapturingGenerator implements AnswerGenerator {
 
 function setup(profileValue: AssistantProfile | null = profile(), withKnowledge = true) {
   const companies = { findById: (_context: WorkspaceContext, id: number) => id === 1 ? { id: 1, workspaceId: 1, name: "Atlas", website: "https://atlas.test", phone: "", email: "", status: "ready" as const, createdAt: "now" } : null } as CompanyRepositoryPort;
-  const knowledgeRepository = { load: () => withKnowledge ? knowledge : null } as unknown as KnowledgeRepositoryPort;
+  const knowledgeRepository = { load: () => withKnowledge ? knowledge : null, loadCurrentVersion: () => withKnowledge ? knowledgeVersion : null } as KnowledgeRepositoryPort & { loadCurrentVersion: () => typeof knowledgeVersion | null };
   const profiles = { findById: () => profileValue } as unknown as AssistantProfileRepositoryPort;
   const generator = new CapturingGenerator();
-  return { generator, service: new AssistantPreviewService(companies, knowledgeRepository, profiles, new AtlasAgent(generator)) };
+  const runtime = new OperationalAssistantRuntime(new AtlasAgent(generator), { create: (record) => record, complete: () => true }, { now: () => "2026-07-18T00:00:00.000Z" });
+  return { generator, service: new AssistantPreviewService(companies, knowledgeRepository, profiles, runtime, "test") };
 }
 
 test("preview creates a frozen minimal contract and never uses the legacy FAQ shortcut", async () => {

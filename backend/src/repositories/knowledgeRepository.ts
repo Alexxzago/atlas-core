@@ -10,5 +10,6 @@ export class KnowledgeRepository implements KnowledgeRepositoryPort {
   private readonly frozen: CompanyKnowledgeRepository;
   public constructor(private readonly db: SynchronousDatabase) { this.frozen = new CompanyKnowledgeRepository(db); }
   public load(context: WorkspaceContext, companyId: number): CompanyKnowledge | null { return this.frozen.loadPublished(context, companyId); }
+  public loadCurrentVersion(context: WorkspaceContext, companyId: number) { return this.frozen.loadCurrentVersion(context, companyId); }
 }
 export const knowledgeRepository = new KnowledgeRepository(database);

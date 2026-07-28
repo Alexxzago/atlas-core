@@ -1,0 +1,5 @@
+export interface WhatsAppCloudApiPort { sendText(phoneNumberId: string, recipientWaId: string, text: string): Promise<string>; }
+export class WhatsAppCloudApiProvider implements WhatsAppCloudApiPort {
+  public constructor(private readonly accessToken: string, private readonly graphVersion: string, private readonly fetcher: typeof fetch = fetch) {}
+  public async sendText(phoneNumberId: string, recipientWaId: string, text: string): Promise<string> { const response=await this.fetcher(`https://graph.facebook.com/${this.graphVersion}/${encodeURIComponent(phoneNumberId)}/messages`,{method:"POST",headers:{authorization:`Bearer ${this.accessToken}`,"content-type":"application/json"},body:JSON.stringify({messaging_product:"whatsapp",to:recipientWaId,type:"text",text:{body:text}})}); if(!response.ok)throw new Error("WhatsApp delivery failed."); const body=await response.json() as {messages?:Array<{id?:unknown}>}; const id=body.messages?.[0]?.id; if(typeof id!=="string"||!id)return Promise.reject(new Error("WhatsApp delivery response is invalid.")); return id; }
+}

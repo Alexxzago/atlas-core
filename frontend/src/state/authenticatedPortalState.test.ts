@@ -141,6 +141,17 @@ test("selecting another Company clears Profile and transient archive state", () 
   assert.deepEqual(state.profiles, []); assert.equal(state.transientArchivedProfile, null);
 });
 
+test("a refreshed selected Company replaces stale status without changing selection", () => {
+  const processing = { ...companyA, status: "processing" as const }, ready = { ...processing, status: "ready" as const };
+  const state = authenticatedPortalReducer({ ...populated(), companies: [processing] }, { type: "companyRefreshed", workspaceId: workspaceA.id, company: ready });
+  assert.equal(state.selectedCompanyId, companyA.id); assert.equal(state.companies[0]?.status, "ready");
+});
+
+test("a stale Company refresh cannot replace a different selected Company", () => {
+  const state = authenticatedPortalReducer({ ...populated(), selectedCompanyId: companyB.id, companies: [companyA, companyB] }, { type: "companyRefreshed", workspaceId: workspaceA.id, company: { ...companyA, status: "processing" } });
+  assert.equal(state.companies[0]?.status, "ready"); assert.equal(state.selectedCompanyId, companyB.id);
+});
+
 test("Workspace selection 404 keeps the Workspace choices", () => {
   const request = { requestId: 1, generation: 1, workspaceId: workspaceB.id };
   let state = authenticatedPortalReducer(populated(), { type: "workspaceSelectionRequested", workspaceId: workspaceB.id, request });

@@ -462,6 +462,259 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 12,
+    name: "0012_operational_assistant_runtime",
+    checksumSource: "assistant-execution-records-v1|profile-runtime-snapshots-v1|published-knowledge-reference-v1|no-input-persistence",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE assistant_execution_records (
+          id TEXT PRIMARY KEY,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          assistant_profile_id TEXT NOT NULL REFERENCES assistant_profiles(id) ON DELETE CASCADE,
+          profile_snapshot_json TEXT NOT NULL,
+          knowledge_version_id TEXT NOT NULL REFERENCES company_knowledge_versions(id) ON DELETE CASCADE,
+          provider TEXT NOT NULL,
+          purpose TEXT NOT NULL CHECK (purpose IN ('preview', 'operational_execution')),
+          state TEXT NOT NULL CHECK (state IN ('started', 'answered', 'safe_fallback', 'failed')),
+          fallback_used INTEGER NOT NULL CHECK (fallback_used IN (0, 1)),
+          result TEXT,
+          input_tokens INTEGER CHECK (input_tokens IS NULL OR input_tokens >= 0),
+          output_tokens INTEGER CHECK (output_tokens IS NULL OR output_tokens >= 0),
+          error_code TEXT,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          duration_milliseconds INTEGER,
+          CHECK ((state = 'started' AND completed_at IS NULL AND duration_milliseconds IS NULL AND result IS NULL AND error_code IS NULL)
+            OR (state IN ('answered', 'safe_fallback') AND completed_at IS NOT NULL AND duration_milliseconds >= 0 AND result IS NOT NULL AND error_code IS NULL)
+            OR (state = 'failed' AND completed_at IS NOT NULL AND duration_milliseconds >= 0 AND result IS NULL AND error_code IS NOT NULL))
+        );
+        CREATE INDEX idx_assistant_execution_records_company_started
+          ON assistant_execution_records(company_id, started_at DESC, id DESC);
+        CREATE INDEX idx_assistant_execution_records_profile_started
+          ON assistant_execution_records(assistant_profile_id, started_at DESC, id DESC);
+      `);
+    },
+  },
+  {
+    id: 13,
+    name: "0013_conversation_domain_foundation",
+    checksumSource: "company-conversations-v1|neutral-participants-v1|neutral-messages-v1|nullable-idempotency-key-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE conversations (
+          id TEXT PRIMARY KEY,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          state TEXT NOT NULL CHECK (state IN ('open','closed')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          closed_at TEXT,
+          CHECK ((state='open' AND closed_at IS NULL) OR (state='closed' AND closed_at IS NOT NULL))
+        );
+        CREATE INDEX idx_conversations_company_created ON conversations(company_id,created_at DESC,id DESC);
+
+        CREATE TABLE conversation_participants (
+          id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          participant_type TEXT NOT NULL,
+          reference TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_conversation_participants_conversation_created ON conversation_participants(conversation_id,created_at,id);
+
+        CREATE TABLE conversation_messages (
+          id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          sender_participant_id TEXT NOT NULL REFERENCES conversation_participants(id) ON DELETE CASCADE,
+          direction TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
+          content TEXT NOT NULL,
+          idempotency_key TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_conversation_messages_conversation_created ON conversation_messages(conversation_id,created_at,id);
+      `);
+    },
+  },
+  {
+    id: 14,
+    name: "0014_conversation_execution_record_link",
+    checksumSource: "conversation-outbound-execution-record-reference-v1",
+    apply(database): void {
+      database.exec(`
+        ALTER TABLE conversation_messages
+        ADD COLUMN assistant_execution_record_id TEXT
+          REFERENCES assistant_execution_records(id) ON DELETE SET NULL;
+        CREATE INDEX idx_conversation_messages_execution_record
+          ON conversation_messages(assistant_execution_record_id)
+          WHERE assistant_execution_record_id IS NOT NULL;
+      `);
+    },
+  },
+  {
+    id: 15,
+    name: "0015_web_chat_connections",
+    checksumSource: "web-chat-connection-binding-v1|opaque-public-id-v1|active-inactive-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE web_chat_connections (
+          id TEXT PRIMARY KEY,
+          public_id TEXT NOT NULL UNIQUE,
+          workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          assistant_profile_id TEXT NOT NULL REFERENCES assistant_profiles(id) ON DELETE CASCADE,
+          status TEXT NOT NULL CHECK (status IN ('active','inactive')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_web_chat_connections_workspace ON web_chat_connections(workspace_id,id);
+        CREATE INDEX idx_web_chat_connections_company_created ON web_chat_connections(company_id,created_at DESC,id DESC);
+        CREATE INDEX idx_web_chat_connections_profile ON web_chat_connections(assistant_profile_id);
+      `);
+    },
+  },
+  {
+    id: 16,
+    name: "0016_web_chat_sessions",
+    checksumSource: "anonymous-web-chat-session-v1|opaque-token-digest-v1|conversation-participant-binding-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE web_chat_sessions (
+          id TEXT PRIMARY KEY,
+          web_chat_connection_id TEXT NOT NULL REFERENCES web_chat_connections(id) ON DELETE RESTRICT,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE RESTRICT,
+          visitor_participant_id TEXT NOT NULL REFERENCES conversation_participants(id) ON DELETE RESTRICT,
+          responder_participant_id TEXT NOT NULL REFERENCES conversation_participants(id) ON DELETE RESTRICT,
+          token_digest TEXT NOT NULL UNIQUE,
+          state TEXT NOT NULL CHECK (state IN ('active','expired','closed')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_web_chat_sessions_connection ON web_chat_sessions(web_chat_connection_id);
+        CREATE INDEX idx_web_chat_sessions_conversation ON web_chat_sessions(conversation_id);
+        CREATE INDEX idx_web_chat_sessions_expires ON web_chat_sessions(expires_at);
+        CREATE INDEX idx_web_chat_sessions_state_expires ON web_chat_sessions(state,expires_at);
+      `);
+    },
+  },
+  {
+    id: 17,
+    name: "0017_conversation_channel_metadata",
+    checksumSource: "conversation-channel-v1|internal-web-chat-whatsapp|existing-internal-default",
+    apply(database): void {
+      database.exec(`
+        ALTER TABLE conversations
+        ADD COLUMN channel TEXT NOT NULL DEFAULT 'internal'
+          CHECK (channel IN ('internal','web_chat','whatsapp'));
+        CREATE INDEX idx_conversations_company_channel_created
+          ON conversations(company_id,channel,created_at DESC,id DESC);
+      `);
+    },
+  },
+  {
+    id: 18,
+    name: "0018_whatsapp_connections_bindings",
+    checksumSource: "whatsapp-connection-v1|phone-number-global-unique|connection-wa-id-binding-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE whatsapp_connections (
+          id TEXT PRIMARY KEY,
+          workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
+          company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          assistant_profile_id TEXT NOT NULL REFERENCES assistant_profiles(id) ON DELETE CASCADE,
+          phone_number_id TEXT NOT NULL UNIQUE,
+          whatsapp_business_account_id TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('active','inactive')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_whatsapp_connections_workspace ON whatsapp_connections(workspace_id,id);
+        CREATE INDEX idx_whatsapp_connections_company_created ON whatsapp_connections(company_id,created_at DESC,id DESC);
+        CREATE INDEX idx_whatsapp_connections_profile ON whatsapp_connections(assistant_profile_id);
+
+        CREATE TABLE whatsapp_conversation_bindings (
+          id TEXT PRIMARY KEY,
+          whatsapp_connection_id TEXT NOT NULL REFERENCES whatsapp_connections(id) ON DELETE CASCADE,
+          wa_id TEXT NOT NULL,
+          conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          customer_participant_id TEXT NOT NULL REFERENCES conversation_participants(id) ON DELETE CASCADE,
+          assistant_participant_id TEXT NOT NULL REFERENCES conversation_participants(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (whatsapp_connection_id,wa_id)
+        );
+        CREATE INDEX idx_whatsapp_conversation_bindings_conversation ON whatsapp_conversation_bindings(conversation_id);
+      `);
+    },
+  },
+  {
+    id: 19,
+    name: "0019_channel_provider_events_messages",
+    checksumSource: "channel-provider-event-v1|provider-message-record-v1|external-idempotency-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE channel_provider_events (
+          id TEXT PRIMARY KEY,
+          communication_channel TEXT NOT NULL CHECK (communication_channel IN ('internal','web_chat','whatsapp')),
+          transport_provider TEXT NOT NULL,
+          transport_connection_id TEXT NOT NULL,
+          external_event_id TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('claimed','processing','completed','failed')),
+          conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+          conversation_message_id TEXT REFERENCES conversation_messages(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (transport_provider,external_event_id)
+        );
+        CREATE INDEX idx_channel_provider_events_connection_state
+          ON channel_provider_events(transport_connection_id,state,created_at);
+
+        CREATE TABLE provider_message_records (
+          id TEXT PRIMARY KEY,
+          communication_channel TEXT NOT NULL CHECK (communication_channel IN ('internal','web_chat','whatsapp')),
+          transport_provider TEXT NOT NULL,
+          direction TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
+          transport_connection_id TEXT NOT NULL,
+          conversation_message_id TEXT NOT NULL REFERENCES conversation_messages(id) ON DELETE CASCADE,
+          external_message_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (transport_provider,external_message_id),
+          UNIQUE (transport_provider,transport_connection_id,conversation_message_id)
+        );
+        CREATE INDEX idx_provider_message_records_message ON provider_message_records(conversation_message_id);
+      `);
+    },
+  },
+  {
+    id: 20,
+    name: "0020_outbound_deliveries",
+    checksumSource: "outbound-delivery-v1|provider-message-connection-unique|lease-ready",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE outbound_deliveries (
+          id TEXT PRIMARY KEY,
+          provider_message_record_id TEXT NOT NULL REFERENCES provider_message_records(id) ON DELETE CASCADE,
+          transport_connection_id TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('pending','leased','accepted','retryable','permanent_failure','uncertain')),
+          attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
+          next_attempt_at TEXT NOT NULL,
+          lease_owner TEXT,
+          lease_expires_at TEXT,
+          safe_error_category TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK ((lease_owner IS NULL AND lease_expires_at IS NULL) OR (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)),
+          UNIQUE (provider_message_record_id,transport_connection_id)
+        );
+        CREATE INDEX idx_outbound_deliveries_ready
+          ON outbound_deliveries(state,next_attempt_at,id);
+        CREATE INDEX idx_outbound_deliveries_lease
+          ON outbound_deliveries(state,lease_expires_at,id);
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

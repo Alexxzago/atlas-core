@@ -7,8 +7,11 @@ import { useI18n } from "./i18n/I18nContext";
 import { applyOnboardingFailure, replaceCompany, setCompanyStatus } from "./state/companyState";
 import type { Company, CompanyInput, CompanyUpdate } from "./types/api";
 import { AuthenticationPortal } from "./components/AuthenticationPortal";
+import { PublicChatPage, publicConnectionIdFromPath } from "./components/PublicChatPage";
 
 export default function App(): React.JSX.Element {
+  const publicConnectionId = publicConnectionIdFromPath(window.location.pathname);
+  if (publicConnectionId) return <PublicChatPage connectionPublicId={publicConnectionId} />;
   if(import.meta.env.VITE_ATLAS_TRUSTED_LOCAL_MODE!=="true")return <AuthenticationPortal/>;
   return <TrustedPortal/>;
 }

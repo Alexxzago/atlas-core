@@ -100,6 +100,7 @@ type Action =
   | { type: "companyCreateFailed"; request: RequestContext }
   | { type: "companyCreateNotFound"; request: RequestContext }
   | { type: "companySelected"; companyId: number }
+  | { type: "companyRefreshed"; workspaceId: string; company: Company }
   | { type: "companyNotFound" }
   | { type: "profilesLoadStarted"; request: RequestContext }
   | { type: "profilesLoaded"; request: RequestContext; profiles: AssistantProfile[] }
@@ -210,6 +211,8 @@ export function authenticatedPortalReducer(state: AuthenticatedPortalState, acti
         notice: { type: "error", key: "portal.resourceUnavailable" } }) : state;
     case "companySelected": return clearProfiles({ ...state, selectedCompanyId: action.companyId,
       companyGeneration: state.companyGeneration + 1, notice: null });
+    case "companyRefreshed": return state.selectedWorkspace?.id === action.workspaceId && state.selectedCompanyId === action.company.id
+      ? { ...state, companies: replaceCompany(state.companies, action.company) } : state;
     case "companyNotFound": return clearProfiles({ ...state, selectedCompanyId: null,
       notice: { type: "error", key: "portal.resourceUnavailable" } });
     case "profilesLoadStarted": return { ...state, profilesLoading: true, profileError: false, profileReloadRequested: false,
@@ -276,6 +279,10 @@ export function authenticatedPortalReducer(state: AuthenticatedPortalState, acti
 function replaceProfile(profiles: AssistantProfile[], updated: AssistantProfile): AssistantProfile[] {
   const exists = profiles.some((profile) => profile.id === updated.id);
   return exists ? profiles.map((profile) => profile.id === updated.id ? updated : profile) : [updated, ...profiles];
+}
+
+function replaceCompany(companies: Company[], updated: Company): Company[] {
+  return companies.map((company) => company.id === updated.id ? updated : company);
 }
 
 export const readyAdvisoryFields = ["name", "businessRole", "objective", "tone", "assistantLanguage", "welcomeMessage", "fallbackMessage"] as const;

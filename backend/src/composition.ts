@@ -69,6 +69,29 @@ import type { AppRouters } from "./app.js";
 import { smtpConfiguration, SmtpEmailDelivery } from "./providers/smtpEmailDelivery.js";
 import { SqlitePlatformBootstrapTransaction } from "./repositories/platformBootstrapTransaction.js";
 import { PlatformBootstrapService } from "./identity/services/platformBootstrapService.js";
+import { ConversationRepository } from "./repositories/conversationRepository.js";
+import { ConversationService } from "./conversation/services/conversationService.js";
+import { AssistantExecutionRecordRepository } from "./repositories/assistantExecutionRecordRepository.js";
+import { OperationalAssistantRuntime } from "./assistant/services/operationalAssistantRuntime.js";
+import { InMemoryConversationTurnLock, OperationalConversationTurnService } from "./assistant/services/operationalConversationTurnService.js";
+import { WebChatConnectionRepository } from "./repositories/webChatConnectionRepository.js";
+import { WebChatConnectionService } from "./webChat/services/webChatConnectionService.js";
+import { createGetWebChatConnectionController, createListWebChatConnectionsController, createUpdateWebChatConnectionController, createWebChatConnectionController } from "./controllers/webChatConnectionController.js";
+import { WebChatSessionRepository } from "./repositories/webChatSessionRepository.js";
+import { PublicWebChatSessionService } from "./webChat/services/publicWebChatSessionService.js";
+import { PublicWebChatConversationService } from "./webChat/services/publicWebChatConversationService.js";
+import { createPublicWebChatRouter } from "./routes/publicWebChat.js";
+import { WhatsAppWebhookService } from "./whatsapp/services/WhatsAppWebhookService.js";
+import { createWhatsAppWebhookControllers } from "./controllers/WhatsAppWebhookController.js";
+import { createWhatsAppWebhookRouter } from "./routes/whatsAppWebhook.js";
+import { WhatsAppConversationRepository } from "./repositories/whatsappConversationRepository.js";
+import { ChannelProviderEventRepository } from "./repositories/channelProviderEventRepository.js";
+import { ProviderMessageRecordRepository } from "./repositories/providerMessageRecordRepository.js";
+import { OutboundDeliveryRepository } from "./repositories/outboundDeliveryRepository.js";
+import { WhatsAppCloudApiProvider } from "./whatsapp/providers/WhatsAppCloudApiProvider.js";
+import { WhatsAppConnectionRepository } from "./repositories/whatsappConnectionRepository.js";
+import { WhatsAppConnectionService } from "./whatsapp/services/WhatsAppConnectionService.js";
+import { createGetWhatsAppConnectionController, createListWhatsAppConnectionsController, createUpdateWhatsAppConnectionController, createWhatsAppConnectionController } from "./controllers/WhatsAppConnectionController.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -83,6 +106,7 @@ const verificationHashProvider = new Sha256VerificationHashProvider();
 const identityClock = new SystemClock();
 const production=process.env.NODE_ENV==="production";
 if (production && (process.env.ATLAS_BOOTSTRAP_SECRET?.length ?? 0) < 32) throw new Error("Production requires ATLAS_BOOTSTRAP_SECRET with at least 32 characters.");
+if (production && (!(process.env.WHATSAPP_APP_SECRET?.trim()) || !(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim()) || !(process.env.WHATSAPP_ACCESS_TOKEN?.trim()))) throw new Error("Production requires WhatsApp webhook and access credentials.");
 const deliverySelection = process.env.ATLAS_VERIFICATION_DELIVERY;
 const useDevelopmentDelivery = !production && deliverySelection !== "smtp";
 const smtpDelivery = useDevelopmentDelivery
@@ -111,6 +135,12 @@ const platformBootstrapControllers = createPlatformBootstrapControllers(platform
 export const authorizationService=new AuthorizationService(new MembershipRepository(database),workspaceRepository);
 export const authenticatedWorkspaceResolver=new WorkspaceResolver(workspaceRepository);
 const assistantProfileService=new AssistantProfileService(new AssistantProfileRepository(database),identityClock);
+const webChatConnectionService = new WebChatConnectionService(companyRepository, new AssistantProfileRepository(database), new WebChatConnectionRepository(database), identityClock);
+const whatsAppConnectionService = new WhatsAppConnectionService(companyRepository, new AssistantProfileRepository(database), new WhatsAppConnectionRepository(database), identityClock);
+export const conversationService = new ConversationService(new ConversationRepository(database), identityClock);
+const publicWebChatSessionService = new PublicWebChatSessionService(webChatConnectionService, conversationService, new WebChatSessionRepository(database), identityClock);
+export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock), new InMemoryConversationTurnLock(), "gemini", 20);
+const publicWebChatConversationService = new PublicWebChatConversationService(publicWebChatSessionService, operationalConversationTurnService, conversationService);
 const companyKnowledgeService=new FrozenKnowledgeService(companyRepository,new CompanyKnowledgeRepository(database),new SecurePublicUrlProvider(),new WorkerPdfTextExtractor(),new GeminiKnowledgeFactExtractor(geminiProvider),identityClock);
 const companyKnowledgeControllers=createCompanyKnowledgeControllers(companyKnowledgeService);
 const onboardingService = new OnboardingService(companyRepository,knowledgeRepository,firecrawlProvider,geminiProvider,cleanMarkdown,new FileMarkdownDebugStore(resolve(repositoryRoot,"knowledge")),companyKnowledgeService);
@@ -134,15 +164,18 @@ export const identityRouter = createIdentityRouter({
   platformBootstrap: platformBootstrapControllers.bootstrap,
   ...authenticationControllers,
 });
+export const publicWebChatRouter = createPublicWebChatRouter(publicWebChatSessionService, publicWebChatConversationService, production);
+const whatsAppWebhookRouter = createWhatsAppWebhookRouter(createWhatsAppWebhookControllers(new WhatsAppWebhookService({ appSecret: process.env.WHATSAPP_APP_SECRET ?? "", verifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? "" }, whatsAppConnectionService, new WhatsAppConversationRepository(database), new ChannelProviderEventRepository(database), conversationService, operationalConversationTurnService, identityClock, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), new WhatsAppCloudApiProvider(process.env.WHATSAPP_ACCESS_TOKEN ?? "", process.env.WHATSAPP_GRAPH_API_VERSION ?? "v22.0"))));
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));
 function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
-  const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), execution);
-  const operational = new OperationalAssistantExecutionService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), execution, new InMemoryOperationalExecutionBudget());
-  return createAuthorizedCompaniesRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,controllers:{list:context=>createListCompaniesController(companyService,context),create:context=>createCompanyController(companyService,context),get:context=>createGetCompanyController(companyService,context),update:context=>createUpdateCompanyController(companyService,context),delete:context=>createDeleteCompanyController(companyService,context),onboard:(context,actor)=>createOnboardingController(onboardingService,context,actor)},assistantControllers:{list:context=>createListAssistantProfilesController(assistantProfileService,context),create:context=>createAssistantProfileController(assistantProfileService,context),get:context=>createGetAssistantProfileController(assistantProfileService,context),update:context=>createUpdateAssistantProfileController(assistantProfileService,context),transition:context=>createTransitionAssistantProfileController(assistantProfileService,context),preview:context=>createAssistantPreviewController(preview,context),execution:context=>createOperationalAssistantExecutionController(operational,context)},knowledgeControllers:companyKnowledgeControllers});
+  const runtime = new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), identityClock);
+  const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, "gemini");
+  const operational = new OperationalAssistantExecutionService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, new InMemoryOperationalExecutionBudget(), "gemini");
+  return createAuthorizedCompaniesRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,controllers:{list:context=>createListCompaniesController(companyService,context),create:context=>createCompanyController(companyService,context),get:context=>createGetCompanyController(companyService,context),update:context=>createUpdateCompanyController(companyService,context),delete:context=>createDeleteCompanyController(companyService,context),onboard:(context,actor)=>createOnboardingController(onboardingService,context,actor)},assistantControllers:{list:context=>createListAssistantProfilesController(assistantProfileService,context),create:context=>createAssistantProfileController(assistantProfileService,context),get:context=>createGetAssistantProfileController(assistantProfileService,context),update:context=>createUpdateAssistantProfileController(assistantProfileService,context),transition:context=>createTransitionAssistantProfileController(assistantProfileService,context),preview:context=>createAssistantPreviewController(preview,context),execution:context=>createOperationalAssistantExecutionController(operational,context)},webChatConnectionControllers:{list:context=>createListWebChatConnectionsController(webChatConnectionService,context),create:context=>createWebChatConnectionController(webChatConnectionService,context),get:context=>createGetWebChatConnectionController(webChatConnectionService,context),update:context=>createUpdateWebChatConnectionController(webChatConnectionService,context)},whatsAppConnectionControllers:{list:context=>createListWhatsAppConnectionsController(whatsAppConnectionService,context),create:context=>createWhatsAppConnectionController(whatsAppConnectionService,context),get:context=>createGetWhatsAppConnectionController(whatsAppConnectionService,context),update:context=>createUpdateWhatsAppConnectionController(whatsAppConnectionService,context)},knowledgeControllers:companyKnowledgeControllers});
 }
 
 export const authorizedCompaniesRouter = createProductionAuthorizedCompaniesRouter(agent);
 
 export function createProductionAppRouters(execution: AssistantExecutionPort = agent): AppRouters {
-  return { authorizedCompaniesRouter: createProductionAuthorizedCompaniesRouter(execution), chatRouter, companiesRouter, identityRouter, knowledgeRouter, scrapeRouter, workspacesRouter };
+  return { authorizedCompaniesRouter: createProductionAuthorizedCompaniesRouter(execution), chatRouter, companiesRouter, identityRouter, knowledgeRouter, publicWebChatRouter, scrapeRouter, whatsAppWebhookRouter, workspacesRouter };
 }

@@ -116,3 +116,14 @@ export interface OperationalAssistantExecutionResponse {
   status: "answered" | "safe_fallback";
   answer: string;
 }
+
+export type WebChatConnectionStatus = "active" | "inactive";
+
+export interface WebChatConnection {
+  id: string;
+  publicId: string;
+  assistantProfileId: string;
+  status: WebChatConnectionStatus;
+  createdAt: string;
+  updatedAt: string;
+}
