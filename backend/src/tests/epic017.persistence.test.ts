@@ -63,7 +63,7 @@ test("EPIC-017 Phase 1 persists tenant-scoped WhatsApp Connections and bindings"
     assert.deepEqual(value.connectionRepository.listByCompany(value.secondary, value.first.id), []);
     assert.equal(value.connectionRepository.create(value.primary, reconstructWhatsAppConnection({ ...value.firstConnection, id: whatsAppConnectionId("wac_3123456789abcdef0123456789abcdef"), assistantProfileId: value.secondProfile.id, phoneNumberId: "phone-invalid-profile" })), null);
     assert.equal("accessToken" in value.firstConnection, false); assert.equal("appSecret" in value.firstConnection, false); assert.equal("verifyToken" in value.firstConnection, false);
-    assert.equal(value.connectionRepository.updateStatus(value.primary, value.first.id, value.firstConnection.id, "inactive", later)?.status, "inactive");
+    assert.equal(value.connectionRepository.updateStatus(value.primary, value.first.id, value.firstConnection.id, value.firstConnection.updatedAt, "inactive", later)?.status, "inactive");
     assert.throws(() => whatsAppConnectionStatus("disabled"));
     const duplicatePhone = reconstructWhatsAppConnection({ ...value.secondConnection, id: whatsAppConnectionId("wac_2123456789abcdef0123456789abcdef"), phoneNumberId: "phone-first" });
     assert.throws(() => value.connectionRepository.create(value.secondary, duplicatePhone));

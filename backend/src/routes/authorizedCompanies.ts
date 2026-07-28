@@ -33,6 +33,12 @@ interface ContextualWebChatConnectionControllers {
   get: (context: WorkspaceContext) => RequestHandler;
   update: (context: WorkspaceContext) => RequestHandler;
 }
+interface ContextualWhatsAppConnectionControllers {
+  list: (context: WorkspaceContext) => RequestHandler;
+  create: (context: WorkspaceContext) => RequestHandler;
+  get: (context: WorkspaceContext) => RequestHandler;
+  update: (context: WorkspaceContext) => RequestHandler;
+}
 
 interface AuthorizedCompanyDependencies {
   authentication: AuthenticationService;
@@ -42,6 +48,7 @@ interface AuthorizedCompanyDependencies {
   controllers: ContextualControllers;
   assistantControllers: ContextualAssistantControllers;
   webChatConnectionControllers?: ContextualWebChatConnectionControllers;
+  whatsAppConnectionControllers?: ContextualWhatsAppConnectionControllers;
   knowledgeControllers?: Record<string, (context: WorkspaceContext, actor: ActorContext) => RequestHandler>;
   pdfBodyParser?: RequestHandler;
 }
@@ -133,6 +140,13 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     router.post("/:workspaceId/companies/:companyId/web-chat-connections", authorize("company:manage", true, webChat.create));
     router.get("/:workspaceId/companies/:companyId/web-chat-connections/:connectionId", authorize("company:read", false, webChat.get));
     router.patch("/:workspaceId/companies/:companyId/web-chat-connections/:connectionId", authorize("company:manage", true, webChat.update));
+  }
+  const whatsApp = dependencies.whatsAppConnectionControllers;
+  if (whatsApp) {
+    router.get("/:workspaceId/companies/:companyId/whatsapp-connections", authorize("company:read", false, whatsApp.list));
+    router.post("/:workspaceId/companies/:companyId/whatsapp-connections", authorize("company:manage", true, whatsApp.create));
+    router.get("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId", authorize("company:read", false, whatsApp.get));
+    router.patch("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId", authorize("company:manage", true, whatsApp.update));
   }
   const k=dependencies.knowledgeControllers;
   if(k){

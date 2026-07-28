@@ -29,8 +29,13 @@ export class WhatsAppConnectionRepository implements WhatsAppConnectionRepositor
     return (this.db.prepare("SELECT wc.* FROM whatsapp_connections wc JOIN companies c ON c.id=wc.company_id WHERE wc.company_id=? AND wc.workspace_id=? AND c.workspace_id=? ORDER BY wc.created_at DESC,wc.id DESC").all(companyId, context.workspaceId, context.workspaceId) as unknown as Row[]).map(connection);
   }
 
-  public updateStatus(context: WorkspaceContext, companyId: number, id: WhatsAppConnectionId, status: WhatsAppConnectionStatus, updatedAt: string): WhatsAppConnection | null {
-    const result = this.db.prepare("UPDATE whatsapp_connections SET status=?,updated_at=? WHERE id=? AND company_id=? AND workspace_id=? AND company_id IN (SELECT id FROM companies WHERE id=? AND workspace_id=?)").run(status, updatedAt, id, companyId, context.workspaceId, companyId, context.workspaceId);
+  public updateStatus(context: WorkspaceContext, companyId: number, id: WhatsAppConnectionId, expectedUpdatedAt: string, status: WhatsAppConnectionStatus, updatedAt: string): WhatsAppConnection | null {
+    const result = this.db.prepare("UPDATE whatsapp_connections SET status=?,updated_at=? WHERE id=? AND company_id=? AND workspace_id=? AND updated_at=? AND company_id IN (SELECT id FROM companies WHERE id=? AND workspace_id=?)").run(status, updatedAt, id, companyId, context.workspaceId, expectedUpdatedAt, companyId, context.workspaceId);
+    return result.changes === 1 ? this.findById(context, companyId, id) : null;
+  }
+
+  public updateAssistantProfile(context: WorkspaceContext, companyId: number, id: WhatsAppConnectionId, expectedUpdatedAt: string, profileId: WhatsAppConnection["assistantProfileId"], updatedAt: string): WhatsAppConnection | null {
+    const result = this.db.prepare("UPDATE whatsapp_connections SET assistant_profile_id=?,updated_at=? WHERE id=? AND company_id=? AND workspace_id=? AND status='inactive' AND updated_at=? AND EXISTS (SELECT 1 FROM assistant_profiles p WHERE p.id=? AND p.company_id=?) AND company_id IN (SELECT id FROM companies WHERE id=? AND workspace_id=?)").run(profileId, updatedAt, id, companyId, context.workspaceId, expectedUpdatedAt, profileId, companyId, companyId, context.workspaceId);
     return result.changes === 1 ? this.findById(context, companyId, id) : null;
   }
 }

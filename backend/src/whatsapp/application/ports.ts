@@ -6,7 +6,8 @@ export interface WhatsAppConnectionRepositoryPort {
   findById(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId): WhatsAppConnection | null;
   findByPhoneNumberId(phoneNumberId: string): WhatsAppConnection | null;
   listByCompany(context: WorkspaceContext, companyId: number): WhatsAppConnection[];
-  updateStatus(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId, status: WhatsAppConnectionStatus, updatedAt: string): WhatsAppConnection | null;
+  updateStatus(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId, expectedUpdatedAt: string, status: WhatsAppConnectionStatus, updatedAt: string): WhatsAppConnection | null;
+  updateAssistantProfile(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId, expectedUpdatedAt: string, assistantProfileId: WhatsAppConnection["assistantProfileId"], updatedAt: string): WhatsAppConnection | null;
 }
 
 export interface WhatsAppConversationRepositoryPort {
