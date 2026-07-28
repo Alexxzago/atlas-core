@@ -127,3 +127,36 @@ export interface WebChatConnection {
   createdAt: string;
   updatedAt: string;
 }
+
+export type WhatsAppConnectionStatus = "active" | "inactive";
+export type WhatsAppValidationState = "not_validated" | "valid" | "invalid";
+export type WhatsAppHealthState = "inactive" | "healthy" | "degraded";
+
+export interface WhatsAppConnection {
+  id: string;
+  assistantProfileId: string;
+  phoneNumberId: string;
+  whatsappBusinessAccountId: string;
+  status: WhatsAppConnectionStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWhatsAppConnectionInput {
+  assistantProfileId: string;
+  phoneNumberId: string;
+  whatsappBusinessAccountId: string;
+}
+
+export interface WhatsAppConnectionOperationalStatus {
+  connection: WhatsAppConnection;
+  credentialsConfigured: boolean;
+  validationState: WhatsAppValidationState;
+  validatedAt: string | null;
+  validationFailureCode: string | null;
+  healthState: WhatsAppHealthState;
+  lastProviderActivityAt: string | null;
+  lastWebhookActivityAt: string | null;
+  healthFailureCode: string | null;
+  updatedAt: string;
+}

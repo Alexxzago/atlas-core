@@ -715,6 +715,72 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 21,
+    name: "0021_whatsapp_connection_credentials_state",
+    checksumSource: "whatsapp-company-credential-ciphertext-v1|whatsapp-redacted-operational-state-v1",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE whatsapp_connection_credentials (
+          whatsapp_connection_id TEXT PRIMARY KEY REFERENCES whatsapp_connections(id) ON DELETE CASCADE,
+          encrypted_access_token TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE whatsapp_connection_operational_states (
+          whatsapp_connection_id TEXT PRIMARY KEY REFERENCES whatsapp_connections(id) ON DELETE CASCADE,
+          validation_state TEXT NOT NULL CHECK (validation_state IN ('not_validated','valid','invalid')),
+          validated_at TEXT,
+          validation_failure_code TEXT CHECK (validation_failure_code IN ('credentials_invalid','provider_identity_mismatch','provider_unavailable')),
+          health_state TEXT NOT NULL CHECK (health_state IN ('inactive','healthy','degraded')),
+          last_provider_activity_at TEXT,
+          last_webhook_activity_at TEXT,
+          health_failure_code TEXT CHECK (health_failure_code IN ('credentials_invalid','provider_identity_mismatch','provider_unavailable')),
+          updated_at TEXT NOT NULL,
+          CHECK (
+            (validation_state = 'not_validated' AND validated_at IS NULL AND validation_failure_code IS NULL)
+            OR (validation_state = 'valid' AND validated_at IS NOT NULL AND validation_failure_code IS NULL)
+            OR (validation_state = 'invalid' AND validated_at IS NOT NULL AND validation_failure_code IS NOT NULL)
+          ),
+          CHECK (
+            (health_state = 'degraded' AND health_failure_code IS NOT NULL)
+            OR (health_state IN ('inactive','healthy') AND health_failure_code IS NULL)
+          )
+        );
+
+        INSERT INTO whatsapp_connection_operational_states(
+          whatsapp_connection_id,validation_state,validated_at,validation_failure_code,health_state,
+          last_provider_activity_at,last_webhook_activity_at,health_failure_code,updated_at
+        )
+        SELECT id,'not_validated',NULL,NULL,'inactive',NULL,NULL,NULL,updated_at
+        FROM whatsapp_connections;
+
+        CREATE TRIGGER whatsapp_connections_seed_operational_state
+        AFTER INSERT ON whatsapp_connections
+        BEGIN
+          INSERT INTO whatsapp_connection_operational_states(
+            whatsapp_connection_id,validation_state,validated_at,validation_failure_code,health_state,
+            last_provider_activity_at,last_webhook_activity_at,health_failure_code,updated_at
+          ) VALUES (NEW.id,'not_validated',NULL,NULL,'inactive',NULL,NULL,NULL,NEW.updated_at);
+        END;
+      `);
+    },
+  },
+  {
+    id: 22,
+    name: "0022_whatsapp_one_active_connection_per_company",
+    checksumSource: "whatsapp-company-single-active-connection-v1",
+    apply(database): void {
+      database.exec(`
+        UPDATE whatsapp_connections SET status='inactive'
+        WHERE status='active' AND id NOT IN (
+          SELECT MAX(id) FROM whatsapp_connections WHERE status='active' GROUP BY company_id
+        );
+        CREATE UNIQUE INDEX idx_whatsapp_connections_one_active_per_company ON whatsapp_connections(company_id) WHERE status='active';
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

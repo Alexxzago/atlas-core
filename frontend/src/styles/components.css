@@ -161,6 +161,13 @@
 .authenticated-portal .assistant-preview-result { display: grid; gap: var(--space-2); padding: var(--space-4); background: var(--color-success-bg); border: 1px solid var(--color-success-border); border-radius: var(--radius-md); }
 .authenticated-portal .assistant-preview-result--fallback { background: var(--color-warning-bg); border-color: var(--color-warning-border); }
 .authenticated-portal .assistant-preview-result p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.authenticated-portal .whatsapp-onboarding { display: grid; gap: var(--space-5); }
+.authenticated-portal .whatsapp-steps { display: grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap: var(--space-3); padding: 0; overflow-x: auto; list-style: none; }
+.authenticated-portal .whatsapp-steps li { display: grid; gap: var(--space-2); min-inline-size: 120px; padding: var(--space-3); color: var(--color-text-secondary); background: var(--color-surface-subtle); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); font-size: 12px; }
+.authenticated-portal .whatsapp-steps li.is-complete { color: var(--color-success); background: var(--color-success-bg); border-color: var(--color-success-border); }
+.authenticated-portal .whatsapp-workflow, .authenticated-portal .whatsapp-create, .authenticated-portal .whatsapp-credential-row { display: grid; gap: var(--space-4); }
+.authenticated-portal .whatsapp-create { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; }
+.authenticated-portal .whatsapp-credential-row { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
 @media (max-width: 767px) {
   .authenticated-section { padding: var(--space-5); }
   .authenticated-portal .workspace-create-row, .authenticated-portal .authenticated-company-create fieldset, .authenticated-portal .assistant-form-grid, .authenticated-portal .assistant-profile-summary { grid-template-columns: 1fr; }
@@ -168,4 +175,5 @@
   .authenticated-portal .archived-recovery { align-items: stretch; flex-direction: column; }
   .authenticated-portal .assistant-profile-detail .action-row { align-items: stretch; flex-direction: column; }
   .authenticated-portal .assistant-profile-detail .action-row .button { inline-size: 100%; }
+  .authenticated-portal .whatsapp-create, .authenticated-portal .whatsapp-credential-row { grid-template-columns: 1fr; }
 }
