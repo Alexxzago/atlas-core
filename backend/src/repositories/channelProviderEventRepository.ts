@@ -10,7 +10,7 @@ export class ChannelProviderEventRepository implements ChannelProviderEventRepos
   public constructor(private readonly db: SynchronousDatabase) {}
 
   public claim(value: ChannelProviderEvent): { readonly event: ChannelProviderEvent; readonly claimed: boolean } {
-    const result = this.db.prepare("INSERT INTO channel_provider_events(id,communication_channel,transport_provider,transport_connection_id,external_event_id,state,conversation_id,conversation_message_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(transport_provider,external_event_id) DO NOTHING").run(value.id, value.communicationChannel, value.transportProvider, value.transportConnectionId, value.externalEventId, value.state, value.conversationId, value.conversationMessageId, value.createdAt, value.updatedAt);
+    const result = this.db.prepare("INSERT INTO channel_provider_events(id,communication_channel,transport_provider,transport_connection_id,external_event_id,state,conversation_id,conversation_message_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(transport_provider,external_event_id) DO UPDATE SET state='claimed',updated_at=excluded.updated_at WHERE channel_provider_events.state='failed'").run(value.id, value.communicationChannel, value.transportProvider, value.transportConnectionId, value.externalEventId, value.state, value.conversationId, value.conversationMessageId, value.createdAt, value.updatedAt);
     const current = this.findByTransportProviderAndExternalEventId(value.transportProvider, value.externalEventId);
     if (!current) throw new Error("Channel Provider Event could not be read after claim.");
     return { event: current, claimed: result.changes === 1 };

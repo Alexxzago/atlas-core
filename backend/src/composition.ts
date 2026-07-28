@@ -81,6 +81,14 @@ import { WebChatSessionRepository } from "./repositories/webChatSessionRepositor
 import { PublicWebChatSessionService } from "./webChat/services/publicWebChatSessionService.js";
 import { PublicWebChatConversationService } from "./webChat/services/publicWebChatConversationService.js";
 import { createPublicWebChatRouter } from "./routes/publicWebChat.js";
+import { WhatsAppWebhookService } from "./whatsapp/services/WhatsAppWebhookService.js";
+import { createWhatsAppWebhookControllers } from "./controllers/WhatsAppWebhookController.js";
+import { createWhatsAppWebhookRouter } from "./routes/whatsAppWebhook.js";
+import { WhatsAppConversationRepository } from "./repositories/whatsappConversationRepository.js";
+import { ChannelProviderEventRepository } from "./repositories/channelProviderEventRepository.js";
+import { ProviderMessageRecordRepository } from "./repositories/providerMessageRecordRepository.js";
+import { OutboundDeliveryRepository } from "./repositories/outboundDeliveryRepository.js";
+import { WhatsAppCloudApiProvider } from "./whatsapp/providers/WhatsAppCloudApiProvider.js";
 import { WhatsAppConnectionRepository } from "./repositories/whatsappConnectionRepository.js";
 import { WhatsAppConnectionService } from "./whatsapp/services/WhatsAppConnectionService.js";
 import { createGetWhatsAppConnectionController, createListWhatsAppConnectionsController, createUpdateWhatsAppConnectionController, createWhatsAppConnectionController } from "./controllers/WhatsAppConnectionController.js";
@@ -98,6 +106,7 @@ const verificationHashProvider = new Sha256VerificationHashProvider();
 const identityClock = new SystemClock();
 const production=process.env.NODE_ENV==="production";
 if (production && (process.env.ATLAS_BOOTSTRAP_SECRET?.length ?? 0) < 32) throw new Error("Production requires ATLAS_BOOTSTRAP_SECRET with at least 32 characters.");
+if (production && (!(process.env.WHATSAPP_APP_SECRET?.trim()) || !(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim()) || !(process.env.WHATSAPP_ACCESS_TOKEN?.trim()))) throw new Error("Production requires WhatsApp webhook and access credentials.");
 const deliverySelection = process.env.ATLAS_VERIFICATION_DELIVERY;
 const useDevelopmentDelivery = !production && deliverySelection !== "smtp";
 const smtpDelivery = useDevelopmentDelivery
@@ -156,6 +165,7 @@ export const identityRouter = createIdentityRouter({
   ...authenticationControllers,
 });
 export const publicWebChatRouter = createPublicWebChatRouter(publicWebChatSessionService, publicWebChatConversationService, production);
+const whatsAppWebhookRouter = createWhatsAppWebhookRouter(createWhatsAppWebhookControllers(new WhatsAppWebhookService({ appSecret: process.env.WHATSAPP_APP_SECRET ?? "", verifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? "" }, whatsAppConnectionService, new WhatsAppConversationRepository(database), new ChannelProviderEventRepository(database), conversationService, operationalConversationTurnService, identityClock, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), new WhatsAppCloudApiProvider(process.env.WHATSAPP_ACCESS_TOKEN ?? "", process.env.WHATSAPP_GRAPH_API_VERSION ?? "v22.0"))));
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));
 function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
   const runtime = new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), identityClock);
@@ -167,5 +177,5 @@ function createProductionAuthorizedCompaniesRouter(execution: AssistantExecution
 export const authorizedCompaniesRouter = createProductionAuthorizedCompaniesRouter(agent);
 
 export function createProductionAppRouters(execution: AssistantExecutionPort = agent): AppRouters {
-  return { authorizedCompaniesRouter: createProductionAuthorizedCompaniesRouter(execution), chatRouter, companiesRouter, identityRouter, knowledgeRouter, publicWebChatRouter, scrapeRouter, workspacesRouter };
+  return { authorizedCompaniesRouter: createProductionAuthorizedCompaniesRouter(execution), chatRouter, companiesRouter, identityRouter, knowledgeRouter, publicWebChatRouter, scrapeRouter, whatsAppWebhookRouter, workspacesRouter };
 }

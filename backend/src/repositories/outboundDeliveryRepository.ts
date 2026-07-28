@@ -17,4 +17,5 @@ export class OutboundDeliveryRepository implements OutboundDeliveryRepositoryPor
     const row = this.db.prepare("SELECT * FROM outbound_deliveries WHERE id=?").get(id) as Row | undefined;
     return row ? delivery(row) : null;
   }
+  public updateState(id: OutboundDeliveryId, state: OutboundDelivery["state"], safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null { const result=this.db.prepare("UPDATE outbound_deliveries SET state=?,safe_error_category=?,updated_at=? WHERE id=?").run(state,safeErrorCategory,updatedAt,id); return result.changes===1?this.findById(id):null; }
 }

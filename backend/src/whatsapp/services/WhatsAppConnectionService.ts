@@ -27,6 +27,7 @@ export class WhatsAppConnectionService {
     } catch (error: unknown) { if (unique(error)) throw new WhatsAppConnectionConflictError("WhatsApp Connection configuration conflicts with an existing connection."); throw error; }
   }
   public list(context: WorkspaceContext, companyIdValue: unknown): WhatsAppConnection[] { const id = parseCompanyId(companyIdValue); this.company(context, id); return this.connections.listByCompany(context, id); }
+  public resolveActiveByPhoneNumberId(phoneNumberId: unknown): WhatsAppConnection | null { if (typeof phoneNumberId !== "string") return null; const connection = this.connections.findByPhoneNumberId(phoneNumberId); return connection?.status === "active" ? connection : null; }
   public get(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): WhatsAppConnection { const id = parseCompanyId(companyIdValue), connection = this.connections.findById(context, id, connectionId(connectionIdValue)); if (!connection) throw new WhatsAppConnectionNotFoundError("WhatsApp Connection was not found."); return connection; }
   public update(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown, value: unknown): WhatsAppConnection {
     const current = this.get(context, companyIdValue, connectionIdValue), input = updateInput(value);
