@@ -10,6 +10,7 @@ export interface ProviderMessageRecordRepositoryPort {
   create(record: ProviderMessageRecord): ProviderMessageRecord | null;
   findByMessageAndConnection(transportProvider: string, transportConnectionId: string, conversationMessageId: string): ProviderMessageRecord | null;
   attachExternalMessageId(id: ProviderMessageRecordId, externalMessageId: string, updatedAt: string): ProviderMessageRecord | null;
+  findByTransportProviderAndExternalMessageId(transportProvider: string, externalMessageId: string): ProviderMessageRecord | null;
 }
 
 export interface OutboundDeliveryRepositoryPort {
@@ -17,4 +18,5 @@ export interface OutboundDeliveryRepositoryPort {
   findById(id: OutboundDeliveryId): OutboundDelivery | null;
   findByProviderMessageRecordAndConnection(providerMessageRecordId: string, transportConnectionId: string): OutboundDelivery | null;
   updateState(id: OutboundDeliveryId, state: OutboundDelivery["state"], safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null;
+  compareAndSetState(id: OutboundDeliveryId, expectedState: OutboundDelivery["state"], state: OutboundDelivery["state"], safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null;
 }

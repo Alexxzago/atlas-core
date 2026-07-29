@@ -22,4 +22,5 @@ export class OutboundDeliveryRepository implements OutboundDeliveryRepositoryPor
     return row ? delivery(row) : null;
   }
   public updateState(id: OutboundDeliveryId, state: OutboundDelivery["state"], safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null { const result=this.db.prepare("UPDATE outbound_deliveries SET state=?,safe_error_category=?,updated_at=? WHERE id=?").run(state,safeErrorCategory,updatedAt,id); return result.changes===1?this.findById(id):null; }
+  public compareAndSetState(id: OutboundDeliveryId, expectedState: OutboundDelivery["state"], state: OutboundDelivery["state"], safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null { const result=this.db.prepare("UPDATE outbound_deliveries SET state=?,safe_error_category=?,updated_at=? WHERE id=? AND state=?").run(state,safeErrorCategory,updatedAt,id,expectedState); return result.changes===1?this.findById(id):null; }
 }

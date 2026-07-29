@@ -4,7 +4,7 @@ export type ChannelProviderEventId = string & { readonly __brand: "ChannelProvid
 export type ProviderMessageRecordId = string & { readonly __brand: "ProviderMessageRecordId" };
 export type OutboundDeliveryId = string & { readonly __brand: "OutboundDeliveryId" };
 export type ProviderEventProcessingState = "claimed" | "processing" | "completed" | "failed";
-export type OutboundDeliveryState = "pending" | "leased" | "accepted" | "retryable" | "permanent_failure" | "uncertain";
+export type OutboundDeliveryState = "pending" | "leased" | "accepted" | "delivered" | "read" | "retryable" | "permanent_failure" | "uncertain";
 
 export interface ChannelProviderEvent {
   readonly id: ChannelProviderEventId;
@@ -56,7 +56,16 @@ export function providerMessageRecordId(valueToValidate: string): ProviderMessag
 export function outboundDeliveryId(valueToValidate: string): OutboundDeliveryId { return opaque<OutboundDeliveryId>(valueToValidate, "odl"); }
 export function transportProvider(valueToValidate: string): string { const normalized = value(valueToValidate, "Transport Provider", 64); if (!/^[a-z][a-z0-9_-]{0,63}$/.test(normalized)) throw new ProviderDeliveryDomainError("Transport Provider is invalid."); return normalized; }
 export function providerEventProcessingState(valueToValidate: string): ProviderEventProcessingState { if (valueToValidate !== "claimed" && valueToValidate !== "processing" && valueToValidate !== "completed" && valueToValidate !== "failed") throw new ProviderDeliveryDomainError("Provider event state is invalid."); return valueToValidate; }
-export function outboundDeliveryState(valueToValidate: string): OutboundDeliveryState { if (valueToValidate !== "pending" && valueToValidate !== "leased" && valueToValidate !== "accepted" && valueToValidate !== "retryable" && valueToValidate !== "permanent_failure" && valueToValidate !== "uncertain") throw new ProviderDeliveryDomainError("Outbound Delivery state is invalid."); return valueToValidate; }
+export function outboundDeliveryState(valueToValidate: string): OutboundDeliveryState { if (valueToValidate !== "pending" && valueToValidate !== "leased" && valueToValidate !== "accepted" && valueToValidate !== "delivered" && valueToValidate !== "read" && valueToValidate !== "retryable" && valueToValidate !== "permanent_failure" && valueToValidate !== "uncertain") throw new ProviderDeliveryDomainError("Outbound Delivery state is invalid."); return valueToValidate; }
+
+export class DeliveryLifecyclePolicy {
+  public transition(current: OutboundDeliveryState, next: OutboundDeliveryState): "apply" | "noop" {
+    if (current === next) return "noop";
+    const allowed: Record<OutboundDeliveryState, readonly OutboundDeliveryState[]> = { pending: ["leased", "accepted", "retryable", "permanent_failure", "uncertain"], leased: ["accepted", "retryable", "permanent_failure", "uncertain"], accepted: ["delivered", "read", "permanent_failure", "uncertain"], delivered: ["read", "permanent_failure", "uncertain"], read: [], retryable: ["leased", "accepted", "permanent_failure", "uncertain"], permanent_failure: [], uncertain: ["accepted", "delivered", "read", "permanent_failure"] };
+    if (!allowed[current].includes(next)) throw new ProviderDeliveryDomainError("Outbound Delivery transition is invalid.");
+    return "apply";
+  }
+}
 
 export function reconstructChannelProviderEvent(record: ChannelProviderEvent): ChannelProviderEvent { return Object.freeze({ ...record, id: channelProviderEventId(record.id), communicationChannel: communicationChannel(record.communicationChannel), transportProvider: transportProvider(record.transportProvider), transportConnectionId: value(record.transportConnectionId, "Transport Connection ID"), externalEventId: value(record.externalEventId, "External Event ID"), state: providerEventProcessingState(record.state), conversationId: record.conversationId === null ? null : conversationId(record.conversationId), conversationMessageId: record.conversationMessageId === null ? null : conversationMessageId(record.conversationMessageId), createdAt: timestamp(record.createdAt), updatedAt: timestamp(record.updatedAt) }); }
 export function reconstructProviderMessageRecord(record: ProviderMessageRecord): ProviderMessageRecord { return Object.freeze({ ...record, id: providerMessageRecordId(record.id), communicationChannel: communicationChannel(record.communicationChannel), transportProvider: transportProvider(record.transportProvider), direction: conversationMessageDirection(record.direction), transportConnectionId: value(record.transportConnectionId, "Transport Connection ID"), conversationMessageId: conversationMessageId(record.conversationMessageId), externalMessageId: record.externalMessageId === null ? null : value(record.externalMessageId, "External Message ID"), createdAt: timestamp(record.createdAt), updatedAt: timestamp(record.updatedAt) }); }
