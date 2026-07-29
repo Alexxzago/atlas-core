@@ -13,6 +13,7 @@ import { reconstructWhatsAppConversationBinding, whatsAppConversationBindingId }
 import type { WhatsAppConversationRepositoryPort, WhatsAppCredentialResolverPort } from "../application/ports.js";
 import type { WhatsAppConnectionService } from "./WhatsAppConnectionService.js";
 import type { WhatsAppOutboundDeliveryService } from "./WhatsAppOutboundDeliveryService.js";
+import type { WhatsAppDeliveryStatusService } from "./WhatsAppDeliveryStatusService.js";
 
 export interface WhatsAppWebhookConfiguration { readonly appSecret: string; readonly verifyToken: string; }
 export interface WhatsAppInboundTextMessage { readonly phoneNumberId: string; readonly waId: string; readonly wamid: string; readonly text: string; }
@@ -21,7 +22,7 @@ export interface WhatsAppInboundTextEvent extends WhatsAppInboundTextMessage { r
 export type WhatsAppWebhookEvent = WhatsAppInboundTextEvent | WhatsAppMessageStatusEvent;
 
 export class WhatsAppWebhookService {
-  public constructor(private readonly configuration: WhatsAppWebhookConfiguration, private readonly connections?: WhatsAppConnectionService, private readonly bindings?: WhatsAppConversationRepositoryPort, private readonly events?: ChannelProviderEventRepositoryPort, private readonly conversations?: ConversationService, private readonly turns?: OperationalConversationTurnService, private readonly clock: { now(): string } = { now: () => new Date().toISOString() }, private readonly messages?: ProviderMessageRecordRepositoryPort, private readonly deliveries?: OutboundDeliveryRepositoryPort, private readonly api?: WhatsAppCloudApiPort, private readonly credentials?: WhatsAppCredentialResolverPort, private readonly apiFactory?: (accessToken: string) => WhatsAppCloudApiPort, private readonly controls?: ConversationRepositoryPort, private readonly outbound?: WhatsAppOutboundDeliveryService) {}
+  public constructor(private readonly configuration: WhatsAppWebhookConfiguration, private readonly connections?: WhatsAppConnectionService, private readonly bindings?: WhatsAppConversationRepositoryPort, private readonly events?: ChannelProviderEventRepositoryPort, private readonly conversations?: ConversationService, private readonly turns?: OperationalConversationTurnService, private readonly clock: { now(): string } = { now: () => new Date().toISOString() }, private readonly messages?: ProviderMessageRecordRepositoryPort, private readonly deliveries?: OutboundDeliveryRepositoryPort, private readonly api?: WhatsAppCloudApiPort, private readonly credentials?: WhatsAppCredentialResolverPort, private readonly apiFactory?: (accessToken: string) => WhatsAppCloudApiPort, private readonly controls?: ConversationRepositoryPort, private readonly outbound?: WhatsAppOutboundDeliveryService, private readonly statuses?: WhatsAppDeliveryStatusService) {}
   public verify(mode: unknown, token: unknown, challenge: unknown): string | null { return this.configuration.verifyToken.length > 0 && mode === "subscribe" && typeof token === "string" && token === this.configuration.verifyToken && typeof challenge === "string" ? challenge : null; }
   public signatureValid(raw: Buffer, header: unknown): boolean {
     if (!this.configuration.appSecret || typeof header !== "string" || !/^sha256=[0-9a-f]{64}$/i.test(header)) return false;
@@ -55,7 +56,7 @@ export class WhatsAppWebhookService {
     }
     return messages;
   }
-  public async receive(raw: Buffer): Promise<void> { for (const event of this.parseEvents(raw)) { if (event.kind === "inbound_text") await this.process(event); } }
+  public async receive(raw: Buffer): Promise<void> { for (const event of this.parseEvents(raw)) { if (event.kind === "inbound_text") await this.process(event); else this.statuses?.process(event); } }
   private async process(message: WhatsAppInboundTextMessage): Promise<void> {
     if (!this.connections || !this.bindings || !this.events || !this.conversations || !this.turns) return;
     const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) return;
