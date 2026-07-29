@@ -16,6 +16,9 @@ import type { WhatsAppOutboundDeliveryService } from "./WhatsAppOutboundDelivery
 
 export interface WhatsAppWebhookConfiguration { readonly appSecret: string; readonly verifyToken: string; }
 export interface WhatsAppInboundTextMessage { readonly phoneNumberId: string; readonly waId: string; readonly wamid: string; readonly text: string; }
+export interface WhatsAppMessageStatusEvent { readonly kind: "message_status"; readonly phoneNumberId: string; readonly externalMessageId: string; readonly status: "sent" | "delivered" | "read" | "failed"; readonly providerTimestamp: string | null; readonly safeFailureCategory: "provider_unavailable" | null; }
+export interface WhatsAppInboundTextEvent extends WhatsAppInboundTextMessage { readonly kind: "inbound_text"; }
+export type WhatsAppWebhookEvent = WhatsAppInboundTextEvent | WhatsAppMessageStatusEvent;
 
 export class WhatsAppWebhookService {
   public constructor(private readonly configuration: WhatsAppWebhookConfiguration, private readonly connections?: WhatsAppConnectionService, private readonly bindings?: WhatsAppConversationRepositoryPort, private readonly events?: ChannelProviderEventRepositoryPort, private readonly conversations?: ConversationService, private readonly turns?: OperationalConversationTurnService, private readonly clock: { now(): string } = { now: () => new Date().toISOString() }, private readonly messages?: ProviderMessageRecordRepositoryPort, private readonly deliveries?: OutboundDeliveryRepositoryPort, private readonly api?: WhatsAppCloudApiPort, private readonly credentials?: WhatsAppCredentialResolverPort, private readonly apiFactory?: (accessToken: string) => WhatsAppCloudApiPort, private readonly controls?: ConversationRepositoryPort, private readonly outbound?: WhatsAppOutboundDeliveryService) {}
@@ -25,26 +28,34 @@ export class WhatsAppWebhookService {
     const expected = Buffer.from(createHmac("sha256", this.configuration.appSecret).update(raw).digest("hex"), "hex"), provided = Buffer.from(header.slice(7), "hex");
     return expected.length === provided.length && timingSafeEqual(expected, provided);
   }
-  public parse(raw: Buffer): readonly WhatsAppInboundTextMessage[] {
+  public parse(raw: Buffer): readonly WhatsAppInboundTextMessage[] { return this.parseEvents(raw).filter((event): event is WhatsAppInboundTextEvent => event.kind === "inbound_text").map(({ phoneNumberId, waId, wamid, text }) => ({ phoneNumberId, waId, wamid, text })); }
+  public parseEvents(raw: Buffer): readonly WhatsAppWebhookEvent[] {
     let value: unknown; try { value = JSON.parse(raw.toString("utf8")); } catch { return []; }
     if (!value || typeof value !== "object") return [];
     const entries = (value as { entry?: unknown }).entry; if (!Array.isArray(entries)) return [];
-    const messages: WhatsAppInboundTextMessage[] = [];
+    const messages: WhatsAppWebhookEvent[] = [];
     for (const entry of entries) if (entry && typeof entry === "object") {
       const changes = (entry as { changes?: unknown }).changes; if (!Array.isArray(changes)) continue;
       for (const change of changes) if (change && typeof change === "object") {
         const record = change as { field?: unknown; value?: unknown }; if (record.field !== "messages" || !record.value || typeof record.value !== "object") continue;
-        const payload = record.value as { metadata?: { phone_number_id?: unknown }; messages?: unknown };
-        if (typeof payload.metadata?.phone_number_id !== "string" || !Array.isArray(payload.messages)) continue;
-        for (const message of payload.messages) if (message && typeof message === "object") {
+        const payload = record.value as { metadata?: { phone_number_id?: unknown }; messages?: unknown; statuses?: unknown };
+        if (typeof payload.metadata?.phone_number_id !== "string") continue;
+        if (Array.isArray(payload.messages)) for (const message of payload.messages) if (message && typeof message === "object") {
           const input = message as { type?: unknown; from?: unknown; id?: unknown; text?: { body?: unknown } };
-          if (input.type === "text" && typeof input.from === "string" && typeof input.id === "string" && typeof input.text?.body === "string") messages.push({ phoneNumberId: payload.metadata.phone_number_id, waId: input.from, wamid: input.id, text: input.text.body });
+          if (input.type === "text" && typeof input.from === "string" && typeof input.id === "string" && typeof input.text?.body === "string" && input.text.body.normalize("NFKC").trim()) messages.push({ kind: "inbound_text", phoneNumberId: payload.metadata.phone_number_id, waId: input.from, wamid: input.id, text: input.text.body.normalize("NFKC").trim() });
+        }
+        if (Array.isArray(payload.statuses)) for (const status of payload.statuses) if (status && typeof status === "object") {
+          const input = status as { id?: unknown; status?: unknown; timestamp?: unknown; errors?: unknown };
+          if (typeof input.id !== "string" || (input.status !== "sent" && input.status !== "delivered" && input.status !== "read" && input.status !== "failed")) continue;
+          const seconds = typeof input.timestamp === "string" && /^\d+$/.test(input.timestamp) ? Number(input.timestamp) : NaN;
+          const providerTimestamp = Number.isSafeInteger(seconds) && Number.isFinite(new Date(seconds * 1000).getTime()) ? new Date(seconds * 1000).toISOString() : null;
+          messages.push({ kind: "message_status", phoneNumberId: payload.metadata.phone_number_id, externalMessageId: input.id, status: input.status, providerTimestamp, safeFailureCategory: input.status === "failed" ? "provider_unavailable" : null });
         }
       }
     }
     return messages;
   }
-  public async receive(raw: Buffer): Promise<void> { for (const message of this.parse(raw)) await this.process(message); }
+  public async receive(raw: Buffer): Promise<void> { for (const event of this.parseEvents(raw)) { if (event.kind === "inbound_text") await this.process(event); } }
   private async process(message: WhatsAppInboundTextMessage): Promise<void> {
     if (!this.connections || !this.bindings || !this.events || !this.conversations || !this.turns) return;
     const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) return;
