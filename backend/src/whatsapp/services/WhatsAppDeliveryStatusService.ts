@@ -2,9 +2,10 @@ import { DeliveryLifecyclePolicy, ProviderDeliveryDomainError } from "../../tran
 import type { OutboundDeliveryRepositoryPort, ProviderMessageRecordRepositoryPort } from "../../transport/application/ports.js";
 import type { WhatsAppMessageStatusEvent } from "./WhatsAppWebhookService.js";
 import { MetaDeliveryStatusMapper } from "./MetaDeliveryStatusMapper.js";
+import type { WhatsAppConnectionService } from "./WhatsAppConnectionService.js";
 
 export class WhatsAppDeliveryStatusService {
-  public constructor(private readonly messages: ProviderMessageRecordRepositoryPort, private readonly deliveries: OutboundDeliveryRepositoryPort, private readonly mapper: MetaDeliveryStatusMapper, private readonly policy: DeliveryLifecyclePolicy, private readonly clock: { now(): string }) {}
+  public constructor(private readonly messages: ProviderMessageRecordRepositoryPort, private readonly deliveries: OutboundDeliveryRepositoryPort, private readonly mapper: MetaDeliveryStatusMapper, private readonly policy: DeliveryLifecyclePolicy, private readonly clock: { now(): string }, private readonly connections?: WhatsAppConnectionService) {}
   public process(event: WhatsAppMessageStatusEvent): void {
     const record = this.messages.findByTransportProviderAndExternalMessageId("meta_whatsapp_cloud", event.externalMessageId);
     if (!record || record.direction !== "outbound") return;
@@ -14,7 +15,7 @@ export class WhatsAppDeliveryStatusService {
     try { if (this.policy.transition(delivery.state, mapped.state) === "noop") return; }
     catch (error: unknown) { if (error instanceof ProviderDeliveryDomainError) return; throw error; }
     const updated = this.deliveries.compareAndSetState(delivery.id, delivery.state, mapped.state, mapped.safeErrorCategory, this.clock.now());
-    if (updated) return;
+    if (updated) { this.connections?.recordWebhookActivity(event.phoneNumberId); return; }
     const current = this.deliveries.findById(delivery.id);
     if (!current) return;
     try { this.policy.transition(current.state, mapped.state); } catch (error: unknown) { if (error instanceof ProviderDeliveryDomainError) return; throw error; }

@@ -24,6 +24,10 @@ export class WhatsAppConnectionRepository implements WhatsAppConnectionRepositor
     const row = this.db.prepare("SELECT wc.* FROM whatsapp_connections wc JOIN companies c ON c.id=wc.company_id WHERE wc.id=? AND wc.company_id=? AND wc.workspace_id=? AND c.workspace_id=?").get(id, companyId, context.workspaceId, context.workspaceId) as Row | undefined;
     return row ? connection(row) : null;
   }
+  public findByIdForRecovery(id: WhatsAppConnectionId): WhatsAppConnection | null {
+    const row = this.db.prepare("SELECT wc.* FROM whatsapp_connections wc JOIN companies c ON c.id=wc.company_id AND c.workspace_id=wc.workspace_id WHERE wc.id=?").get(id) as Row | undefined;
+    return row ? connection(row) : null;
+  }
 
   public findByPhoneNumberId(phoneNumberId: string): WhatsAppConnection | null {
     const row = this.db.prepare("SELECT wc.* FROM whatsapp_connections wc JOIN companies c ON c.id=wc.company_id AND c.workspace_id=wc.workspace_id JOIN assistant_profiles p ON p.id=wc.assistant_profile_id AND p.company_id=c.id WHERE wc.phone_number_id=?").get(phoneNumberId) as Row | undefined;

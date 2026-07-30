@@ -84,6 +84,7 @@ export interface ConversationInboxProjection {
   readonly preview: string | null;
   readonly deliveryCategory: "received" | "sent" | null;
   readonly lastActivityAt: string;
+  readonly delivery: WhatsAppOutboundDeliveryProjection | null;
 }
 
 export interface ConversationDetailProjection extends ConversationInboxProjection {
@@ -96,4 +97,11 @@ export interface ConversationDetailMessageProjection {
   readonly deliveryCategory: "received" | "sent";
   readonly content: string;
   readonly createdAt: string;
+  readonly delivery: WhatsAppOutboundDeliveryProjection | null;
+}
+
+export interface WhatsAppOutboundDeliveryProjection {
+  readonly state: "pending" | "leased" | "accepted" | "delivered" | "read" | "retryable" | "permanent_failure" | "uncertain";
+  readonly updatedAt: string;
+  readonly safeErrorCategory: string | null;
 }

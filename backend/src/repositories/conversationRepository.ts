@@ -1,7 +1,7 @@
 import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
 import type { ConversationRepositoryPort } from "../conversation/application/ports.js";
 import { reconstructConversation, reconstructConversationMessage, reconstructConversationParticipant, type Conversation, type ConversationId, type ConversationMessage, type ConversationMessageId, type ConversationParticipant, type ConversationParticipantId, type ConversationState } from "../conversation/domain/conversation.js";
-import { reconstructConversationControl, type ConversationControl, type ConversationDetailProjection, type ConversationInboxProjection } from "../conversation/domain/conversationControl.js";
+import { reconstructConversationControl, type ConversationControl, type ConversationDetailProjection, type ConversationInboxProjection, type WhatsAppOutboundDeliveryProjection } from "../conversation/domain/conversationControl.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 
 interface ConversationRow { id:string; company_id:number; channel:Conversation["channel"]; state:ConversationState; created_at:string; updated_at:string; closed_at:string|null; }
@@ -16,6 +16,7 @@ function control(row: ControlRow): ConversationControl { return reconstructConve
 function bounded(value: string, maximum: number): string { return Array.from(value).slice(0, maximum).join(""); }
 function deliveryCategory(direction: "inbound" | "outbound"): "received" | "sent" { return direction === "inbound" ? "received" : "sent"; }
 function safeActorId(value: string | null): string | null { return value === null ? null : "masked"; }
+function delivery(value: { state: WhatsAppOutboundDeliveryProjection["state"]; updated_at: string; safe_error_category: string | null } | undefined): WhatsAppOutboundDeliveryProjection | null { return value ? Object.freeze({ state: value.state, updatedAt: value.updated_at, safeErrorCategory: value.safe_error_category }) : null; }
 
 export class ConversationRepository implements ConversationRepositoryPort {
   public constructor(private readonly db: SynchronousDatabase) {}
@@ -114,7 +115,7 @@ export class ConversationRepository implements ConversationRepositoryPort {
     const currentControl = this.ensureConversationControl(context, companyId, id);
     if (!currentControl) return null;
     const inbox = this.inboxProjection(context, companyId, current, currentControl);
-    const messages = this.listMessages(context, companyId, id).map((value) => Object.freeze({ messageId: value.id, participant: "masked", deliveryCategory: deliveryCategory(value.direction), content: bounded(value.content, 4_000), createdAt: value.createdAt }));
+    const messages = this.listMessages(context, companyId, id).map((value) => Object.freeze({ messageId: value.id, participant: "masked", deliveryCategory: deliveryCategory(value.direction), content: bounded(value.content, 4_000), createdAt: value.createdAt, delivery: this.deliveryProjection(context, companyId, value.id) }));
     return Object.freeze({ ...inbox, messages: Object.freeze(messages) });
   }
 
@@ -122,6 +123,10 @@ export class ConversationRepository implements ConversationRepositoryPort {
     const messages = this.listMessages(context, companyId, value.id);
     const latest = messages[messages.length - 1] ?? null;
     const participant = this.listParticipants(context, companyId, value.id).length === 0 ? null : "masked";
-    return Object.freeze({ conversationId: value.id, channel: value.channel, state: value.state, controlState: valueControl.state, attentionReason: valueControl.attentionReason, controllingActorId: safeActorId(valueControl.controllingActorId), takenAt: valueControl.takenAt, releasedAt: valueControl.releasedAt, lastOperatorActivityAt: valueControl.lastOperatorActivityAt, resolvedAt: valueControl.resolvedAt, resolvedBy: safeActorId(valueControl.resolvedBy), controlVersion: valueControl.version, updatedAt: valueControl.updatedAt, participant, preview: latest === null ? null : bounded(latest.content, 280), deliveryCategory: latest === null ? null : deliveryCategory(latest.direction), lastActivityAt: latest?.createdAt ?? value.updatedAt });
+    return Object.freeze({ conversationId: value.id, channel: value.channel, state: value.state, controlState: valueControl.state, attentionReason: valueControl.attentionReason, controllingActorId: safeActorId(valueControl.controllingActorId), takenAt: valueControl.takenAt, releasedAt: valueControl.releasedAt, lastOperatorActivityAt: valueControl.lastOperatorActivityAt, resolvedAt: valueControl.resolvedAt, resolvedBy: safeActorId(valueControl.resolvedBy), controlVersion: valueControl.version, updatedAt: valueControl.updatedAt, participant, preview: latest === null ? null : bounded(latest.content, 280), deliveryCategory: latest === null ? null : deliveryCategory(latest.direction), lastActivityAt: latest?.createdAt ?? value.updatedAt, delivery: latest === null ? null : this.deliveryProjection(context, companyId, latest.id) });
+  }
+  private deliveryProjection(context: WorkspaceContext, companyId: number, messageId: ConversationMessageId): WhatsAppOutboundDeliveryProjection | null {
+    const row = this.db.prepare("SELECT d.state,d.updated_at,d.safe_error_category FROM outbound_deliveries d JOIN provider_message_records pmr ON pmr.id=d.provider_message_record_id AND pmr.direction='outbound' AND pmr.communication_channel='whatsapp' JOIN conversation_messages m ON m.id=pmr.conversation_message_id JOIN conversations c ON c.id=m.conversation_id JOIN companies co ON co.id=c.company_id WHERE co.workspace_id=? AND c.company_id=? AND m.id=?").get(context.workspaceId, companyId, messageId) as { state: WhatsAppOutboundDeliveryProjection["state"]; updated_at: string; safe_error_category: string | null } | undefined;
+    return delivery(row);
   }
 }

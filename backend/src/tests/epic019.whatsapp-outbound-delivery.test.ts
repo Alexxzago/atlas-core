@@ -38,27 +38,27 @@ function setup(options: { failure?: boolean; transportFailure?: boolean; foreign
   return { service, records, deliveries, sends: () => sends, tokens: () => tokens };
 }
 
-test("EPIC-019 shared delivery persists one transport record, delivery, credential-scoped accepted send, and Meta ID", async () => {
+test("EPIC-019 shared delivery persists one pending transport delivery without sending inline", async () => {
   const value = setup();
   const result = await value.service.deliverWhatsAppText(context, 1, { conversationId: conversationIdValue, conversationMessageId: messageId, whatsAppConnectionId: connectionId, recipientWaId: "wa" });
-  assert.equal(value.records.length, 1); assert.equal(value.deliveries.length, 1); assert.equal(value.tokens(), 1); assert.equal(value.sends(), 1);
-  assert.equal(value.records[0]?.externalMessageId, "wamid-out"); assert.equal(value.deliveries[0]?.state, "accepted"); assert.equal(result.state, "accepted");
+  assert.equal(value.records.length, 1); assert.equal(value.deliveries.length, 1); assert.equal(value.tokens(), 0); assert.equal(value.sends(), 0);
+  assert.equal(value.records[0]?.externalMessageId, null); assert.equal(value.deliveries[0]?.state, "pending"); assert.equal(result.state, "pending");
 });
 
-test("EPIC-019 shared delivery persists uncertain provider_unavailable without leaking provider failure", async () => {
+test("EPIC-019 queueing does not call Meta when a future provider send would fail", async () => {
   const value = setup({ failure: true });
   const result = await value.service.deliverWhatsAppText(context, 1, { conversationId: conversationIdValue, conversationMessageId: messageId, whatsAppConnectionId: connectionId, recipientWaId: "wa" });
-  assert.deepEqual(result, { id: value.deliveries[0]?.id, state: "uncertain" }); assert.equal(value.deliveries[0]?.safeErrorCategory, "provider_unavailable"); assert.equal(JSON.stringify(result).includes("company-token"), false);
+  assert.deepEqual(result, { id: value.deliveries[0]?.id, state: "pending" }); assert.equal(value.deliveries[0]?.safeErrorCategory, null); assert.equal(JSON.stringify(result).includes("company-token"), false);
 });
 
-test("EPIC-019 shared delivery does not send when transport persistence fails and duplicate invocation sends once", async () => {
+test("EPIC-019 shared delivery does not queue when transport persistence fails and duplicate invocation queues once", async () => {
   const failed = setup({ transportFailure: true });
   await assert.rejects(() => failed.service.deliverWhatsAppText(context, 1, { conversationId: conversationIdValue, conversationMessageId: messageId, whatsAppConnectionId: connectionId, recipientWaId: "wa" }), WhatsAppOutboundDeliveryValidationError);
   assert.equal(failed.sends(), 0);
   const duplicate = setup();
   await duplicate.service.deliverWhatsAppText(context, 1, { conversationId: conversationIdValue, conversationMessageId: messageId, whatsAppConnectionId: connectionId, recipientWaId: "wa" });
   await duplicate.service.deliverWhatsAppText(context, 1, { conversationId: conversationIdValue, conversationMessageId: messageId, whatsAppConnectionId: connectionId, recipientWaId: "wa" });
-  assert.equal(duplicate.records.length, 1); assert.equal(duplicate.deliveries.length, 1); assert.equal(duplicate.sends(), 1);
+  assert.equal(duplicate.records.length, 1); assert.equal(duplicate.deliveries.length, 1); assert.equal(duplicate.sends(), 0);
 });
 
 test("EPIC-019 shared delivery rejects cross-workspace, cross-company, and mismatched conversation messages", async () => {

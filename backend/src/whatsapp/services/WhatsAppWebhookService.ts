@@ -1,8 +1,9 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { randomUUID } from "node:crypto";
 import { OperationalConversationTurnSuppressedError, type OperationalConversationTurnService } from "../../assistant/services/operationalConversationTurnService.js";
 import type { ConversationRepositoryPort } from "../../conversation/application/ports.js";
 import { reconstructConversationControl } from "../../conversation/domain/conversationControl.js";
+import { conversationMessageId, reconstructConversationMessage } from "../../conversation/domain/conversation.js";
 import type { ConversationService } from "../../conversation/services/conversationService.js";
 import { channelProviderEventId, reconstructChannelProviderEvent } from "../../transport/domain/providerDelivery.js";
 import type { ChannelProviderEventRepositoryPort } from "../../transport/application/ports.js";
@@ -56,47 +57,83 @@ export class WhatsAppWebhookService {
     }
     return messages;
   }
-  public async receive(raw: Buffer): Promise<void> { for (const event of this.parseEvents(raw)) { if (event.kind === "inbound_text") await this.process(event); else this.statuses?.process(event); } }
+  public async receive(raw: Buffer): Promise<void> { for (const event of this.parseEvents(raw)) { if (this.connections && "recordWebhookActivity" in this.connections) this.connections.recordWebhookActivity(event.phoneNumberId); if (event.kind === "inbound_text") await this.process(event); else this.statuses?.process(event); } }
+  public async resumeIncomplete(limit = 25): Promise<void> {
+    if (!this.connections || !this.bindings || !this.events || !this.conversations || !this.turns) return;
+    for (const event of this.events.listRecoverable("meta_whatsapp_cloud", limit)) {
+      const connection = this.connections.resolveForRecovery(event.transportConnectionId as import("../domain/whatsappConnection.js").WhatsAppConnectionId);
+      if (!connection || !event.conversationId || !event.conversationMessageId) continue;
+      const context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, binding = this.bindings.findBindingByConversation(context, connection.companyId, event.conversationId);
+      const inbound = this.conversations.listMessages(context, connection.companyId, event.conversationId).find((value) => value.id === event.conversationMessageId);
+      const claimed = inbound ? this.events.acquireForRecovery(event.id, new Date(Date.parse(this.clock.now()) - 60_000).toISOString(), this.clock.now()) : null;
+      if (!binding || !inbound || !claimed) continue;
+      try {
+        const turn = await this.turns.executePersistedInbound(context, connection.companyId, binding.conversationId, { assistantProfileId: connection.assistantProfileId, outboundParticipantId: binding.assistantParticipantId, replyIdempotencyKey: key("reply", event.externalEventId) }, inbound, { beforeRuntime: () => this.allowsAutomation(context, connection.companyId, binding.conversationId) });
+        if (turn.response.outcome === "safe_fallback") this.markHumanRequired(context, connection.companyId, binding.conversationId);
+        if (this.outbound) await this.outbound.deliverWhatsAppText(context, connection.companyId, { conversationId: binding.conversationId, conversationMessageId: turn.outbound.id, whatsAppConnectionId: connection.id, recipientWaId: binding.waId });
+        this.events.updateState(claimed.id, "processing", "completed", this.clock.now());
+      } catch { this.events.updateState(claimed.id, "processing", "failed", this.clock.now()); }
+    }
+  }
   private async process(message: WhatsAppInboundTextMessage): Promise<void> {
     if (!this.connections || !this.bindings || !this.events || !this.conversations || !this.turns) return;
     const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) return;
-    const now = this.clock.now(), claimed = this.events.claim(reconstructChannelProviderEvent({ id: channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: connection.id, externalEventId: message.wamid, state: "claimed", conversationId: null, conversationMessageId: null, createdAt: now, updatedAt: now }));
-    if (!claimed.claimed) return;
-    const context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, existing = this.bindings.findBinding(connection.id, message.waId);
+    const now = this.clock.now(), context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, existing = this.bindings.findBinding(connection.id, message.waId);
     const binding = existing ?? (() => { const conversation = this.conversations!.open(context, connection.companyId, "whatsapp"), customer = this.conversations!.addParticipant(context, connection.companyId, conversation.id, { type: "whatsapp_contact", reference: message.waId }), assistant = this.conversations!.addParticipant(context, connection.companyId, conversation.id, { type: "assistant", reference: connection.assistantProfileId }); return this.bindings!.createBinding(reconstructWhatsAppConversationBinding({ id: whatsAppConversationBindingId(`wcb_${randomUUID().replaceAll("-", "")}`), whatsAppConnectionId: connection.id, waId: message.waId, conversationId: conversation.id, customerParticipantId: customer.id, assistantParticipantId: assistant.id, createdAt: now, updatedAt: now })); })();
     if (!binding) return;
     const initialControl = this.controls?.ensureConversationControl(context, connection.companyId, binding.conversationId);
-    let inbound;
-    let turn;
+    if (!("captureInbound" in this.events) || !("executePersistedInbound" in this.turns)) {
+      await this.processLegacy(context, connection, binding, message, initialControl);
+      return;
+    }
+    const inboundKey = key("inbound", message.wamid), replyKey = key("reply", message.wamid);
+    const inboundMessageId = conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`);
+    const captured = this.events.captureInbound(
+      reconstructChannelProviderEvent({ id: channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: connection.id, externalEventId: message.wamid, state: "claimed", conversationId: null, conversationMessageId: null, createdAt: now, updatedAt: now }),
+      reconstructConversationMessage({ id: inboundMessageId, conversationId: binding.conversationId, senderParticipantId: binding.customerParticipantId, direction: "inbound", content: message.text, idempotencyKey: inboundKey, executionRecordId: null, createdAt: now }),
+      reconstructProviderMessageRecord({ id: providerMessageRecordId(`pmr_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", direction: "inbound", transportConnectionId: connection.id, conversationMessageId: inboundMessageId, externalMessageId: message.wamid, createdAt: now, updatedAt: now }),
+    );
+    const claimed = this.events.acquireForRecovery(captured.event.id, new Date(Date.parse(now) - 60_000).toISOString(), now);
+    if (!claimed) return;
+    const inbound = captured.inbound;
+    let turn: Awaited<ReturnType<OperationalConversationTurnService["executePersistedInbound"]>> | undefined;
     try {
       if (initialControl && initialControl.state !== "automated") {
-        inbound = this.conversations.addMessage(context, connection.companyId, binding.conversationId, { senderParticipantId: binding.customerParticipantId, direction: "inbound", content: message.text });
         this.reopenForInbound(context, connection.companyId, binding.conversationId);
       } else {
-        turn = await this.turns.execute(context, connection.companyId, binding.conversationId, { assistantProfileId: connection.assistantProfileId, inboundParticipantId: binding.customerParticipantId, outboundParticipantId: binding.assistantParticipantId, content: message.text }, {
-          afterInbound: (created) => { inbound = created; this.reopenForInbound(context, connection.companyId, binding.conversationId); },
+        this.reopenForInbound(context, connection.companyId, binding.conversationId);
+        turn = await this.turns.executePersistedInbound(context, connection.companyId, binding.conversationId, { assistantProfileId: connection.assistantProfileId, outboundParticipantId: binding.assistantParticipantId, replyIdempotencyKey: replyKey }, inbound, {
           beforeRuntime: () => this.allowsAutomation(context, connection.companyId, binding.conversationId),
         });
-        inbound = turn.inbound;
       }
     } catch (error: unknown) {
       if (error instanceof OperationalConversationTurnSuppressedError) {
-        inbound = error.inbound;
+        // The inbound row is already durable and linked to the provider event.
       } else {
         this.markHumanRequired(context, connection.companyId, binding.conversationId);
-        if (inbound) this.createInboundRecord(connection.id, inbound.id, message.wamid, now);
-        this.events.updateState(claimed.event.id, "claimed", "failed", this.clock.now());
+        this.events.updateState(claimed.id, "processing", "failed", this.clock.now());
         throw error;
       }
     }
-    if (!inbound) { this.events.updateState(claimed.event.id, "claimed", "failed", this.clock.now()); return; }
-    this.createInboundRecord(connection.id, inbound.id, message.wamid, now);
     if (turn) {
       if (turn.response?.outcome === "safe_fallback") this.markHumanRequired(context, connection.companyId, binding.conversationId);
       if (this.outbound) await this.outbound.deliverWhatsAppText(context, connection.companyId, { conversationId: binding.conversationId, conversationMessageId: turn.outbound.id, whatsAppConnectionId: connection.id, recipientWaId: message.waId });
       else await this.deliverAutomatedResponse(context, connection, message, turn.outbound.id, turn.outbound.content, now);
     }
-    this.events.updateState(claimed.event.id, "claimed", "completed", this.clock.now());
+    this.events.updateState(claimed.id, "processing", "completed", this.clock.now());
+  }
+  private async processLegacy(context: { workspaceId: number; workspaceKey: string }, connection: { readonly id: import("../domain/whatsappConnection.js").WhatsAppConnectionId; readonly companyId: number; readonly phoneNumberId: string; readonly assistantProfileId: import("../../assistant/domain/assistantProfile.js").AssistantProfileId }, binding: import("../domain/whatsappConnection.js").WhatsAppConversationBinding, message: WhatsAppInboundTextMessage, initialControl: import("../../conversation/domain/conversationControl.js").ConversationControl | null | undefined): Promise<void> {
+    const now = this.clock.now(), claimed = this.events!.claim(reconstructChannelProviderEvent({ id: channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: connection.id, externalEventId: message.wamid, state: "claimed", conversationId: null, conversationMessageId: null, createdAt: now, updatedAt: now }));
+    if (!claimed.claimed) return;
+    let inbound: import("../../conversation/domain/conversation.js").ConversationMessage | undefined;
+    let turn: Awaited<ReturnType<OperationalConversationTurnService["execute"]>> | undefined;
+    try {
+      if (initialControl && initialControl.state !== "automated") { inbound = this.conversations!.addMessage(context, connection.companyId, binding.conversationId, { senderParticipantId: binding.customerParticipantId, direction: "inbound", content: message.text }); this.reopenForInbound(context, connection.companyId, binding.conversationId); }
+      else { turn = await this.turns!.execute(context, connection.companyId, binding.conversationId, { assistantProfileId: connection.assistantProfileId, inboundParticipantId: binding.customerParticipantId, outboundParticipantId: binding.assistantParticipantId, content: message.text }, { afterInbound: (created) => { inbound = created; this.reopenForInbound(context, connection.companyId, binding.conversationId); }, beforeRuntime: () => this.allowsAutomation(context, connection.companyId, binding.conversationId) }); inbound = turn.inbound; }
+    } catch (error: unknown) { if (error instanceof OperationalConversationTurnSuppressedError) inbound = error.inbound; else { this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events!.updateState(claimed.event.id, "claimed", "failed", this.clock.now()); throw error; } }
+    if (!inbound) { this.events!.updateState(claimed.event.id, "claimed", "failed", this.clock.now()); return; }
+    if (turn) { if (turn.response?.outcome === "safe_fallback") this.markHumanRequired(context, connection.companyId, binding.conversationId); if (this.outbound) await this.outbound.deliverWhatsAppText(context, connection.companyId, { conversationId: binding.conversationId, conversationMessageId: turn.outbound.id, whatsAppConnectionId: connection.id, recipientWaId: message.waId }); else await this.deliverAutomatedResponse(context, connection, message, turn.outbound.id, turn.outbound.content, now); }
+    this.events!.updateState(claimed.event.id, "claimed", "completed", this.clock.now());
   }
 
   private reopenForInbound(context: { workspaceId: number; workspaceKey: string }, companyId: number, conversationId: import("../../conversation/domain/conversation.js").ConversationId): void {
@@ -141,3 +178,5 @@ export class WhatsAppWebhookService {
     return api.sendText(phoneNumberId, recipient, text);
   }
 }
+
+function key(kind: "inbound" | "reply", wamid: string): string { return `whatsapp-${kind}:${createHash("sha256").update(wamid).digest("hex")}`; }

@@ -44,6 +44,10 @@ interface ContextualWhatsAppConnectionControllers {
   activate?: (context: WorkspaceContext) => RequestHandler;
   deactivate?: (context: WorkspaceContext) => RequestHandler;
 }
+interface ContextualConversationReadControllers {
+  list: (context: WorkspaceContext) => RequestHandler;
+  get: (context: WorkspaceContext) => RequestHandler;
+}
 
 interface AuthorizedCompanyDependencies {
   authentication: AuthenticationService;
@@ -56,11 +60,14 @@ interface AuthorizedCompanyDependencies {
   whatsAppConnectionControllers?: ContextualWhatsAppConnectionControllers;
   knowledgeControllers?: Record<string, (context: WorkspaceContext, actor: ActorContext) => RequestHandler>;
   conversationMessageController?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
+  conversationReadControllers?: ContextualConversationReadControllers;
   pdfBodyParser?: RequestHandler;
 }
 
 let productionConversationMessageController: ((context: WorkspaceContext, actor: ActorContext) => RequestHandler) | null = null;
+let productionConversationReadControllers: ContextualConversationReadControllers | null = null;
 export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
+export function configureProductionConversationReadControllers(controllers: ContextualConversationReadControllers): void { productionConversationReadControllers = controllers; }
 
 function rawCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -145,6 +152,11 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   if (operationalExecution) router.post("/:workspaceId/companies/:companyId/assistant/executions", operationalExecution);
   const conversationMessageController = dependencies.conversationMessageController ?? productionConversationMessageController;
   if (conversationMessageController) router.post("/:workspaceId/companies/:companyId/conversations/:conversationId/messages", authorize("conversation:message:send", true, conversationMessageController));
+  const conversationReads = dependencies.conversationReadControllers ?? productionConversationReadControllers;
+  if (conversationReads) {
+    router.get("/:workspaceId/companies/:companyId/conversations", authorize("company:read", false, conversationReads.list));
+    router.get("/:workspaceId/companies/:companyId/conversations/:conversationId", authorize("company:read", false, conversationReads.get));
+  }
   const webChat = dependencies.webChatConnectionControllers;
   if (webChat) {
     router.get("/:workspaceId/companies/:companyId/web-chat-connections", authorize("company:read", false, webChat.list));

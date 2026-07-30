@@ -13,7 +13,7 @@ export class OperatorConversationMessageNotFoundError extends Error {}
 
 export interface OperatorConversationMessageResult {
   readonly messageId: string;
-  readonly delivery: { readonly id: string; readonly state: "accepted" | "uncertain" };
+  readonly delivery: { readonly id: string; readonly state: "pending" | "accepted" | "uncertain" };
 }
 
 export class OperatorConversationMessagingService {

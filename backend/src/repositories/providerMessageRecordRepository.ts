@@ -18,6 +18,10 @@ export class ProviderMessageRecordRepository implements ProviderMessageRecordRep
     const row = this.db.prepare("SELECT * FROM provider_message_records WHERE transport_provider=? AND transport_connection_id=? AND conversation_message_id=?").get(transportProvider, transportConnectionId, messageId) as Row | undefined;
     return row ? record(row) : null;
   }
+  public findById(id: ProviderMessageRecordId): ProviderMessageRecord | null {
+    const row = this.db.prepare("SELECT * FROM provider_message_records WHERE id=?").get(id) as Row | undefined;
+    return row ? record(row) : null;
+  }
   public findByTransportProviderAndExternalMessageId(transportProvider: string, externalMessageId: string): ProviderMessageRecord | null {
     if (!externalMessageId.trim()) return null;
     const row = this.db.prepare("SELECT * FROM provider_message_records WHERE transport_provider=? AND external_message_id=?").get(transportProvider, externalMessageId) as Row | undefined;

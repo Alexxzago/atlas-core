@@ -1,7 +1,8 @@
 import { createApp } from "./app.js";
-import { createProductionAppRouters } from "./composition.js";
+import { createProductionAppRouters, whatsAppOutboundDeliveryService, whatsAppWebhookService } from "./composition.js";
 import { database } from "./config/database.js";
 import { setShuttingDown } from "./routes/health.js";
+import { randomUUID } from "node:crypto";
 
 const portValue = Number(process.env.PORT ?? "3000");
 if (!Number.isSafeInteger(portValue) || portValue < 1 || portValue > 65_535) throw new Error("PORT must be a valid TCP port.");
@@ -9,6 +10,11 @@ if (!Number.isSafeInteger(portValue) || portValue < 1 || portValue > 65_535) thr
 const server = createApp(createProductionAppRouters(), { production: process.env.NODE_ENV === "production" }).listen(portValue, "0.0.0.0", () => {
   console.log(`Atlas listening on port ${portValue}`);
 });
+const dispatchOwner = `whatsapp-dispatch-${randomUUID()}`;
+async function recoverWhatsApp(): Promise<void> { try { await whatsAppWebhookService.resumeIncomplete(); await whatsAppOutboundDeliveryService.dispatchReady(dispatchOwner); } catch { console.error("WhatsApp recovery cycle failed."); } }
+void recoverWhatsApp();
+const recoveryTimer = setInterval(() => { void recoverWhatsApp(); }, 5_000);
+recoveryTimer.unref();
 
 let isShuttingDown = false;
 
@@ -18,6 +24,7 @@ function gracefulShutdown(reason: string, exitCode: number): void {
   console.log(`Initiating graceful shutdown. Reason: ${reason}`);
 
   setShuttingDown(true);
+  clearInterval(recoveryTimer);
 
   if (typeof server.closeIdleConnections === "function") {
     server.closeIdleConnections();

@@ -34,10 +34,20 @@ export class WhatsAppConnectionService {
   }
   public list(context: WorkspaceContext, companyIdValue: unknown): WhatsAppConnection[] { const id = parseCompanyId(companyIdValue); this.company(context, id); return this.connections.listByCompany(context, id); }
   public resolveActiveByPhoneNumberId(phoneNumberId: unknown): WhatsAppConnection | null { if (typeof phoneNumberId !== "string") return null; const connection = this.connections.findByPhoneNumberId(phoneNumberId); return connection?.status === "active" ? connection : null; }
+  public resolveForRecovery(connectionId: WhatsAppConnectionId): WhatsAppConnection | null { const connection = this.connections.findByIdForRecovery(connectionId); return connection?.status === "active" ? connection : null; }
   public get(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): WhatsAppConnection { const id = parseCompanyId(companyIdValue), connection = this.connections.findById(context, id, connectionId(connectionIdValue)); if (!connection) throw new WhatsAppConnectionNotFoundError("WhatsApp Connection was not found."); return connection; }
   public update(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown, value: unknown): WhatsAppConnection {
     const current = this.get(context, companyIdValue, connectionIdValue), input = updateInput(value);
-    if (input.kind === "status") return this.updateStatus(context, current, input.status);
+    if (input.kind === "status") {
+      if (input.status === "active") {
+        const profile = this.profiles.findById(context, current.companyId, current.assistantProfileId);
+        try { if (!profile) throw new AssistantProfilePolicyError(); this.executionPolicy.assert(profile); } catch { throw new WhatsAppConnectionProfileNotExecutableError("Assistant Profile is not executable."); }
+        // Connections created before onboarding gates existed are only exercised by legacy local callers.
+        if (!this.onboarding) return this.updateStoredStatus(context, current, input.status);
+        throw new WhatsAppConnectionConflictError("Use the activation endpoint to activate a WhatsApp Connection.");
+      }
+      return this.updateStoredStatus(context, current, input.status);
+    }
     if (current.status !== "inactive") throw new WhatsAppConnectionConflictError("Deactivate the WhatsApp Connection before changing its Assistant Profile.");
     const profile = this.profiles.findById(context, current.companyId, input.assistantProfileId);
     if (!profile || profile.status === "archived") throw new WhatsAppConnectionNotFoundError("Assistant Profile was not found.");
@@ -79,9 +89,35 @@ export class WhatsAppConnectionService {
     if (connection.status === "active") { const updated = this.connections.updateStatus(context, connection.companyId, connection.id, connection.updatedAt, "inactive", next(connection.updatedAt, this.clock.now())); if (!updated) this.changed(context, connection); }
     return this.status(context, connection.companyId, connection.id);
   }
-  private updateStatus(context: WorkspaceContext, current: WhatsAppConnection, status: WhatsAppConnectionStatus): WhatsAppConnection {
+  public recordWebhookActivity(phoneNumberId: string): void {
+    const connection = this.resolveActiveByPhoneNumberId(phoneNumberId);
+    if (!connection || !this.onboarding) return;
+    const context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" };
+    const state = this.onboarding.states.findOperationalState(context, connection.companyId, connection.id);
+    if (!state) return;
+    const now = this.clock.now();
+    this.saveState(context, connection, { ...state, healthState: "healthy", healthFailureCode: null, lastWebhookActivityAt: now, updatedAt: now });
+  }
+  public recordProviderActivity(context: WorkspaceContext, companyId: number, connectionIdValue: WhatsAppConnectionId): void {
+    if (!this.onboarding) return;
+    const connection = this.connections.findById(context, companyId, connectionIdValue);
+    if (!connection) return;
+    const state = this.onboarding.states.findOperationalState(context, companyId, connection.id);
+    if (!state) return;
+    const now = this.clock.now();
+    this.saveState(context, connection, { ...state, healthState: "healthy", healthFailureCode: null, lastProviderActivityAt: now, updatedAt: now });
+  }
+  public recordProviderFailure(context: WorkspaceContext, companyId: number, connectionIdValue: WhatsAppConnectionId): void {
+    if (!this.onboarding) return;
+    const connection = this.connections.findById(context, companyId, connectionIdValue);
+    if (!connection) return;
+    const state = this.onboarding.states.findOperationalState(context, companyId, connection.id);
+    if (!state) return;
+    const now = this.clock.now();
+    this.saveState(context, connection, { ...state, healthState: "degraded", healthFailureCode: "provider_unavailable", updatedAt: now });
+  }
+  private updateStoredStatus(context: WorkspaceContext, current: WhatsAppConnection, status: WhatsAppConnectionStatus): WhatsAppConnection {
     if (current.status === status) return current;
-    if (status === "active") { const profile = this.profiles.findById(context, current.companyId, current.assistantProfileId); if (!profile) throw new WhatsAppConnectionNotFoundError("Assistant Profile was not found."); try { this.executionPolicy.assert(profile); } catch (error: unknown) { if (error instanceof AssistantProfilePolicyError) throw new WhatsAppConnectionProfileNotExecutableError("Assistant Profile is not executable."); throw error; } }
     const updated = this.connections.updateStatus(context, current.companyId, current.id, current.updatedAt, status, next(current.updatedAt, this.clock.now()));
     return updated ?? this.changed(context, current);
   }
