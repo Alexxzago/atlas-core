@@ -1,0 +1,66 @@
+:root {
+  --atlas-color-canvas: #f6f7f9;
+  --atlas-color-surface: #ffffff;
+  --atlas-color-surface-subtle: #f9fafb;
+  --atlas-color-surface-selected: #eef4ff;
+  --atlas-color-text: #111827;
+  --atlas-color-text-secondary: #5f6b7a;
+  --atlas-color-text-muted: #7c8796;
+  --atlas-color-text-disabled: #9ca3af;
+  --atlas-color-text-inverse: #ffffff;
+  --atlas-color-border: #d9dee7;
+  --atlas-color-border-subtle: #e8ebf0;
+  --atlas-color-border-strong: #b8c0cc;
+  --atlas-color-action: #2563eb;
+  --atlas-color-action-hover: #1d4ed8;
+  --atlas-color-action-active: #1e40af;
+  --atlas-color-focus: #2563eb;
+  --atlas-color-focus-halo: rgb(37 99 235 / 22%);
+  --atlas-color-success: #16794a;
+  --atlas-color-success-surface: #eaf7f0;
+  --atlas-color-warning: #8a5a00;
+  --atlas-color-warning-surface: #fff7d6;
+  --atlas-color-danger: #b42318;
+  --atlas-color-danger-surface: #fef0ed;
+  --atlas-color-success-border: #b9e5cc;
+  --atlas-color-warning-border: #ecd58a;
+  --atlas-color-danger-border: #f1b8b2;
+  --atlas-color-selected-border: #8bb4ff;
+  --atlas-color-processing: #245ea8;
+  --atlas-color-processing-surface: #ebf3ff;
+  --atlas-color-processing-border: #b9d4fa;
+  --atlas-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --atlas-font-size-body: 14px;
+  --atlas-line-height-body: 1.5;
+  --atlas-space-1: 2px; --atlas-space-2: 4px; --atlas-space-3: 8px; --atlas-space-4: 12px; --atlas-space-5: 16px; --atlas-space-6: 20px; --atlas-space-7: 24px; --atlas-space-8: 32px; --atlas-space-9: 40px; --atlas-space-10: 48px;
+  --atlas-size-control: 40px; --atlas-size-control-touch: 44px; --atlas-size-header: 56px; --atlas-size-sidebar: 248px;
+  --atlas-radius-sm: 4px; --atlas-radius-md: 6px; --atlas-radius-lg: 10px; --atlas-radius-xl: 14px; --atlas-radius-pill: 999px;
+  --atlas-border-default: 1px solid var(--atlas-color-border); --atlas-border-subtle: 1px solid var(--atlas-color-border-subtle);
+  --atlas-shadow-overlay: 0 12px 32px rgb(17 24 39 / 14%);
+  --atlas-z-base: 0; --atlas-z-header: 20; --atlas-z-drawer: 30; --atlas-z-toast: 40;
+  --atlas-motion-fast: 120ms; --atlas-motion-standard: 180ms; --atlas-motion-slow: 240ms;
+  --atlas-ease-enter: cubic-bezier(.2, .8, .2, 1); --atlas-ease-exit: cubic-bezier(.4, 0, 1, 1);
+  --atlas-breakpoint-compact: 767px;
+  --atlas-density-comfortable: var(--atlas-space-5); --atlas-density-compact: var(--atlas-space-3);
+}
+
+.ds-stack { display: grid; gap: var(--ds-gap, var(--atlas-space-5)); }
+.ds-inline, .ds-cluster { display: flex; align-items: center; gap: var(--ds-gap, var(--atlas-space-3)); }
+.ds-cluster { flex-wrap: wrap; }
+.ds-grid { display: grid; gap: var(--ds-gap, var(--atlas-space-5)); }
+.ds-container { inline-size: min(100%, 1200px); margin-inline: auto; }
+.ds-divider { block-size: 1px; background: var(--atlas-color-border-subtle); }
+.ds-visually-hidden { position: absolute; inline-size: 1px; block-size: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.ds-alert, .ds-error-state, .ds-empty-state { display: grid; gap: var(--atlas-space-2); padding: var(--atlas-space-4); border: var(--atlas-border-default); border-radius: var(--atlas-radius-md); }
+.ds-alert--success { color: var(--atlas-color-success); background: var(--atlas-color-success-surface); }
+.ds-alert--warning { color: var(--atlas-color-warning); background: var(--atlas-color-warning-surface); }
+.ds-alert--danger, .ds-error-state { color: var(--atlas-color-danger); background: var(--atlas-color-danger-surface); }
+.ds-alert--info { color: var(--atlas-color-action); background: var(--atlas-color-surface-selected); }
+.ds-status { display: inline-flex; align-items: center; gap: var(--atlas-space-2); font-size: 12px; font-weight: 600; }
+.ds-status__mark { inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--atlas-color-text-muted); }
+.ds-status--success .ds-status__mark { background: var(--atlas-color-success); }.ds-status--warning .ds-status__mark { background: var(--atlas-color-warning); }.ds-status--danger .ds-status__mark { background: var(--atlas-color-danger); }.ds-status--info .ds-status__mark { background: var(--atlas-color-action); }
+.ds-skeleton { display: grid; gap: var(--atlas-space-3); }.ds-skeleton > span:not(.ds-visually-hidden) { block-size: 12px; background: var(--atlas-color-border-subtle); border-radius: var(--atlas-radius-pill); animation: atlas-pulse 1.4s ease-in-out infinite; }.ds-skeleton > span:nth-child(3) { inline-size: 62%; }
+.ds-empty-state { max-inline-size: 560px; text-align: center; place-items: center; background: var(--atlas-color-surface-subtle); }.ds-empty-state h2, .ds-error-state h2 { font-size: 16px; }
+.ds-progress { display: inline-flex; align-items: center; gap: var(--atlas-space-3); color: var(--atlas-color-text-secondary); }.ds-progress__spinner { inline-size: 16px; block-size: 16px; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; animation: atlas-spin 800ms linear infinite; }
+@keyframes atlas-pulse { 50% { opacity: .45; } } @keyframes atlas-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ds-skeleton > span:not(.ds-visually-hidden), .ds-progress__spinner { animation: none; } }

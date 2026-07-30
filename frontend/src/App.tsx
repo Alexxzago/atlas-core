@@ -8,11 +8,12 @@ import { applyOnboardingFailure, replaceCompany, setCompanyStatus } from "./stat
 import type { Company, CompanyInput, CompanyUpdate } from "./types/api";
 import { AuthenticationPortal } from "./components/AuthenticationPortal";
 import { PublicChatPage, publicConnectionIdFromPath } from "./components/PublicChatPage";
+import { RouterProvider } from "./routing/RouterProvider";
 
 export default function App(): React.JSX.Element {
   const publicConnectionId = publicConnectionIdFromPath(window.location.pathname);
   if (publicConnectionId) return <PublicChatPage connectionPublicId={publicConnectionId} />;
-  if(import.meta.env.VITE_ATLAS_TRUSTED_LOCAL_MODE!=="true")return <AuthenticationPortal/>;
+  if(import.meta.env.VITE_ATLAS_TRUSTED_LOCAL_MODE!=="true")return <RouterProvider><AuthenticationPortal/></RouterProvider>;
   return <TrustedPortal/>;
 }
 

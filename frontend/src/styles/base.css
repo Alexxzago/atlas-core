@@ -8,3 +8,5 @@ a:hover { color: var(--color-action-hover); }
 ::selection { background: var(--color-surface-selected); }
 .sr-only { position: absolute; inline-size: 1px; block-size: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .supporting-copy, small { color: var(--color-text-secondary); font-size: 12px; line-height: 18px; }
+.skip-link { position: fixed; z-index: var(--atlas-z-toast); inset-block-start: var(--atlas-space-3); inset-inline-start: var(--atlas-space-3); padding: var(--atlas-space-3) var(--atlas-space-4); color: var(--atlas-color-text-inverse); background: var(--atlas-color-action); border-radius: var(--atlas-radius-md); transform: translateY(-160%); transition: transform var(--atlas-motion-fast) var(--atlas-ease-enter); }
+.skip-link:focus { transform: translateY(0); }
