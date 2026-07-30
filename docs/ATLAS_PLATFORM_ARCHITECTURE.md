@@ -45,10 +45,10 @@ flowchart LR
   API --> Gemini[Gemini adapter]
   API --> Firecrawl[Firecrawl adapter]
   API --> SMTP[SMTP adapter]
-  Meta[Meta WhatsApp - planned transport execution] -. future .-> API
+  Meta[Meta WhatsApp Cloud API] --> API
 ```
 
-This diagram represents the current platform with planned WhatsApp transport execution explicitly marked as future.
+WhatsApp transport execution is implemented. Real Meta production validation remains a release-operation requirement; it is not represented as complete by this diagram.
 
 ## 6. Module Map
 
@@ -62,11 +62,11 @@ This diagram represents the current platform with planned WhatsApp transport exe
 | Runtime | Assistant execution, execution records, immutable profile/knowledge snapshots | execution port, profiles, knowledge |
 | Conversations | Conversations, participants, messages, channel metadata | Company scope, conversation repository |
 | Web Chat | Public connection/session transport adapter | Conversations, runtime, profiles |
-| WhatsApp | Connection configuration and future sender/conversation binding | Companies, profiles, conversations |
-| Transport | Provider event/message references and outbound-delivery persistence | Conversations and channel connection references |
+| WhatsApp | Connection configuration, signed webhook handling, conversation binding, and durable delivery dispatch | Companies, profiles, conversations, transport |
+| Transport | Provider event/message references, inbound recovery, and outbound-delivery persistence | Conversations and channel connection references |
 | Deployment | Database selection, migrations, health/readiness, environment validation | configuration and composition root |
 
-Modules are mature when they have explicit domain types, services, repositories, tests, and production composition wiring. Identity, Workspaces, Knowledge, Assistant Profiles, Runtime, and Web Chat are established. Conversations, WhatsApp, and Transport are emerging modules.
+Modules are mature when they have explicit domain types, services, repositories, tests, and production composition wiring. Identity, Workspaces, Knowledge, Assistant Profiles, Runtime, Web Chat, WhatsApp, and Transport have established implementations. Real provider production validation and scaled operational concerns remain release work.
 
 ## 7. Dependency Rules
 
@@ -114,7 +114,7 @@ Atlas has a conceptual kernel shared by modules. These are not instructions to m
 | AssistantTurn | `OperationalConversationTurnService` input/result | One grounded inbound-to-outbound operational turn |
 | RuntimeResult | assistant execution result | Answered or safe fallback outcome |
 | ExecutionRecord | assistant execution record | Immutable audit snapshot of profile, knowledge, provider, outcome |
-| ExternalIdentity | WhatsApp `wa_id` binding is partial implementation | Future provider-specific external contact identity |
+| ExternalIdentity | WhatsApp `wa_id` conversation binding | Provider-specific external contact identity |
 | ChannelConnection | Web Chat and WhatsApp connection models | Channel-specific Company/Profile attachment |
 
 ## 9. Multi-tenant Model
@@ -190,7 +190,7 @@ Provider extraction, URL acquisition, PDF extraction, and Gemini interactions ar
 
 Conversations are Company-owned persistent records with `internal`, `web_chat`, or `whatsapp` channel metadata. Participants are neutral records with type/reference fields. Messages have inbound/outbound direction, content, optional idempotency key, and optional execution-record link.
 
-Conversation state is `open|closed`. Messages are appended chronologically and are not channel-specific. This is the foundation shared by Web Chat and future WhatsApp execution.
+Conversation state is `open|closed`. Messages are appended chronologically and are not channel-specific. This is the foundation shared by Web Chat and WhatsApp execution.
 
 Current per-process turn serialization uses `InMemoryConversationTurnLock`. It prevents overlapping turns in one process but is not a distributed coordination mechanism.
 
@@ -202,15 +202,9 @@ Web Chat is implemented. A Web Chat connection binds a Company and executable As
 
 ### WhatsApp
 
-WhatsApp is an emerging channel. Phase 1 created:
+WhatsApp is implemented through the Meta WhatsApp Cloud API. It provides tenant-scoped connection configuration, encrypted credentials, provider identity validation, activation gates, signed raw-body webhook verification, inbound capture and recovery, `wa_id` conversation binding, shared assistant-turn execution, durable outbound queueing/lease dispatch, Graph API delivery, and delivery-status processing.
 
-- WhatsApp connection persistence.
-- Unique Phone Number ID mapping.
-- Connection plus `wa_id` conversation bindings.
-- Provider event/message references.
-- Durable outbound-delivery persistence.
-
-Phase 2 adds authenticated Company-scoped connection management. It separates configuration from operation: connections may be configured with a non-archived profile, while activation requires an executable profile. Webhook verification, inbound parsing, Graph API delivery, credentials, and workers are not implemented.
+Connections separate configuration from operation: activation requires validated credentials, published Knowledge, and an executable profile. Atlas behavior is covered by automated contract and persistence tests. Real Meta production validation with a WABA, Phone Number ID, system-user token, reachable callback, live inbound/outbound flow, receipts, and redacted evidence remains pending release approval.
 
 ### Future channels
 
@@ -219,13 +213,13 @@ Instagram, Messenger, Telegram, SMS, and email should be channel-specific adapte
 ```mermaid
 flowchart LR
   Web[Web Chat adapter] --> Turn[OperationalConversationTurnService]
-  WA[WhatsApp adapter - future execution] --> Turn
+   WA[WhatsApp adapter] --> Turn
   Future[Future channel adapter] --> Turn
   Turn --> Conv[Conversation persistence]
   Turn --> Runtime[OperationalAssistantRuntime]
   Runtime --> Record[Execution record]
   Turn --> Outbound[Persisted outbound message]
-  Outbound --> Delivery[Outbound delivery - future worker]
+   Outbound --> Delivery[Persisted outbound delivery dispatcher]
 ```
 
 ## 15. Persistence Strategy
@@ -300,11 +294,9 @@ The worker and dedicated-service nodes are future evolution, not current deploym
 
 ### Near-term
 
-- WhatsApp signed inbound webhook.
-- Inbound event idempotency and conversation binding execution.
-- Persisted outbound delivery worker and Graph API adapter.
-- Provider credential boundary and operational connection health.
-- Transport correlation/observability.
+- Complete real Meta production validation and attach redacted release evidence.
+- Transport correlation/observability, delivery monitoring, and alerting.
+- Evaluate distributed conversation turn coordination for multi-instance operation.
 
 ### Future
 
@@ -338,4 +330,4 @@ Existing ADRs establish the architecture baseline, modular-monolith direction, W
 
 Atlas has a credible modular-monolith foundation for a multi-tenant, transport-neutral assistant platform. Its strongest architectural assets are workspace-scoped authorization, published knowledge, profile/runtime separation, persistent conversations, and channel adapters that reuse the same turn engine.
 
-Future work should extend these contracts rather than duplicate them. The next architectural priority is completing WhatsApp as a transport adapter: signed inbound handling, durable delivery, and credential isolation while preserving the existing tenancy, runtime, and conversation invariants.
+Future work should extend these contracts rather than duplicate them. The next release priority is completing real Meta production validation with redacted evidence while preserving the existing tenancy, runtime, conversation, and credential-isolation invariants.
