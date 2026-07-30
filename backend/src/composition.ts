@@ -99,15 +99,19 @@ import { MetaDeliveryStatusMapper } from "./whatsapp/services/MetaDeliveryStatus
 import { DeliveryLifecyclePolicy } from "./transport/domain/providerDelivery.js";
 import { OperatorConversationMessagingService } from "./conversation/services/operatorConversationMessagingService.js";
 import { createOperatorConversationMessageController } from "./controllers/operatorConversationMessagingController.js";
-import { configureProductionConversationMessageController, configureProductionConversationReadControllers } from "./routes/authorizedCompanies.js";
+import { configureProductionCompanyCoreControllers, configureProductionConversationMessageController, configureProductionConversationReadControllers } from "./routes/authorizedCompanies.js";
 import { createGetConversationController, createListConversationController } from "./controllers/conversationReadController.js";
 import { createActivateWhatsAppConnectionController, createConfigureWhatsAppCredentialsController, createDeactivateWhatsAppConnectionController, createGetWhatsAppConnectionController, createGetWhatsAppConnectionStatusController, createListWhatsAppConnectionsController, createUpdateWhatsAppConnectionController, createValidateWhatsAppConnectionController, createWhatsAppConnectionController } from "./controllers/WhatsAppConnectionController.js";
+import { CompanyDomainRepository } from "./repositories/companyDomainRepository.js";
+import { CompanyApplicationService } from "./company/application/companyApplicationService.js";
+import { createCompanyCoreControllers } from "./controllers/companyCoreController.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
 const agent = new AtlasAgent(geminiProvider);
 const chatService = new ChatService(companyRepository, knowledgeRepository, agent);
 const companyService = new CompanyService(companyRepository);
+configureProductionCompanyCoreControllers(createCompanyCoreControllers(new CompanyApplicationService(new CompanyDomainRepository(database))));
 const knowledgeService = new KnowledgeService(knowledgeRepository);
 const scrapeService = new ScrapeService(firecrawlProvider);
 const identityTransaction = new SqliteIdentityTransaction(database);

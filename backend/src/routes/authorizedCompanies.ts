@@ -7,6 +7,7 @@ import { AuthorizationService } from "../workspace/services/authorizationService
 import { WorkspaceResolver } from "../workspace/services/workspaceResolver.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 import { createActorContext, type ActorContext } from "../knowledge/domain/actorContext.js";
+import type { CompanyCoreControllers } from "../controllers/companyCoreController.js";
 
 interface ContextualControllers {
   list: (context: WorkspaceContext) => RequestHandler;
@@ -55,6 +56,7 @@ interface AuthorizedCompanyDependencies {
   authorization: AuthorizationService;
   resolver: WorkspaceResolver;
   controllers: ContextualControllers;
+  companyCoreControllers?: CompanyCoreControllers;
   assistantControllers: ContextualAssistantControllers;
   webChatConnectionControllers?: ContextualWebChatConnectionControllers;
   whatsAppConnectionControllers?: ContextualWhatsAppConnectionControllers;
@@ -66,8 +68,10 @@ interface AuthorizedCompanyDependencies {
 
 let productionConversationMessageController: ((context: WorkspaceContext, actor: ActorContext) => RequestHandler) | null = null;
 let productionConversationReadControllers: ContextualConversationReadControllers | null = null;
+let productionCompanyCoreControllers: CompanyCoreControllers | null = null;
 export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
 export function configureProductionConversationReadControllers(controllers: ContextualConversationReadControllers): void { productionConversationReadControllers = controllers; }
+export function configureProductionCompanyCoreControllers(controllers: CompanyCoreControllers): void { productionCompanyCoreControllers = controllers; }
 
 function rawCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -121,11 +125,27 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     } catch { res.status(404).json({ error: "Resource not found." }); }
   };
 
-  router.get("/:workspaceId/companies", authorize("company:read", false, dependencies.controllers.list));
-  router.post("/:workspaceId/companies", authorize("company:manage", true, dependencies.controllers.create));
-  router.get("/:workspaceId/companies/:companyId", authorize("company:read", false, dependencies.controllers.get));
-  router.patch("/:workspaceId/companies/:companyId", authorize("company:manage", true, dependencies.controllers.update));
-  router.delete("/:workspaceId/companies/:companyId", authorize("company:manage", true, dependencies.controllers.delete));
+  const companyCore = dependencies.companyCoreControllers ?? productionCompanyCoreControllers;
+  if (companyCore) {
+    router.get("/:workspaceId/companies", authorize("company:read", false, companyCore.list));
+    router.post("/:workspaceId/companies", authorize("company:manage", true, companyCore.create));
+    router.get("/:workspaceId/companies/slug/:slug", authorize("company:read", false, companyCore.getBySlug));
+    router.get("/:workspaceId/companies/:companyId", authorize("company:read", false, companyCore.get));
+    router.patch("/:workspaceId/companies/:companyId/identity", authorize("company:manage", true, companyCore.updateIdentity));
+    router.patch("/:workspaceId/companies/:companyId/branding", authorize("company:manage", true, companyCore.updateBranding));
+    router.patch("/:workspaceId/companies/:companyId/configuration", authorize("company:manage", true, companyCore.updateConfiguration));
+    router.post("/:workspaceId/companies/:companyId/readiness/evaluate", authorize("company:manage", true, companyCore.evaluateReadiness));
+    router.post("/:workspaceId/companies/:companyId/readiness/apply", authorize("company:manage", true, companyCore.applyReadiness));
+    router.post("/:workspaceId/companies/:companyId/suspend", authorize("company:manage", true, companyCore.suspend));
+    router.post("/:workspaceId/companies/:companyId/restore", authorize("company:manage", true, companyCore.restore));
+    router.post("/:workspaceId/companies/:companyId/archive", authorize("company:manage", true, companyCore.archive));
+  }
+
+  if (!companyCore) {
+    router.get("/:workspaceId/companies", authorize("company:read", false, dependencies.controllers.list));
+    router.post("/:workspaceId/companies", authorize("company:manage", true, dependencies.controllers.create));
+    router.get("/:workspaceId/companies/:companyId", authorize("company:read", false, dependencies.controllers.get));
+  }
   router.post("/:workspaceId/companies/:companyId/onboard", authorize("onboarding:run", true, dependencies.controllers.onboard));
   router.get("/:workspaceId/companies/:companyId/assistant-profiles", authorize("company:read", false, dependencies.assistantControllers.list));
   router.post("/:workspaceId/companies/:companyId/assistant-profiles", authorize("company:manage", true, dependencies.assistantControllers.create));

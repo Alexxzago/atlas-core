@@ -23,6 +23,7 @@ export function createApp(routers: AppRouters, options: AppOptions = {}): expres
   app.use("/workspaces", routers.workspacesRouter);
   app.use("/workspaces", routers.authorizedCompaniesRouter);
   app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction): void => {
+    if (typeof error === "object" && error !== null && "type" in error && (error as { type?: unknown }).type === "entity.parse.failed") { res.status(400).json({ error: { code: "validation_failed", message: "Request body must be valid JSON." } }); return; }
     if (typeof error === "object" && error !== null && "type" in error && (error as { type?: unknown }).type === "entity.too.large") { res.status(413).json({ error: { code: "knowledge_input_too_large", message: "Knowledge input is too large." } }); return; }
     next(error);
   });
