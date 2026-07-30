@@ -42,9 +42,22 @@ const shellTranslationKeys = [
   "companyNav.overview", "companyNav.assistant", "companyNav.knowledge", "companyNav.channels", "companyNav.whatsapp",
 ] as const;
 
+const dashboardTranslationKeys = [
+  "dashboard.title", "dashboard.description", "dashboard.loading",
+  "dashboard.overview.title", "dashboard.overview.workspace", "dashboard.overview.company", "dashboard.overview.status", "dashboard.overview.notAvailable", "dashboard.overview.noCompany", "dashboard.overview.companyDescription", "dashboard.overview.newCustomerDescription", "dashboard.overview.selectCompanyDescription",
+  "dashboard.health.title", "dashboard.health.notAssessedDescription",
+  "dashboard.connections.title", "dashboard.connection.whatsapp", "dashboard.connection.knowledge", "dashboard.connection.assistant", "dashboard.connection.channels",
+  "dashboard.state.ready", "dashboard.state.pending", "dashboard.state.attentionRequired", "dashboard.state.unavailable", "dashboard.state.notAssessed", "dashboard.connectionState.connected", "dashboard.connectionState.pending", "dashboard.connectionState.attentionRequired", "dashboard.connectionState.disconnected", "dashboard.connectionState.notAssessed",
+  "dashboard.actions.title", "dashboard.actions.open", "dashboard.action.createCompany.title", "dashboard.action.createCompany.description", "dashboard.action.selectCompany.title", "dashboard.action.selectCompany.description", "dashboard.action.connectWhatsApp.title", "dashboard.action.connectWhatsApp.description", "dashboard.action.reason.setupRequired", "dashboard.action.reason.connectionNotAssessed",
+  "dashboard.insight.title", "dashboard.insight.companySetup", "dashboard.insight.companySelection", "dashboard.insight.connectionStatusNotAssessed",
+  "dashboard.activity.title", "dashboard.activity.empty",
+  "dashboard.empty.title", "dashboard.empty.description", "dashboard.unavailable.title", "dashboard.unavailable.description", "dashboard.error.title", "dashboard.error.description",
+] as const;
+
 type ExistingTranslationKey = typeof translationKeys[number];
 type ShellTranslationKey = typeof shellTranslationKeys[number];
-export type TranslationKey = ExistingTranslationKey | ShellTranslationKey;
+type DashboardTranslationKey = typeof dashboardTranslationKeys[number];
+export type TranslationKey = ExistingTranslationKey | ShellTranslationKey | DashboardTranslationKey;
 export type TranslationDictionary = Record<TranslationKey, string>;
 
 const esBase: Record<ExistingTranslationKey, string> = {
@@ -122,6 +135,31 @@ const shellTranslations: Record<Locale, Record<ShellTranslationKey, string>> = {
   },
 };
 
+const dashboardTranslations: Record<Locale, Record<DashboardTranslationKey, string>> = {
+  es: {
+    "dashboard.title": "Panel", "dashboard.description": "Resumen operativo de la empresa seleccionada.", "dashboard.loading": "Cargando el panel…",
+    "dashboard.overview.title": "Resumen de empresa", "dashboard.overview.workspace": "Espacio de trabajo", "dashboard.overview.company": "Empresa", "dashboard.overview.status": "Estado", "dashboard.overview.notAvailable": "No disponible", "dashboard.overview.noCompany": "Sin empresa seleccionada", "dashboard.overview.companyDescription": "Este panel usa el contexto operativo actual de la empresa.", "dashboard.overview.newCustomerDescription": "Creá una empresa para comenzar a preparar su operación.", "dashboard.overview.selectCompanyDescription": "Seleccioná una empresa existente para ver su contexto operativo.",
+    "dashboard.health.title": "Salud de la empresa", "dashboard.health.notAssessedDescription": "Todavía no hay una evaluación operativa consolidada.",
+    "dashboard.connections.title": "Estado de conexiones", "dashboard.connection.whatsapp": "WhatsApp", "dashboard.connection.knowledge": "Conocimiento", "dashboard.connection.assistant": "Asistente", "dashboard.connection.channels": "Canales",
+    "dashboard.state.ready": "Listo", "dashboard.state.pending": "Pendiente", "dashboard.state.attentionRequired": "Requiere atención", "dashboard.state.unavailable": "No disponible", "dashboard.state.notAssessed": "Sin evaluar", "dashboard.connectionState.connected": "Conectado", "dashboard.connectionState.pending": "Pendiente", "dashboard.connectionState.attentionRequired": "Requiere atención", "dashboard.connectionState.disconnected": "Desconectado", "dashboard.connectionState.notAssessed": "Sin evaluar",
+    "dashboard.actions.title": "Acciones recomendadas", "dashboard.actions.open": "Abrir", "dashboard.action.createCompany.title": "Crear una empresa", "dashboard.action.createCompany.description": "Definí la empresa que Atlas ayudará a operar.", "dashboard.action.selectCompany.title": "Seleccionar una empresa", "dashboard.action.selectCompany.description": "Elegí una empresa existente para revisar su operación.", "dashboard.action.connectWhatsApp.title": "Conectar WhatsApp", "dashboard.action.connectWhatsApp.description": "Prepará la conexión de WhatsApp de esta empresa.", "dashboard.action.reason.setupRequired": "Se requiere una empresa para continuar.", "dashboard.action.reason.connectionNotAssessed": "La conexión todavía no fue evaluada.",
+    "dashboard.insight.title": "Información de Atlas", "dashboard.insight.companySetup": "Una empresa establece el contexto compartido para el conocimiento, los asistentes y los canales.", "dashboard.insight.companySelection": "La empresa seleccionada define qué conocimiento, asistentes y canales vas a revisar.", "dashboard.insight.connectionStatusNotAssessed": "Los estados de conexión aparecerán cuando haya un modelo operativo disponible.",
+    "dashboard.activity.title": "Actividad reciente", "dashboard.activity.empty": "Todavía no se registró actividad reciente.",
+    "dashboard.empty.title": "Todavía no hay datos del panel", "dashboard.empty.description": "Seleccioná una empresa para ver su contexto operativo.", "dashboard.unavailable.title": "El panel no está disponible", "dashboard.unavailable.description": "No podemos mostrar el panel en este momento.", "dashboard.error.title": "No pudimos cargar el panel", "dashboard.error.description": "Intentá nuevamente más tarde.",
+  },
+  en: {
+    "dashboard.title": "Dashboard", "dashboard.description": "Operational summary for the selected company.", "dashboard.loading": "Loading dashboard…",
+    "dashboard.overview.title": "Company overview", "dashboard.overview.workspace": "Workspace", "dashboard.overview.company": "Company", "dashboard.overview.status": "Status", "dashboard.overview.notAvailable": "Unavailable", "dashboard.overview.noCompany": "No company selected", "dashboard.overview.companyDescription": "This dashboard uses the company's current operational context.", "dashboard.overview.newCustomerDescription": "Create a company to begin preparing its operation.", "dashboard.overview.selectCompanyDescription": "Select an existing company to view its operational context.",
+    "dashboard.health.title": "Company health", "dashboard.health.notAssessedDescription": "A consolidated operational assessment is not available yet.",
+    "dashboard.connections.title": "Connection status", "dashboard.connection.whatsapp": "WhatsApp", "dashboard.connection.knowledge": "Knowledge", "dashboard.connection.assistant": "Assistant", "dashboard.connection.channels": "Channels",
+    "dashboard.state.ready": "Ready", "dashboard.state.pending": "Pending", "dashboard.state.attentionRequired": "Attention required", "dashboard.state.unavailable": "Unavailable", "dashboard.state.notAssessed": "Not assessed", "dashboard.connectionState.connected": "Connected", "dashboard.connectionState.pending": "Pending", "dashboard.connectionState.attentionRequired": "Attention required", "dashboard.connectionState.disconnected": "Disconnected", "dashboard.connectionState.notAssessed": "Not assessed",
+    "dashboard.actions.title": "Recommended actions", "dashboard.actions.open": "Open", "dashboard.action.createCompany.title": "Create a company", "dashboard.action.createCompany.description": "Define the company Atlas will help operate.", "dashboard.action.selectCompany.title": "Select a company", "dashboard.action.selectCompany.description": "Choose an existing company to review its operation.", "dashboard.action.connectWhatsApp.title": "Connect WhatsApp", "dashboard.action.connectWhatsApp.description": "Prepare this company's WhatsApp connection.", "dashboard.action.reason.setupRequired": "A company is required to continue.", "dashboard.action.reason.connectionNotAssessed": "The connection has not been assessed yet.",
+    "dashboard.insight.title": "Atlas insight", "dashboard.insight.companySetup": "A company establishes the shared context for knowledge, assistants, and channels.", "dashboard.insight.companySelection": "The selected company determines which knowledge, assistants, and channels you review.", "dashboard.insight.connectionStatusNotAssessed": "Connection statuses will appear when an operational read model is available.",
+    "dashboard.activity.title": "Recent activity", "dashboard.activity.empty": "No recent activity has been recorded yet.",
+    "dashboard.empty.title": "No dashboard data yet", "dashboard.empty.description": "Select a company to view its operational context.", "dashboard.unavailable.title": "Dashboard unavailable", "dashboard.unavailable.description": "We cannot show the dashboard right now.", "dashboard.error.title": "We could not load the dashboard", "dashboard.error.description": "Try again later.",
+  },
+};
+
 export const translations: Record<Locale, TranslationDictionary> = {
-  es: { ...esBase, ...shellTranslations.es }, en: { ...enBase, ...shellTranslations.en },
+  es: { ...esBase, ...shellTranslations.es, ...dashboardTranslations.es }, en: { ...enBase, ...shellTranslations.en, ...dashboardTranslations.en },
 };

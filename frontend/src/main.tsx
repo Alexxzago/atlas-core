@@ -8,5 +8,6 @@ import "./styles/base.css";
 import "./styles/layout.css";
 import "./styles/components.css";
 import "./design-system/foundations.css";
+import "./styles/dashboard.css";
 
 createRoot(document.getElementById("root")!).render(<StrictMode><I18nProvider><App /></I18nProvider></StrictMode>);
