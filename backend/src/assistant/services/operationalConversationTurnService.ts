@@ -93,6 +93,34 @@ export class OperationalConversationTurnService {
       return Object.freeze({ inbound, outbound, response: executed.response, executionRecordId: executed.record.id });
     } finally { release(); }
   }
+
+  public async executePersistedInbound(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, input: { readonly assistantProfileId: string; readonly outboundParticipantId: string; readonly replyIdempotencyKey: string }, inbound: ConversationMessage, hooks?: Omit<OperationalConversationTurnHooks, "afterInbound">): Promise<OperationalConversationTurnResult> {
+    const scopedCompanyId = parseCompanyId(companyIdValue), conversationIdValueParsed = parseConversationId(conversationIdValue);
+    const company = this.companies.findById(context, scopedCompanyId);
+    if (!company) throw new OperationalConversationTurnNotFoundError("Company was not found.");
+    const conversation = this.conversations.validateOpen(context, scopedCompanyId, conversationIdValueParsed);
+    if (inbound.conversationId !== conversation.id || inbound.direction !== "inbound") throw new OperationalConversationTurnValidationError("Persisted inbound message is invalid.");
+    const profileId = assistantProfileId(input.assistantProfileId), outboundParticipantId = conversationParticipantId(input.outboundParticipantId);
+    const release = this.locks.acquire(context, conversation.id);
+    if (!release) throw new OperationalConversationTurnInProgressError("Conversation turn is already in progress.");
+    try {
+      const existing = this.conversations.findMessageByIdempotencyKey(context, scopedCompanyId, conversation.id, input.replyIdempotencyKey);
+      if (existing) {
+        if (existing.direction !== "outbound" || !existing.executionRecordId) throw new OperationalConversationTurnValidationError("Persisted outbound message is invalid.");
+        return Object.freeze({ inbound, outbound: existing, response: { outcome: "answered" as const, answer: existing.content }, executionRecordId: existing.executionRecordId });
+      }
+      const profile = this.profiles.findById(context, scopedCompanyId, profileId);
+      if (!profile) throw new OperationalConversationTurnNotFoundError("Assistant Profile was not found.");
+      try { this.profilePolicy.assert(profile); } catch (error: unknown) { if (error instanceof AssistantProfilePolicyError) throw new OperationalConversationTurnProfileNotExecutableError("Assistant Profile is not executable."); throw error; }
+      if (company.status !== "ready") throw new OperationalConversationTurnNotFoundError("Company is not ready.");
+      const knowledge = this.knowledge.loadCurrentVersion(context, scopedCompanyId);
+      if (!knowledge) throw new OperationalConversationTurnKnowledgeUnavailableError("Published knowledge is unavailable.");
+      if (await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
+      const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit), { purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true });
+      const outbound = this.conversations.addMessage(context, scopedCompanyId, conversation.id, { senderParticipantId: outboundParticipantId, direction: "outbound", content: executed.response.answer, idempotencyKey: input.replyIdempotencyKey, executionRecordId: executed.record.id });
+      return Object.freeze({ inbound, outbound, response: executed.response, executionRecordId: executed.record.id });
+    } finally { release(); }
+  }
 }
 
 function parseCompanyId(value: unknown): number {

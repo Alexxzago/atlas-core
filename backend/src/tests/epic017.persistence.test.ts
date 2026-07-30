@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { assistantProfileId, reconstructAssistantProfile, type AssistantProfile } from "../assistant/domain/assistantProfile.js";
 import { createDatabase } from "../config/database.js";
 import { runMigrations } from "../config/migrations.js";
-import { conversationId, reconstructConversation } from "../conversation/domain/conversation.js";
+import { conversationId, conversationMessageId, reconstructConversation, reconstructConversationMessage } from "../conversation/domain/conversation.js";
 import { ConversationService } from "../conversation/services/conversationService.js";
 import { AssistantProfileRepository } from "../repositories/assistantProfileRepository.js";
 import { ChannelProviderEventRepository } from "../repositories/channelProviderEventRepository.js";
@@ -97,5 +97,23 @@ test("EPIC-017 Phase 1 persists generic provider idempotency, message references
     const deliveries = new OutboundDeliveryRepository(value.database), delivery = reconstructOutboundDelivery({ id: "odl_0123456789abcdef0123456789abcdef" as never, providerMessageRecordId: outboundRecord.id, transportConnectionId: value.firstConnection.id, state: "pending", attemptCount: 0, nextAttemptAt: at, leaseOwner: null, leaseExpiresAt: null, safeErrorCategory: null, createdAt: at, updatedAt: at });
     assert.ok(deliveries.create(delivery)); assert.equal(deliveries.create({ ...delivery, id: "odl_1123456789abcdef0123456789abcdef" as never }), null);
     assert.equal(deliveries.findById(delivery.id)?.state, "pending");
+    const leased = deliveries.leaseReady("worker-one", at, "2026-07-27T12:01:00.000Z", 10);
+    assert.equal(leased.length, 1); assert.equal(leased[0]?.state, "leased"); assert.equal(leased[0]?.attemptCount, 1);
+    assert.equal(deliveries.completeLease(delivery.id, "worker-one", "accepted", null, later)?.state, "accepted");
+  } finally { value.database.close(); }
+});
+
+test("EPIC-017 captures an inbound provider event and message atomically for restart recovery", () => {
+  const value = setup();
+  try {
+    const conversation = value.conversations.open(value.primary, value.first.id, "whatsapp"), customer = value.conversations.addParticipant(value.primary, value.first.id, conversation.id, { type: "whatsapp_contact", reference: "sender" });
+    const events = new ChannelProviderEventRepository(value.database);
+    const event = reconstructChannelProviderEvent({ id: "cpe_3123456789abcdef0123456789abcdef" as never, communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: value.firstConnection.id, externalEventId: "wamid-recover", state: "claimed", conversationId: null, conversationMessageId: null, createdAt: at, updatedAt: at });
+    const inbound = reconstructConversationMessage({ id: conversationMessageId("cmsg_3123456789abcdef0123456789abcdef"), conversationId: conversation.id, senderParticipantId: customer.id, direction: "inbound", content: "Resume me", idempotencyKey: "whatsapp-inbound:test", executionRecordId: null, createdAt: at });
+    const record = reconstructProviderMessageRecord({ id: "pmr_3123456789abcdef0123456789abcdef" as never, communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", direction: "inbound", transportConnectionId: value.firstConnection.id, conversationMessageId: inbound.id, externalMessageId: "wamid-recover", createdAt: at, updatedAt: at });
+    const first = events.captureInbound(event, inbound, record), duplicate = events.captureInbound({ ...event, id: "cpe_4123456789abcdef0123456789abcdef" as never }, inbound, record);
+    assert.equal(first.claimed, true); assert.equal(duplicate.claimed, false); assert.equal(first.inbound.id, duplicate.inbound.id);
+    assert.equal(value.conversations.listMessages(value.primary, value.first.id, conversation.id).length, 1);
+    assert.equal(events.listRecoverable("meta_whatsapp_cloud", 10)[0]?.conversationMessageId, inbound.id);
   } finally { value.database.close(); }
 });

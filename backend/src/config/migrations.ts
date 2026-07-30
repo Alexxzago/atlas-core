@@ -827,6 +827,29 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 25,
+    name: "0025_outbound_delivery_lifecycle",
+    checksumSource: "outbound-delivery-delivered-read-v1|preserve-delivery-rows-indexes-fks",
+    apply(database): void {
+      const count = readCount(database, "outbound_deliveries" as never);
+      database.exec(`
+        CREATE TABLE outbound_deliveries_lifecycle (
+          id TEXT PRIMARY KEY, provider_message_record_id TEXT NOT NULL REFERENCES provider_message_records(id) ON DELETE CASCADE,
+          transport_connection_id TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending','leased','accepted','delivered','read','retryable','permanent_failure','uncertain')),
+          attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0), next_attempt_at TEXT NOT NULL, lease_owner TEXT, lease_expires_at TEXT,
+          safe_error_category TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          CHECK ((lease_owner IS NULL AND lease_expires_at IS NULL) OR (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)), UNIQUE (provider_message_record_id,transport_connection_id)
+        );
+        INSERT INTO outbound_deliveries_lifecycle SELECT * FROM outbound_deliveries;
+        DROP TABLE outbound_deliveries;
+        ALTER TABLE outbound_deliveries_lifecycle RENAME TO outbound_deliveries;
+        CREATE INDEX idx_outbound_deliveries_ready ON outbound_deliveries(state,next_attempt_at,id);
+        CREATE INDEX idx_outbound_deliveries_lease ON outbound_deliveries(state,lease_expires_at,id);
+      `);
+      if (readCount(database, "outbound_deliveries" as never) !== count) throw new Error("Outbound delivery row count changed during lifecycle migration.");
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

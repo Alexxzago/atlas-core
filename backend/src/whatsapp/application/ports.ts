@@ -5,6 +5,7 @@ import type { EncryptedWhatsAppConnectionCredentials, WhatsAppConnectionFailureC
 export interface WhatsAppConnectionRepositoryPort {
   create(context: WorkspaceContext, connection: WhatsAppConnection): WhatsAppConnection | null;
   findById(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId): WhatsAppConnection | null;
+  findByIdForRecovery(connectionId: WhatsAppConnectionId): WhatsAppConnection | null;
   findByPhoneNumberId(phoneNumberId: string): WhatsAppConnection | null;
   listByCompany(context: WorkspaceContext, companyId: number): WhatsAppConnection[];
   updateStatus(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId, expectedUpdatedAt: string, status: WhatsAppConnectionStatus, updatedAt: string): WhatsAppConnection | null;

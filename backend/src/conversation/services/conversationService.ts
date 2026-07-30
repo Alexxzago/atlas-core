@@ -14,6 +14,7 @@ import {
   type ConversationMessage,
   type ConversationParticipant,
 } from "../domain/conversation.js";
+import type { ConversationDetailProjection, ConversationInboxProjection } from "../domain/conversationControl.js";
 
 export class ConversationValidationError extends Error {}
 export class ConversationNotFoundError extends Error {}
@@ -82,6 +83,20 @@ export class ConversationService {
   public listMessages(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): ConversationMessage[] {
     const current = this.get(context, companyIdValue, conversationIdValue);
     return this.conversations.listMessages(context, current.companyId, current.id);
+  }
+  public findMessageByIdempotencyKey(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, idempotencyKey: string): ConversationMessage | null {
+    const current = this.get(context, companyIdValue, conversationIdValue);
+    return this.conversations.findMessageByIdempotencyKey(context, current.companyId, current.id, idempotencyKey);
+  }
+  public listInbox(context: WorkspaceContext, companyIdValue: unknown): ConversationInboxProjection[] {
+    const companyId = parseCompanyId(companyIdValue);
+    return this.conversations.listConversationInbox(context, companyId);
+  }
+  public detail(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): ConversationDetailProjection {
+    const companyId = parseCompanyId(companyIdValue), id = parseConversationId(conversationIdValue);
+    const detail = this.conversations.findConversationDetail(context, companyId, id);
+    if (!detail) throw new ConversationNotFoundError("Conversation was not found.");
+    return detail;
   }
 
   public validateOpen(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): Conversation {

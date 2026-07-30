@@ -22,4 +22,27 @@ export class OutboundDeliveryRepository implements OutboundDeliveryRepositoryPor
     return row ? delivery(row) : null;
   }
   public updateState(id: OutboundDeliveryId, state: OutboundDelivery["state"], safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null { const result=this.db.prepare("UPDATE outbound_deliveries SET state=?,safe_error_category=?,updated_at=? WHERE id=?").run(state,safeErrorCategory,updatedAt,id); return result.changes===1?this.findById(id):null; }
+  public compareAndSetState(id: OutboundDeliveryId, expectedState: OutboundDelivery["state"], state: OutboundDelivery["state"], safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null { const result=this.db.prepare("UPDATE outbound_deliveries SET state=?,safe_error_category=?,updated_at=? WHERE id=? AND state=?").run(state,safeErrorCategory,updatedAt,id,expectedState); return result.changes===1?this.findById(id):null; }
+  public leaseReady(owner: string, now: string, expiresAt: string, limit: number): OutboundDelivery[] {
+    if (!Number.isSafeInteger(limit) || limit < 1) return [];
+    const leased: OutboundDelivery[] = [];
+    this.db.exec("BEGIN IMMEDIATE;");
+    try {
+      const rows = this.db.prepare("SELECT id FROM outbound_deliveries WHERE (state IN ('pending','retryable') AND next_attempt_at<=?) OR (state='leased' AND lease_expires_at<=?) ORDER BY next_attempt_at,id LIMIT ?").all(now, now, limit) as Array<{ id: OutboundDeliveryId }>;
+      for (const row of rows) {
+        const result = this.db.prepare("UPDATE outbound_deliveries SET state='leased',attempt_count=attempt_count+1,lease_owner=?,lease_expires_at=?,updated_at=? WHERE id=? AND ((state IN ('pending','retryable') AND next_attempt_at<=?) OR (state='leased' AND lease_expires_at<=?))").run(owner, expiresAt, now, row.id, now, now);
+        if (result.changes === 1) { const value = this.findById(row.id); if (value) leased.push(value); }
+      }
+      this.db.exec("COMMIT;");
+      return leased;
+    } catch (error: unknown) { if (this.db.isTransaction) this.db.exec("ROLLBACK;"); throw error; }
+  }
+  public completeLease(id: OutboundDeliveryId, owner: string, state: "accepted" | "uncertain", safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null {
+    const result = this.db.prepare("UPDATE outbound_deliveries SET state=?,lease_owner=NULL,lease_expires_at=NULL,safe_error_category=?,updated_at=? WHERE id=? AND state='leased' AND lease_owner=?").run(state, safeErrorCategory, updatedAt, id, owner);
+    return result.changes === 1 ? this.findById(id) : null;
+  }
+  public retryLease(id: OutboundDeliveryId, owner: string, nextAttemptAt: string, safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null {
+    const result = this.db.prepare("UPDATE outbound_deliveries SET state='retryable',next_attempt_at=?,lease_owner=NULL,lease_expires_at=NULL,safe_error_category=?,updated_at=? WHERE id=? AND state='leased' AND lease_owner=?").run(nextAttemptAt, safeErrorCategory, updatedAt, id, owner);
+    return result.changes === 1 ? this.findById(id) : null;
+  }
 }

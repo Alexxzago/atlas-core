@@ -1,0 +1,17 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { DeliveryLifecyclePolicy } from "../transport/domain/providerDelivery.js";
+import { MetaDeliveryStatusMapper } from "../whatsapp/services/MetaDeliveryStatusMapper.js";
+import { WhatsAppDeliveryStatusService } from "../whatsapp/services/WhatsAppDeliveryStatusService.js";
+
+const event = (status: "sent" | "delivered" | "read" | "failed") => ({ kind: "message_status" as const, phoneNumberId: "phone", externalMessageId: "wamid", status, providerTimestamp: null, safeFailureCategory: null });
+test("EPIC-020 Meta mapper maps only safe lifecycle states", () => { const mapper=new MetaDeliveryStatusMapper(); assert.equal(mapper.map(event("sent")).state,"accepted");assert.equal(mapper.map(event("delivered")).state,"delivered");assert.equal(mapper.map(event("read")).state,"read");assert.deepEqual(mapper.map(event("failed")),{state:"permanent_failure",safeErrorCategory:"provider_unavailable"}); });
+test("EPIC-020 delivery status service CAS-updates only existing outbound delivery", () => { let cas=0; const service=new WhatsAppDeliveryStatusService({findByTransportProviderAndExternalMessageId:()=>({id:"pmr_0123456789abcdef0123456789abcdef",direction:"outbound",transportConnectionId:"connection"})}as never,{findByProviderMessageRecordAndConnection:()=>({id:"odl_0123456789abcdef0123456789abcdef",state:"accepted"}),compareAndSetState:()=>{cas+=1;return {};},findById:()=>null}as never,new MetaDeliveryStatusMapper(),new DeliveryLifecyclePolicy(),{now:()=>"2026-07-28T12:00:00.000Z"});service.process(event("delivered"));assert.equal(cas,1); });
+test("EPIC-020 status service treats missing, inbound, stale, duplicate and CAS-conflict statuses as no-ops", () => {
+  let cas=0, reads=0;
+  const policy=new DeliveryLifecyclePolicy();
+  const missing=new WhatsAppDeliveryStatusService({findByTransportProviderAndExternalMessageId:()=>null}as never,{}as never,new MetaDeliveryStatusMapper(),policy,{now:()=>"2026-07-28T12:00:00.000Z"}); missing.process(event("read"));
+  const inbound=new WhatsAppDeliveryStatusService({findByTransportProviderAndExternalMessageId:()=>({direction:"inbound"})}as never,{}as never,new MetaDeliveryStatusMapper(),policy,{now:()=>"2026-07-28T12:00:00.000Z"}); inbound.process(event("read"));
+  const service=new WhatsAppDeliveryStatusService({findByTransportProviderAndExternalMessageId:()=>({id:"pmr_0123456789abcdef0123456789abcdef",direction:"outbound",transportConnectionId:"connection"})}as never,{findByProviderMessageRecordAndConnection:()=>({id:"odl_0123456789abcdef0123456789abcdef",state:"read"}),compareAndSetState:()=>{cas+=1;return null;},findById:()=>{reads+=1;return {state:"read"};}}as never,new MetaDeliveryStatusMapper(),policy,{now:()=>"2026-07-28T12:00:00.000Z"}); service.process(event("delivered")); service.process(event("read")); assert.equal(cas,0);assert.equal(reads,0);
+  const conflict=new WhatsAppDeliveryStatusService({findByTransportProviderAndExternalMessageId:()=>({id:"pmr_0123456789abcdef0123456789abcdef",direction:"outbound",transportConnectionId:"connection"})}as never,{findByProviderMessageRecordAndConnection:()=>({id:"odl_0123456789abcdef0123456789abcdef",state:"accepted"}),compareAndSetState:()=>{cas+=1;return null;},findById:()=>{reads+=1;return {state:"delivered"};}}as never,new MetaDeliveryStatusMapper(),policy,{now:()=>"2026-07-28T12:00:00.000Z"}); conflict.process(event("delivered"));assert.equal(cas,1);assert.equal(reads,1);
+});
