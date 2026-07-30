@@ -89,6 +89,7 @@ test("fresh database receives all migrations and the default workspace", () => {
     { id: 23, name: "0023_conversation_controls" },
     { id: 24, name: "0024_operator_message_idempotency" },
     { id: 25, name: "0025_outbound_delivery_lifecycle" },
+    { id: 26, name: "0026_company_domain_persistence" },
   ]);
   assert.ok(migrations.every((migration) => migration.checksum.length === 64 && migration.applied_at.length > 0));
   assert.equal(new WorkspaceRepository(database).resolveDefault().key, "default");
@@ -158,7 +159,7 @@ test("an already migrated database restarts idempotently", () => {
     const restarted = createDatabase(path);
     const migrationCount = restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number };
     const workspaceCount = restarted.prepare("SELECT COUNT(*) AS count FROM workspaces WHERE key = 'default'").get() as { count: number };
-    assert.equal(migrationCount.count, 25);
+    assert.equal(migrationCount.count, 26);
     assert.equal(workspaceCount.count, 1);
     assert.deepEqual(restarted.prepare("PRAGMA foreign_key_check").all(), []);
     restarted.close();

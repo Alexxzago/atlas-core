@@ -850,6 +850,75 @@ const migrations: Migration[] = [
       if (readCount(database, "outbound_deliveries" as never) !== count) throw new Error("Outbound delivery row count changed during lifecycle migration.");
     },
   },
+  {
+    id: 26,
+    name: "0026_company_domain_persistence",
+    checksumSource: "company-domain-v1|workspace-slug-name-unique|company-events-atomic-audit",
+    apply(database): void {
+      const legacyRows = database.prepare("SELECT id, workspace_id, name, created_at FROM companies ORDER BY id").all() as Array<{ id: number; workspace_id: number; name: string; created_at: string }>;
+      const normalizedNames = new Set<string>();
+      const slugs = new Set<string>();
+      const prepared = legacyRows.map((row) => {
+        const normalizedName = row.name.trim().normalize("NFKC").toLocaleLowerCase("en-US");
+        const nameKey = `${row.workspace_id}:${normalizedName}`;
+        if (!normalizedName || normalizedNames.has(nameKey)) throw new Error("Company migration found duplicate normalized names in a Workspace.");
+        normalizedNames.add(nameKey);
+        const base = row.name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70) || "company";
+        let slug = base, suffix = 0;
+        while (slugs.has(`${row.workspace_id}:${slug}`)) { suffix += 1; slug = `${base.slice(0, 70)}-${row.id}-${suffix}`; }
+        slugs.add(`${row.workspace_id}:${slug}`);
+        const parsed = new Date(row.created_at);
+        if (Number.isNaN(parsed.getTime())) throw new Error("Company migration found an invalid creation timestamp.");
+        return { ...row, normalizedName, slug, timestamp: parsed.toISOString() };
+      });
+
+      database.exec(`
+        ALTER TABLE companies ADD COLUMN slug TEXT NOT NULL DEFAULT '';
+        ALTER TABLE companies ADD COLUMN name_normalized TEXT NOT NULL DEFAULT '';
+        ALTER TABLE companies ADD COLUMN description TEXT;
+        ALTER TABLE companies ADD COLUMN lifecycle_state TEXT NOT NULL DEFAULT 'draft' CHECK (lifecycle_state IN ('draft','configured','operational','attention_required','suspended','archived'));
+        ALTER TABLE companies ADD COLUMN timezone TEXT;
+        ALTER TABLE companies ADD COLUMN locale TEXT;
+        ALTER TABLE companies ADD COLUMN public_name TEXT;
+        ALTER TABLE companies ADD COLUMN logo_asset_ref TEXT;
+        ALTER TABLE companies ADD COLUMN brand_colors_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE companies ADD COLUMN country_code TEXT;
+        ALTER TABLE companies ADD COLUMN currency_code TEXT;
+        ALTER TABLE companies ADD COLUMN date_format TEXT;
+        ALTER TABLE companies ADD COLUMN phone_format TEXT;
+        ALTER TABLE companies ADD COLUMN business_hours_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE companies ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1);
+        ALTER TABLE companies ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+        ALTER TABLE companies ADD COLUMN lifecycle_changed_at TEXT NOT NULL DEFAULT '';
+        ALTER TABLE companies ADD COLUMN suspended_at TEXT;
+        ALTER TABLE companies ADD COLUMN archived_at TEXT;
+      `);
+      const update = database.prepare("UPDATE companies SET slug=?, name_normalized=?, lifecycle_state='draft', version=1, created_at=?, updated_at=?, lifecycle_changed_at=? WHERE id=? AND workspace_id=?");
+      for (const row of prepared) update.run(row.slug, row.normalizedName, row.timestamp, row.timestamp, row.timestamp, row.id, row.workspace_id);
+      database.exec(`
+        CREATE UNIQUE INDEX idx_companies_workspace_slug ON companies(workspace_id, slug);
+        CREATE UNIQUE INDEX idx_companies_workspace_name_normalized ON companies(workspace_id, name_normalized);
+        CREATE UNIQUE INDEX idx_companies_id_workspace ON companies(id, workspace_id);
+        CREATE INDEX idx_companies_workspace_lifecycle_id ON companies(workspace_id, lifecycle_state, id DESC);
+        CREATE TABLE company_events (
+          id TEXT PRIMARY KEY,
+          company_id INTEGER NOT NULL,
+          workspace_id INTEGER NOT NULL,
+          event_type TEXT NOT NULL CHECK (event_type IN ('CompanyCreated','CompanyIdentityUpdated','CompanyBrandingUpdated','CompanyConfigurationUpdated','CompanyConfigured','CompanyActivated','CompanyAttentionRequired','CompanySuspended','CompanyRestored','CompanyArchived','CompanyUpdated')),
+          aggregate_version INTEGER NOT NULL CHECK (aggregate_version >= 1),
+          event_sequence INTEGER NOT NULL CHECK (event_sequence >= 1),
+          occurred_at TEXT NOT NULL,
+          actor_id TEXT,
+          payload_json TEXT NOT NULL,
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+          FOREIGN KEY (company_id, workspace_id) REFERENCES companies(id, workspace_id) ON DELETE CASCADE,
+          UNIQUE(company_id, aggregate_version, event_sequence)
+        );
+        CREATE INDEX idx_company_events_workspace_occurred ON company_events(workspace_id, occurred_at DESC);
+      `);
+      if (prepared.length !== readCount(database, "companies")) throw new Error("Company migration row count changed.");
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {
