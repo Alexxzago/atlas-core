@@ -15,6 +15,8 @@ import { RouteErrorBoundary, RouteLoadingBoundary } from "./RouteBoundaries";
 import { EmptyState } from "../design-system/feedback";
 import { routeCompanyId } from "../routing/routes";
 import { companyRouteKey, companyRoutePresentation, type CompanyRouteValidation } from "../routing/companyRoutePresentation";
+import { DashboardPage } from "../dashboard/DashboardPage";
+import { buildDashboardViewModel } from "../dashboard/dashboardPresentation";
 import { useRouter } from "../routing/RouterProvider";
 
 interface Props { csrf: string; email: string; onPassword: () => void; onLogout: () => void }
@@ -253,7 +255,7 @@ export function AuthenticatedCompanyPortal({ csrf, email, onPassword, onLogout }
   const webChatPanel = <WebChatConnectionsPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} companyId={state.selectedCompanyId} companyStatus={selectedCompany?.status ?? null} profiles={state.profiles} capabilities={state.selectedWorkspace?.capabilities ?? []}/>;
 
   const routeContent = (): React.JSX.Element => {
-    if (route.name === "dashboard") return <><PageHeader title={t("shell.dashboardTitle")} description={t("shell.dashboardDescription")} /><EmptyState title={t("shell.dashboardTitle")} description={t("shell.dashboardDescription")} /></>;
+    if (route.name === "dashboard") return <DashboardPage model={buildDashboardViewModel(state.selectedWorkspace, state.companies, selectedCompany)} onNavigate={navigate} />;
     if (route.name === "companies") return <><PageHeader title={t("shell.companiesTitle")} description={t("shell.companiesDescription")} />{companySelector}</>;
     if (route.name === "conversations") return <><PageHeader title={t("shell.conversationsTitle")} description={t("shell.conversationsDescription")} /><EmptyState title={t("shell.conversationsTitle")} description={t("shell.conversationsDescription")} /></>;
     if (route.name === "analytics") return <><PageHeader title={t("shell.analyticsTitle")} description={t("shell.analyticsDescription")} /><EmptyState title={t("shell.analyticsTitle")} description={t("shell.analyticsDescription")} /></>;
