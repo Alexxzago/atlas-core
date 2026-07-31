@@ -919,6 +919,73 @@ const migrations: Migration[] = [
       if (prepared.length !== readCount(database, "companies")) throw new Error("Company migration row count changed.");
     },
   },
+  {
+    id: 27,
+    name: "0027_company_website_optional",
+    checksumSource: "company-website-nullable|preserve-company-core-and-fks",
+    disableForeignKeys: true,
+    apply(database): void {
+      const count = readCount(database, "companies");
+      database.exec(`
+        CREATE TABLE companies_website_optional (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
+          name TEXT NOT NULL, website TEXT, phone TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'processing', created_at TEXT NOT NULL,
+          slug TEXT NOT NULL, name_normalized TEXT NOT NULL, description TEXT,
+          lifecycle_state TEXT NOT NULL CHECK (lifecycle_state IN ('draft','configured','operational','attention_required','suspended','archived')),
+          timezone TEXT, locale TEXT, public_name TEXT, logo_asset_ref TEXT, brand_colors_json TEXT NOT NULL DEFAULT '{}',
+          country_code TEXT, currency_code TEXT, date_format TEXT, phone_format TEXT, business_hours_json TEXT NOT NULL DEFAULT '{}',
+          version INTEGER NOT NULL CHECK (version >= 1), updated_at TEXT NOT NULL, lifecycle_changed_at TEXT NOT NULL, suspended_at TEXT, archived_at TEXT,
+          UNIQUE (workspace_id, website), UNIQUE (workspace_id, slug), UNIQUE (workspace_id, name_normalized), UNIQUE (id, workspace_id)
+        );
+        INSERT INTO companies_website_optional SELECT id,workspace_id,name,website,phone,email,status,created_at,slug,name_normalized,description,lifecycle_state,timezone,locale,public_name,logo_asset_ref,brand_colors_json,country_code,currency_code,date_format,phone_format,business_hours_json,version,updated_at,lifecycle_changed_at,suspended_at,archived_at FROM companies;
+        DROP TABLE companies;
+        ALTER TABLE companies_website_optional RENAME TO companies;
+        CREATE INDEX idx_companies_workspace_id_id ON companies(workspace_id,id DESC);
+        CREATE INDEX idx_companies_workspace_lifecycle_id ON companies(workspace_id,lifecycle_state,id DESC);
+      `);
+      if (readCount(database, "companies") !== count) throw new Error("Company row count changed while making website optional.");
+    },
+  },
+  {
+    id: 28,
+    name: "0028_identity_registration_password_reset",
+    checksumSource: "users-full-name-nullable|email-verifications-password-reset-purpose|current-reset-index|no-plaintext-proofs",
+    disableForeignKeys: true,
+    apply(database): void {
+      database.exec(`
+        ALTER TABLE users ADD COLUMN full_name TEXT;
+        CREATE TABLE email_verifications_v2 (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, authentication_identity_id TEXT NOT NULL,
+          purpose TEXT NOT NULL CHECK (purpose IN ('email_verification', 'password_reset')),
+          digest_version TEXT NOT NULL CHECK (digest_version = 'sha256-v1'), token_digest TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'consumed', 'superseded', 'invalidated')),
+          delivery_status TEXT NOT NULL CHECK (delivery_status IN ('pending', 'accepted', 'temporary_failure', 'permanent_failure', 'uncertain')),
+          issued_at TEXT NOT NULL, expires_at TEXT NOT NULL, consumed_at TEXT, superseded_at TEXT, invalidated_at TEXT,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY (authentication_identity_id) REFERENCES authentication_identities(id) ON DELETE CASCADE,
+          UNIQUE (purpose, digest_version, token_digest)
+        );
+        INSERT INTO email_verifications_v2 SELECT * FROM email_verifications;
+        DROP TABLE email_verifications;
+        ALTER TABLE email_verifications_v2 RENAME TO email_verifications;
+        CREATE UNIQUE INDEX idx_email_verifications_current_identity_purpose ON email_verifications(authentication_identity_id, purpose) WHERE status = 'pending';
+        CREATE INDEX idx_email_verifications_digest_lookup ON email_verifications(purpose, digest_version, token_digest);
+        CREATE INDEX idx_email_verifications_current_reset ON email_verifications(authentication_identity_id, expires_at) WHERE purpose = 'password_reset' AND status = 'pending';
+      `);
+    },
+  },
+  {
+    id: 29,
+    name: "0029_workspace_onboarding_settings",
+    checksumSource: "workspaces-timezone-default-locale",
+    apply(database): void {
+      database.exec(`
+        ALTER TABLE workspaces ADD COLUMN timezone TEXT;
+        ALTER TABLE workspaces ADD COLUMN default_locale TEXT CHECK (default_locale IS NULL OR default_locale IN ('en', 'es'));
+      `);
+    },
+  },
 ];
 
 function migrationChecksum(migration: Migration): string {

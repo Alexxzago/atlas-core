@@ -3,5 +3,7 @@ export interface Workspace {
   publicId: string;
   key: string;
   name: string;
+  timezone: string | null;
+  defaultLocale: "en" | "es" | null;
   createdAt: string;
 }

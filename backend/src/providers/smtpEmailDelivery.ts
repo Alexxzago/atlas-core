@@ -1,5 +1,5 @@
 import nodemailer, { type Transporter } from "nodemailer";
-import type { CredentialEnrollmentDeliveryPort, CredentialEnrollmentDeliveryRequest, EmailVerificationDeliveryPort, EmailVerificationDeliveryRequest, VerificationDeliveryOutcome } from "../identity/application/ports.js";
+import type { CredentialEnrollmentDeliveryPort, CredentialEnrollmentDeliveryRequest, EmailVerificationDeliveryPort, EmailVerificationDeliveryRequest, PasswordResetDeliveryPort, PasswordResetDeliveryRequest, VerificationDeliveryOutcome } from "../identity/application/ports.js";
 import type { InvitationDeliveryPort, InvitationDeliveryRequest } from "../workspace/application/ports.js";
 
 export interface SmtpConfiguration {
@@ -51,7 +51,7 @@ function classify(error: unknown): VerificationDeliveryOutcome {
   return "uncertain";
 }
 
-export class SmtpEmailDelivery implements EmailVerificationDeliveryPort, CredentialEnrollmentDeliveryPort, InvitationDeliveryPort {
+export class SmtpEmailDelivery implements EmailVerificationDeliveryPort, CredentialEnrollmentDeliveryPort, PasswordResetDeliveryPort, InvitationDeliveryPort {
   private readonly transport: SmtpTransport;
 
   public constructor(private readonly configuration: SmtpConfiguration, transport?: SmtpTransport) {
@@ -61,7 +61,7 @@ export class SmtpEmailDelivery implements EmailVerificationDeliveryPort, Credent
     }) as Transporter as unknown as SmtpTransport;
   }
 
-  public async deliver(request: EmailVerificationDeliveryRequest | CredentialEnrollmentDeliveryRequest | InvitationDeliveryRequest): Promise<VerificationDeliveryOutcome> {
+  public async deliver(request: EmailVerificationDeliveryRequest | CredentialEnrollmentDeliveryRequest | PasswordResetDeliveryRequest | InvitationDeliveryRequest): Promise<VerificationDeliveryOutcome> {
     const content = this.content(request);
     try {
       const result = await this.transport.sendMail({ from: this.configuration.from, to: request.recipient, replyTo: this.configuration.replyTo, ...content });
@@ -71,7 +71,7 @@ export class SmtpEmailDelivery implements EmailVerificationDeliveryPort, Credent
     }
   }
 
-  private content(request: EmailVerificationDeliveryRequest | CredentialEnrollmentDeliveryRequest | InvitationDeliveryRequest): EmailContent {
+  private content(request: EmailVerificationDeliveryRequest | CredentialEnrollmentDeliveryRequest | PasswordResetDeliveryRequest | InvitationDeliveryRequest): EmailContent {
     if ("verificationUrl" in request) {
       const es = request.locale === "es";
       return actionEmail(request.locale, es ? "Verifica tu correo de Atlas" : "Verify your Atlas email", es ? "Confirma que controlas esta direccion de correo para activar tu cuenta." : "Confirm that you control this email address to activate your account.", es ? "Verificar correo" : "Verify email", request.verificationUrl, request.expiresAt);
@@ -79,6 +79,10 @@ export class SmtpEmailDelivery implements EmailVerificationDeliveryPort, Credent
     if ("enrollmentUrl" in request) {
       const es = request.locale === "es";
       return actionEmail(request.locale, es ? "Crea tu contrasena de Atlas" : "Create your Atlas password", es ? "Usa este enlace para crear tu contrasena." : "Use this link to create your password.", es ? "Crear contrasena" : "Create password", request.enrollmentUrl, request.expiresAt);
+    }
+    if ("resetUrl" in request) {
+      const es = request.locale === "es";
+      return actionEmail(request.locale, es ? "Restablece tu contrasena de Atlas" : "Reset your Atlas password", es ? "Usa este enlace una sola vez para restablecer tu contrasena." : "Use this one-time link to reset your password.", es ? "Restablecer contrasena" : "Reset password", request.resetUrl, request.expiresAt);
     }
     return actionEmail("en", "You are invited to Atlas", `You were invited to join ${request.workspaceName} as ${request.role}.`, "Accept invitation", request.acceptanceUrl, request.expiresAt);
   }

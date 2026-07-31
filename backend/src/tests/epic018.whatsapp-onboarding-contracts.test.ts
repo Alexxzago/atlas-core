@@ -83,7 +83,7 @@ test("EPIC-018 credential cipher uses authenticated platform-key encryption", ()
 test("EPIC-018 resolves Company credentials before global fallback and rejects unauthenticated ciphertext", () => {
   const cipher = new AesGcmWhatsAppCredentialCipher(Buffer.alloc(32, 9));
   const stored = reconstructEncryptedWhatsAppConnectionCredentials({ whatsAppConnectionId: connectionId, encryptedAccessToken: cipher.encrypt("company-token"), createdAt: now, updatedAt: now });
-  const context = createWorkspaceContext({ id: 1, publicId: "wsp_default", key: "default", name: "Default", createdAt: now });
+  const context = createWorkspaceContext({ id: 1, publicId: "wsp_default", key: "default", name: "Default", timezone: null, defaultLocale: null, createdAt: now });
   const resolver = new WhatsAppCredentialResolver({ findCredentials: () => stored, replaceCredentials: () => stored }, cipher, "global-token");
   assert.equal(resolver.resolve(context, 1, connectionId), "company-token");
   const fallback = new WhatsAppCredentialResolver({ findCredentials: () => null, replaceCredentials: () => null }, cipher, " global-token ");

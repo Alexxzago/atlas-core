@@ -9,15 +9,16 @@ export interface BusinessHoursDto { readonly weekly: Readonly<Record<string, rea
 export interface BrandingDto { readonly publicName: string | null; readonly logoAssetReference: string | null; readonly colorTokens: Readonly<Partial<Record<"primary" | "secondary" | "accent", string>>>; }
 export interface BrandingRequestDto { readonly publicName?: string | null; readonly logoAssetReference?: string | null; readonly colorTokens?: Readonly<Partial<Record<"primary" | "secondary" | "accent", string>>>; }
 export interface ConfigurationDto { readonly timezone: string; readonly locale: string; readonly operatingLocale: { readonly countryCode: string; readonly currencyCode: string; readonly dateFormat: DateFormatDto; readonly phoneFormat: PhoneFormatDto }; readonly businessHours: BusinessHoursDto; }
-export interface CompanyIdentityDto { readonly name: string; readonly slug: string; readonly description?: string | null; readonly website: string; }
+export interface CompanyIdentityDto { readonly name: string; readonly slug: string; readonly description?: string | null; readonly website?: string | null; }
 export interface CreateCompanyRequestDto { readonly identity: CompanyIdentityDto; readonly branding?: BrandingRequestDto; }
+export interface CreateOnboardingCompanyRequestDto { readonly name: string; readonly website?: string | null; readonly logoAssetReference?: string | null; }
 export interface UpdateIdentityRequestDto { readonly expectedVersion: number; readonly identity: CompanyIdentityDto; }
 export interface UpdateBrandingRequestDto { readonly expectedVersion: number; readonly branding: BrandingRequestDto; }
 export interface UpdateConfigurationRequestDto { readonly expectedVersion: number; readonly configuration: ConfigurationDto; }
 export interface VersionedRequestDto { readonly expectedVersion: number; }
 
 export interface CompanyResponseDto {
-  readonly id: number; readonly name: string; readonly slug: string; readonly description: string | null; readonly website: string;
+  readonly id: number; readonly name: string; readonly slug: string; readonly description: string | null; readonly website: string | null;
   readonly branding: BrandingDto; readonly configuration: ConfigurationDto | null; readonly lifecycle: "draft" | "configured" | "operational" | "attention_required" | "suspended" | "archived"; readonly version: number;
   readonly createdAt: string; readonly updatedAt: string; readonly lifecycleChangedAt: string; readonly suspendedAt: string | null; readonly archivedAt: string | null;
 }
@@ -33,8 +34,8 @@ function positiveInteger(value: unknown, label: string): number { if (!Number.is
 
 function identity(value: unknown): CompanyIdentityDto {
   const body = record(value, "Identity"); exact(body, ["name", "slug", "description", "website"], "Identity");
-  if (!("name" in body) || !("slug" in body) || !("website" in body)) throw new CompanyHttpValidationError("Identity requires name, slug, and website.");
-  return { name: text(body.name, "Identity name"), slug: text(body.slug, "Identity slug"), ...(body.description === undefined ? {} : { description: nullableText(body.description, "Identity description") }), website: text(body.website, "Identity website") };
+  if (!("name" in body) || !("slug" in body)) throw new CompanyHttpValidationError("Identity requires name and slug.");
+  return { name: text(body.name, "Identity name"), slug: text(body.slug, "Identity slug"), ...(body.description === undefined ? {} : { description: nullableText(body.description, "Identity description") }), ...(body.website === undefined ? {} : { website: nullableText(body.website, "Identity website") }) };
 }
 
 function branding(value: unknown): BrandingRequestDto {
@@ -59,6 +60,7 @@ export function parseCompanyId(value: unknown): number { return positiveInteger(
 export function parseSlug(value: unknown): string { return text(value, "Company slug"); }
 export function parseListCompaniesQuery(value: unknown): void { if (Object.keys(record(value, "Query")).length !== 0) throw new CompanyHttpValidationError("Company list does not accept query parameters."); }
 export function parseCreateCompanyRequest(value: unknown): CreateCompanyRequestDto { const body = record(value, "Request"); exact(body, ["identity", "branding"], "Request"); if (!("identity" in body)) throw new CompanyHttpValidationError("Request requires identity."); return { identity: identity(body.identity), ...(body.branding === undefined ? {} : { branding: branding(body.branding) }) }; }
+export function parseCreateOnboardingCompanyRequest(value: unknown): CreateOnboardingCompanyRequestDto { const body = record(value, "Request"); exact(body, ["name", "website", "logoAssetReference"], "Request"); if (!("name" in body)) throw new CompanyHttpValidationError("Request requires name."); return { name: text(body.name, "Company name"), ...(body.website === undefined ? {} : { website: nullableText(body.website, "Website") }), ...(body.logoAssetReference === undefined ? {} : { logoAssetReference: nullableText(body.logoAssetReference, "Logo asset reference") }) }; }
 export function parseUpdateIdentityRequest(value: unknown): UpdateIdentityRequestDto { const body = record(value, "Request"); exact(body, ["expectedVersion", "identity"], "Request"); if (!("identity" in body)) throw new CompanyHttpValidationError("Request requires identity."); return { ...versioned(body), identity: identity(body.identity) }; }
 export function parseUpdateBrandingRequest(value: unknown): UpdateBrandingRequestDto { const body = record(value, "Request"); exact(body, ["expectedVersion", "branding"], "Request"); if (!("branding" in body)) throw new CompanyHttpValidationError("Request requires branding."); return { ...versioned(body), branding: branding(body.branding) }; }
 export function parseUpdateConfigurationRequest(value: unknown): UpdateConfigurationRequestDto { const body = record(value, "Request"); exact(body, ["expectedVersion", "configuration"], "Request"); if (!("configuration" in body)) throw new CompanyHttpValidationError("Request requires configuration."); return { ...versioned(body), configuration: configuration(body.configuration) }; }

@@ -14,7 +14,8 @@ interface Props {
   onRetry: () => void;
 }
 
-function hostname(website: string): string {
+function hostname(website: string | null): string {
+  if (!website) return "";
   try { return new URL(website).hostname; } catch { return website; }
 }
 
@@ -44,7 +45,7 @@ export function CompanySidebar(props: Props): React.JSX.Element {
         {!props.loading && !props.error && props.companies.length === 0 && <div className="state-block"><strong>{t("companies.emptyTitle")}</strong><p>{t("companies.emptyDescription")}</p><button className="button button--primary" type="button" onClick={() => setCreating(true)}>{t("companies.create")}</button></div>}
         {props.companies.map((company) => (
           <button key={company.id} type="button" className={`company-item${company.id === props.selectedId ? " is-selected" : ""}`} onClick={() => choose(company.id)} aria-current={company.id === props.selectedId ? "true" : undefined}>
-            <span className="company-item__content"><strong>{company.name}</strong><small>{hostname(company.website)}</small></span><StatusBadge status={company.status} />
+            <span className="company-item__content"><strong>{company.name}</strong>{company.website && <small>{hostname(company.website)}</small>}</span><StatusBadge status={company.status} />
           </button>
         ))}
       </div>

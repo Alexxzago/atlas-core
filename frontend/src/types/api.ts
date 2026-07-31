@@ -3,7 +3,7 @@ export type CompanyStatus = "processing" | "ready" | "failed";
 export interface Company {
   id: number;
   name: string;
-  website: string;
+  website: string | null;
   phone: string;
   email: string;
   status: CompanyStatus;
@@ -12,7 +12,7 @@ export interface Company {
 
 export interface CompanyInput {
   name: string;
-  website: string;
+  website?: string | null;
   phone?: string;
   email?: string;
 }
@@ -20,7 +20,7 @@ export interface CompanyInput {
 export type CompanyUpdate = Partial<CompanyInput>;
 
 export interface CompanyKnowledge {
-  company: { name: string; website: string; phone: string; email: string };
+  company: { name: string; website: string | null; phone: string; email: string };
   business: { services: string[]; hours: string; locations: string[] };
   faq: Array<{ question: string; answer: string }>;
 }

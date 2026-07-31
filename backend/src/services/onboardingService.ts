@@ -4,7 +4,6 @@ import type { KnowledgeExtractor, MarkdownDebugStore, WebsiteScraper } from "../
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 import {
   CompanyNotFoundError,
-  DuplicateWebsiteError,
   normalizeWebsiteUrl,
   parseCompanyId,
 } from "./companyValidation.js";
@@ -39,16 +38,11 @@ export class OnboardingService {
     if (!company) throw new CompanyNotFoundError("Company was not found.");
     const existingPublishedKnowledge = this.knowledge.load(context, companyId);
 
-    const websiteOwner = this.companies.findByWebsite(context, website);
-    if (websiteOwner && websiteOwner.id !== company.id) {
-      throw new DuplicateWebsiteError("A company already uses this website.");
-    }
     if (!this.frozenKnowledge) throw new OnboardingError("Frozen Knowledge service is required.");
     return this.frozenOnboard(context, company, website, actor??createSystemActorContext("legacy-onboarding"),existingPublishedKnowledge!==null);
   }
 
   private async frozenOnboard(context:WorkspaceContext,company:import("../types/company.js").Company,website:string,actor:ActorContext,hadPublishedKnowledge:boolean):Promise<OnboardingResult>{
-    const updated=this.companies.update(context,company.id,{...company,website,status:company.status});if(!updated)throw new CompanyNotFoundError("Company was not found.");
     try{
       const sources=this.frozenKnowledge!.list(context,company.id);const existing=sources.find(item=>item.name==="Website onboarding"&&item.kind==="public_url"&&item.status==="active");
       const result=existing?await this.frozenKnowledge!.revise(context,actor,company.id,existing.id,"public_url",{url:website,expectedSourceVersion:existing.version}):await this.frozenKnowledge!.create(context,actor,company.id,"public_url",{name:"Website onboarding",url:website});

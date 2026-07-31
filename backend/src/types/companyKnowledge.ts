@@ -1,7 +1,7 @@
 export interface CompanyKnowledge {
   company: {
     name: string;
-    website: string;
+    website: string | null;
     phone: string;
     email: string;
   };

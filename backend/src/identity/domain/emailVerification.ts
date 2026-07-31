@@ -1,6 +1,6 @@
 import type { AuthenticationIdentityId, UserId } from "./user.js";
 
-export type VerificationPurpose = "email_verification";
+export type VerificationPurpose = "email_verification" | "password_reset";
 export type VerificationStatus = "pending" | "consumed" | "superseded" | "invalidated";
 export type VerificationDeliveryStatus = "pending" | "accepted" | "temporary_failure" | "permanent_failure" | "uncertain";
 export type EmailVerificationId = string & { readonly __brand: "EmailVerificationId" };
@@ -57,7 +57,7 @@ export function isEmailVerificationAuthority(value: EmailVerificationAuthority):
 }
 
 export function verificationPurpose(value: string): VerificationPurpose {
-  if (value !== "email_verification") throw new InvalidVerificationWorkflowError("Verification purpose is unsupported.");
+  if (value !== "email_verification" && value !== "password_reset") throw new InvalidVerificationWorkflowError("Verification purpose is unsupported.");
   return value;
 }
 

@@ -93,9 +93,9 @@ export function validateStoredCompanyKnowledgeJson(json: string): CompanyKnowled
   if (utf8Bytes(json) > KNOWLEDGE_LIMITS.publishedBytes) throw new KnowledgeDomainError("knowledge_integrity_failure");
   let value: unknown; try { value = JSON.parse(json); } catch { throw new KnowledgeDomainError("knowledge_integrity_failure"); }
   const root = exactRecord(value, ["company", "business", "faq"]), company = exactRecord(root.company, ["name", "website", "phone", "email"]), business = exactRecord(root.business, ["services", "hours", "locations"]);
-  if ([company.name, company.website, company.phone, company.email, business.hours].some(item => typeof item !== "string")) throw new KnowledgeDomainError("knowledge_integrity_failure");
+  if ([company.name, company.phone, company.email, business.hours].some(item => typeof item !== "string") || (company.website !== null && typeof company.website !== "string")) throw new KnowledgeDomainError("knowledge_integrity_failure");
   const extracted = validateExtractedBusinessKnowledge({ services: business.services, hours: business.hours, locations: business.locations, faq: root.faq });
-  return { company: { name: company.name as string, website: company.website as string, phone: company.phone as string, email: company.email as string }, business: { services: [...extracted.services], hours: extracted.hours, locations: [...extracted.locations] }, faq: extracted.faq.map(item=>({question:item.question,answer:item.answer})) };
+  return { company: { name: company.name as string, website: company.website as string | null, phone: company.phone as string, email: company.email as string }, business: { services: [...extracted.services], hours: extracted.hours, locations: [...extracted.locations] }, faq: extracted.faq.map(item=>({question:item.question,answer:item.answer})) };
 }
 
 export class KnowledgeDomainError extends Error {

@@ -1,5 +1,5 @@
 import type { Clock, RandomProvider, VerificationHashProvider } from "../application/ports.js";
-import { reconstructEmailVerification, type EmailVerificationWorkflow } from "../domain/emailVerification.js";
+import { reconstructEmailVerification, type EmailVerificationWorkflow, type VerificationPurpose } from "../domain/emailVerification.js";
 import { formatVerificationProof, type VerificationProof } from "../domain/proof.js";
 import type { AuthenticationIdentityId, UserId } from "../domain/user.js";
 
@@ -46,4 +46,11 @@ export function issueEmailVerification(
       updatedAt: now,
     }),
   };
+}
+
+export function issuePasswordReset(userId: UserId, authenticationIdentityId: AuthenticationIdentityId, random: RandomProvider, hash: VerificationHashProvider, clock: Clock, lifetimeMilliseconds: number): IssuedVerification {
+  const now = clock.now();
+  const proof = formatVerificationProof(random.secureBytes(32));
+  const purpose: VerificationPurpose = "password_reset";
+  return { proof, workflow: reconstructEmailVerification({ id: identifier("prf", random), userId, authenticationIdentityId, purpose, digestVersion: hash.version, tokenDigest: hash.digest(proof, purpose), status: "pending", deliveryStatus: "pending", issuedAt: now, expiresAt: new Date(Date.parse(now) + lifetimeMilliseconds).toISOString(), consumedAt: null, supersededAt: null, invalidatedAt: null, createdAt: now, updatedAt: now }) };
 }

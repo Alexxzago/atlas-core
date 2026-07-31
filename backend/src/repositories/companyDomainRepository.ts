@@ -4,7 +4,7 @@ import { reconstructCompany, type Company, type CompanyConfigurationInput, type 
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 
 interface CompanyRow {
-  id: number; workspace_id: number; name: string; name_normalized: string; slug: string; description: string | null; website: string;
+  id: number; workspace_id: number; name: string; name_normalized: string; slug: string; description: string | null; website: string | null;
   public_name: string | null; logo_asset_ref: string | null; brand_colors_json: string;
   lifecycle_state: string; timezone: string | null; locale: string | null; country_code: string | null; currency_code: string | null;
   date_format: string | null; phone_format: string | null; business_hours_json: string;
@@ -120,7 +120,7 @@ export class CompanyDomainRepository implements CompanyDomainRepositoryPort {
     }
   }
 
-  private values(company: Company): [number, number, string, string, string, string | null, string, string | null, string | null, string, string, string | null, string | null, string | null, string | null, string | null, string | null, string, number, string, string, string, string | null, string | null] {
+  private values(company: Company): [number, number, string, string, string, string | null, string | null, string | null, string | null, string, string, string | null, string | null, string | null, string | null, string | null, string | null, string, number, string, string, string, string | null, string | null] {
     const configuration = company.configuration;
     return [company.id, company.workspaceId, company.name, company.normalizedName, company.slug, company.description, company.website, company.branding.publicName, company.branding.logoAssetReference, JSON.stringify(company.branding.colorTokens), company.lifecycle, configuration?.timezone ?? null, configuration?.locale ?? null, configuration?.operatingLocale.countryCode ?? null, configuration?.operatingLocale.currencyCode ?? null, configuration?.operatingLocale.dateFormat ?? null, configuration?.operatingLocale.phoneFormat ?? null, JSON.stringify(configuration?.businessHours ?? {}), company.version, company.createdAt, company.updatedAt, company.lifecycleChangedAt, company.suspendedAt, company.archivedAt];
   }

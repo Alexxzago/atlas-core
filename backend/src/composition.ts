@@ -12,7 +12,7 @@ import {
 import { createKnowledgeController } from "./controllers/knowledgeController.js";
 import { createOnboardingController } from "./controllers/onboarding.js";
 import { createScrapeController } from "./controllers/scrapeController.js";
-import { createAuthenticationControllers, createPlatformBootstrapControllers, createRegistrationController, createResendVerificationController, createVerifyEmailController } from "./controllers/identityController.js";
+import { createAuthenticationControllers, createPasswordResetControllers, createPlatformBootstrapControllers, createRegistrationController, createResendVerificationController, createVerifyEmailController } from "./controllers/identityController.js";
 import { database } from "./config/database.js";
 import { DevelopmentVerificationDelivery, UnavailableVerificationDelivery } from "./identity/infrastructure/developmentVerificationDelivery.js";
 import { ScryptPasswordProvider, SecureRandomProvider, Sha256CredentialEnrollmentHashProvider, Sha256SessionIdentifierProvider, Sha256VerificationHashProvider } from "./identity/infrastructure/securityProviders.js";
@@ -20,6 +20,7 @@ import { SystemClock } from "./identity/infrastructure/systemClock.js";
 import { RegistrationService } from "./identity/services/registrationService.js";
 import { ResendEmailVerificationService } from "./identity/services/resendEmailVerificationService.js";
 import { VerifyEmailService } from "./identity/services/verifyEmailService.js";
+import { PasswordResetService } from "./identity/services/passwordResetService.js";
 import { SqliteAuthenticationTransaction, SqliteIdentityTransaction } from "./repositories/identityTransaction.js";
 import { AuthenticationService } from "./identity/services/authenticationService.js";
 import { createIdentityRouter } from "./routes/identity.js";
@@ -132,13 +133,16 @@ const verificationDelivery = useDevelopmentDelivery
 const verificationOrigin = process.env.ATLAS_VERIFICATION_ORIGIN ?? "http://localhost:3000";
 const verificationLifetimeMilliseconds = 24 * 60 * 60 * 1000;
 const verificationCooldownMilliseconds = 60 * 1000;
+const passwordProvider = new ScryptPasswordProvider();
 const registrationService = new RegistrationService(identityTransaction, randomProvider, verificationHashProvider,
-  identityClock, verificationDelivery, verificationOrigin, verificationLifetimeMilliseconds);
+  identityClock, verificationDelivery, verificationOrigin, verificationLifetimeMilliseconds, passwordProvider);
 const resendVerificationService = new ResendEmailVerificationService(identityTransaction, randomProvider,
   verificationHashProvider, identityClock, verificationDelivery, verificationOrigin,
   verificationLifetimeMilliseconds, verificationCooldownMilliseconds);
 const verifyEmailService = new VerifyEmailService(identityTransaction, verificationHashProvider, identityClock);
-const authenticationService=new AuthenticationService(new SqliteAuthenticationTransaction(database),randomProvider,new Sha256CredentialEnrollmentHashProvider(),new ScryptPasswordProvider(),new Sha256SessionIdentifierProvider(),identityClock,verificationDelivery,verificationOrigin,process.env.NODE_ENV==="production");
+const authenticationTransaction = new SqliteAuthenticationTransaction(database);
+const authenticationService=new AuthenticationService(authenticationTransaction,randomProvider,new Sha256CredentialEnrollmentHashProvider(),passwordProvider,new Sha256SessionIdentifierProvider(),identityClock,verificationDelivery,verificationOrigin,process.env.NODE_ENV==="production");
+const passwordResetControllers = createPasswordResetControllers(new PasswordResetService(authenticationTransaction, randomProvider, verificationHashProvider, passwordProvider, identityClock, verificationDelivery, verificationOrigin));
 const requestOriginPolicy=new ExactRequestOriginPolicy(production?[verificationOrigin]:[verificationOrigin,"http://localhost:5173"],production);
 const authenticationControllers=createAuthenticationControllers(authenticationService,requestOriginPolicy);
 const invitationDelivery=useDevelopmentDelivery?new DevelopmentInvitationDelivery(process.env.NODE_ENV??"development",message=>console.info(message)):smtpDelivery??new UnavailableInvitationDelivery();
@@ -179,6 +183,7 @@ export const identityRouter = createIdentityRouter({
   verify: createVerifyEmailController(verifyEmailService),
   bootstrapStatus: platformBootstrapControllers.status,
   platformBootstrap: platformBootstrapControllers.bootstrap,
+  ...passwordResetControllers,
   ...authenticationControllers,
 });
 export const publicWebChatRouter = createPublicWebChatRouter(publicWebChatSessionService, publicWebChatConversationService, production);

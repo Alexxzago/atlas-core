@@ -11,7 +11,7 @@ export class SqliteIdentityTransaction implements IdentityTransactionPort {
     if (this.db.isTransaction) throw new Error("Nested identity transactions are not supported.");
     this.db.exec("BEGIN IMMEDIATE;");
     try {
-      const result = operation({ users: new UserRepository(this.db), verifications: new EmailVerificationRepository(this.db) });
+      const result = operation({ users: new UserRepository(this.db), verifications: new EmailVerificationRepository(this.db), credentials: new PasswordCredentialRepository(this.db) });
       this.db.exec("COMMIT;");
       return result;
     } catch (error: unknown) {

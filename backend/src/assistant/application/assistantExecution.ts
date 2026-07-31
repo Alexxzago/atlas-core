@@ -11,7 +11,7 @@ export interface AssistantExecutionBehavior {
 }
 
 export interface AssistantExecutionKnowledge {
-  readonly company: Readonly<{ name: string; website: string; phone: string; email: string }>;
+  readonly company: Readonly<{ name: string; website: string | null; phone: string; email: string }>;
   readonly business: Readonly<{
     services: readonly string[];
     hours: string;

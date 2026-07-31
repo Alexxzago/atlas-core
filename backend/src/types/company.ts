@@ -4,7 +4,7 @@ export interface Company {
   id: number;
   workspaceId: number;
   name: string;
-  website: string;
+  website: string | null;
   phone: string;
   email: string;
   status: CompanyStatus;
@@ -13,7 +13,7 @@ export interface Company {
 
 export interface CompanyCreateInput {
   name: string;
-  website: string;
+  website?: string | null;
   phone?: string;
   email?: string;
   status?: CompanyStatus;
@@ -21,7 +21,7 @@ export interface CompanyCreateInput {
 
 export interface CompanyPersistenceInput {
   name: string;
-  website: string;
+  website: string | null;
   phone: string;
   email: string;
   status: CompanyStatus;

@@ -18,6 +18,7 @@ export interface AuthenticationIdentity {
 export interface User {
   readonly id: UserId;
   readonly status: UserStatus;
+  readonly fullName: string | null;
   readonly locale: Locale;
   readonly authenticationIdentities: readonly AuthenticationIdentity[];
   readonly createdAt: string;
@@ -28,6 +29,7 @@ export interface PendingUserInput {
   userId: string;
   authenticationIdentityId: string;
   email: string;
+  fullName?: string | null;
   locale: Locale;
   timestamp: string;
 }
@@ -35,6 +37,7 @@ export interface PendingUserInput {
 export interface UserState {
   id: string;
   status: UserStatus;
+  fullName?: string | null;
   locale: Locale;
   authenticationIdentities: readonly {
     id: string;
@@ -72,6 +75,13 @@ export function locale(value: string): Locale {
   return value;
 }
 
+export function fullName(value: string): string {
+  const normalized = value.trim();
+  const length = Array.from(normalized).length;
+  if (length < 1 || length > 120) throw new InvalidIdentityStateError("Full name is invalid.");
+  return normalized;
+}
+
 function validateStatus(value: string): UserStatus {
   if (value !== "pending_verification" && value !== "active" && value !== "locked"
     && value !== "disabled" && value !== "deleted") {
@@ -84,6 +94,7 @@ export function createPendingUser(input: PendingUserInput): User {
   return reconstructUser({
     id: input.userId,
     status: "pending_verification",
+    fullName: input.fullName === undefined || input.fullName === null ? null : fullName(input.fullName),
     locale: input.locale,
     authenticationIdentities: [{
       id: input.authenticationIdentityId,
@@ -102,6 +113,7 @@ export function createVerifiedUser(input: PendingUserInput): User {
   return reconstructUser({
     id: input.userId,
     status: "active",
+    fullName: input.fullName === undefined || input.fullName === null ? null : fullName(input.fullName),
     locale: input.locale,
     authenticationIdentities: [{
       id: input.authenticationIdentityId,
@@ -154,6 +166,7 @@ export function reconstructUser(state: UserState): User {
   return Object.freeze({
     id: createIdentifier<UserId>(state.id, "User ID"),
     status,
+    fullName: state.fullName === undefined || state.fullName === null ? null : fullName(state.fullName),
     locale: locale(state.locale),
     authenticationIdentities: Object.freeze(identities),
     createdAt: validateTimestamp(state.createdAt),

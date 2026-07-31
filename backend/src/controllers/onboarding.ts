@@ -5,7 +5,6 @@ import type { ActorContext } from "../knowledge/domain/actorContext.js";
 import {
   CompanyNotFoundError,
   CompanyValidationError,
-  DuplicateWebsiteError,
 } from "../services/companyValidation.js";
 
 export function createOnboardingController(service: OnboardingService, context: WorkspaceContext, actor?: ActorContext): RequestHandler {
@@ -20,10 +19,6 @@ export function createOnboardingController(service: OnboardingService, context: 
       }
       if (error instanceof CompanyNotFoundError) {
         res.status(404).json({ error: error.message });
-        return;
-      }
-      if (error instanceof DuplicateWebsiteError) {
-        res.status(409).json({ error: error.message });
         return;
       }
       console.error("Onboarding failed.", error);
