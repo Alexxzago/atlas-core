@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { localeMetadata, translations, type Locale, type TranslationKey } from "./translations";
+import { activationPendingTranslations, assistantSetupTranslations, localeMetadata, translations, websiteKnowledgeTranslations, type Locale, type TranslationKey } from "./translations";
 
 const STORAGE_KEY = "atlas.locale";
 
@@ -41,7 +41,7 @@ export function I18nProvider({ children }: { children: ReactNode }): ReactNode {
     locale,
     setLocale,
     t: (key, variables) => {
-      let message = translations[locale][key] ?? translations.en[key];
+      let message = translations[locale][key] ?? assistantSetupTranslations[locale][key as keyof typeof assistantSetupTranslations.en] ?? websiteKnowledgeTranslations[locale][key as keyof typeof websiteKnowledgeTranslations.en] ?? activationPendingTranslations[locale][key as keyof typeof activationPendingTranslations.en] ?? translations.en[key] ?? assistantSetupTranslations.en[key as keyof typeof assistantSetupTranslations.en] ?? websiteKnowledgeTranslations.en[key as keyof typeof websiteKnowledgeTranslations.en] ?? activationPendingTranslations.en[key as keyof typeof activationPendingTranslations.en] ?? "";
       if (variables) {
         for (const [name, replacement] of Object.entries(variables)) {
           message = message.replaceAll(`{${name}}`, String(replacement));

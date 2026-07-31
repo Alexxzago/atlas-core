@@ -11,6 +11,11 @@ export type PortalRoute =
   | { readonly name: "settings" }
   | { readonly name: "not-found" };
 
+export type AppRoute =
+  | { readonly kind: "public"; readonly name: "guided"; readonly route: GuidedSetupRoute }
+  | { readonly kind: "public"; readonly name: "chat"; readonly connectionPublicId: string }
+  | { readonly kind: "portal"; readonly route: PortalRoute };
+
 function companyId(value: string | undefined): number | null {
   if (!value || !/^\d+$/.test(value)) return null;
   const parsed = Number(value);
@@ -37,6 +42,15 @@ export function parsePortalRoute(pathname: string): PortalRoute {
   return { name: "not-found" };
 }
 
+export function parseAppRoute(pathname: string): AppRoute {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  const guidedRoute = parseGuidedSetupRoute(path);
+  if (guidedRoute) return { kind: "public", name: "guided", route: guidedRoute };
+  const chat = /^\/chat\/([a-zA-Z0-9_-]+)$/.exec(path);
+  if (chat?.[1]) return { kind: "public", name: "chat", connectionPublicId: chat[1] };
+  return { kind: "portal", route: parsePortalRoute(path) };
+}
+
 export function portalPath(route: Exclude<PortalRoute, { name: "not-found" }>): string {
   if (route.name === "dashboard") return "/dashboard";
   if (route.name === "companies") return "/companies";
@@ -54,3 +68,4 @@ export function portalPath(route: Exclude<PortalRoute, { name: "not-found" }>): 
 export function routeCompanyId(route: PortalRoute): number | null {
   return "companyId" in route ? route.companyId : null;
 }
+import { parseGuidedSetupRoute, type GuidedSetupRoute } from "./guidedSetupRoutes.ts";

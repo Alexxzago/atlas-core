@@ -1,4 +1,4 @@
-import type { AssistantPreviewResponse, AssistantProfile, AssistantProfileStatus, ChatResponse, Company, CompanyInput, CompanyKnowledge, CompanyUpdate, CreateAssistantProfileInput, CreateWhatsAppConnectionInput, KnowledgeIngestionResponse, KnowledgePublication, KnowledgeRevision, KnowledgeSource, OnboardingResponse, OperationalAssistantExecutionResponse, SessionBootstrapResponse, UpdateAssistantProfileInput, WebChatConnection, WebChatConnectionStatus, WhatsAppConnection, WhatsAppConnectionOperationalStatus, WorkspaceSummary } from "../types/api";
+import type { AssistantPreviewResponse, AssistantProfile, AssistantProfileStatus, ChatResponse, Company, CompanyInput, CompanyKnowledge, CompanyUpdate, CreatedWorkspace, CreateAssistantProfileInput, CreateWhatsAppConnectionInput, KnowledgeIngestionResponse, KnowledgePublication, KnowledgeRevision, KnowledgeSource, OnboardingCompanyResponse, OnboardingResponse, OperationalAssistantExecutionResponse, RegistrationInput, SessionBootstrapResponse, UpdateAssistantProfileInput, VerificationResponse, WebChatConnection, WebChatConnectionStatus, WhatsAppConnection, WhatsAppConnectionOperationalStatus, WorkspaceSummary } from "../types/api";
 
 export class ApiError extends Error {
   public readonly status: number;
@@ -68,6 +68,12 @@ export const atlasApi = {
   onboardCompany: (companyId: number, url: string): Promise<OnboardingResponse> => request(`/companies/${companyId}/onboard`, { method: "POST", body: JSON.stringify({ url }) }),
   chat: (companyId: number, message: string): Promise<ChatResponse> => request("/chat", { method: "POST", body: JSON.stringify({ companyId, message }) }),
   getKnowledge: (companyId: number): Promise<CompanyKnowledge> => request(`/knowledge?companyId=${companyId}`),
+  register: (input: RegistrationInput): Promise<{ status: "verification_requested" }> => request("/identity/register", { method: "POST", body: JSON.stringify(input) }),
+  resendVerification: (email: string, locale: "en" | "es"): Promise<{ status: "verification_requested" }> => request("/identity/resend-verification", { method: "POST", body: JSON.stringify({ email, locale }) }),
+  verifyEmail: async (proof: string): Promise<VerificationResponse> => {
+    try { return await request(`/identity/verify-email?proof=${segment(proof)}`); }
+    catch (error: unknown) { if (error instanceof ApiError && error.status === 400) return { status: "invalid_or_expired" }; throw error; }
+  },
   requestCredentialEnrollment:(email:string):Promise<void>=>request("/identity/credential-enrollment/request",{method:"POST",body:JSON.stringify({email})}),
   completeCredentialEnrollment:(proof:string,password:string,confirmation:string):Promise<void>=>request("/identity/credential-enrollment/complete",{method:"POST",body:JSON.stringify({proof,password,confirmation})}),
   login:(email:string,password:string):Promise<{status:string;csrfToken:string;csrfGeneration:number}>=>request("/identity/login",{method:"POST",body:JSON.stringify({email,password})}),
@@ -77,7 +83,7 @@ export const atlasApi = {
   logout:(csrf:string):Promise<void>=>request("/identity/logout",{method:"POST",headers:{"x-csrf-token":csrf},body:"{}"},true),
   listWorkspaces:():Promise<WorkspaceSummary[]>=>request("/workspaces"),
   selectedWorkspace:():Promise<WorkspaceSummary|null>=>request("/workspaces/selected"),
-  createWorkspace:(csrf:string,name:string):Promise<{workspace:{id:string;name:string}}>=>(request("/workspaces",{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({name})})),
+  createWorkspace:(csrf:string,name:string,timezone?:string,defaultLocale?:"en"|"es"):Promise<CreatedWorkspace>=>(request("/workspaces",{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({name,...(timezone?{timezone}:{}),...(defaultLocale?{defaultLocale}:{})})})),
   selectWorkspace:(csrf:string,id:string,signal?:AbortSignal):Promise<WorkspaceSummary>=>request(`/workspaces/${segment(id)}/select`,{method:"POST",headers:{"x-csrf-token":csrf},body:"{}",signal:signal??null}),
   listMemberships:(id:string,signal?:AbortSignal):Promise<Array<{id:string;userId:string;role:string;status:string}>>=>request(`/workspaces/${id}/memberships`,{signal:signal??null}),
   listInvitations:(id:string,signal?:AbortSignal):Promise<Array<{id:string;recipient:string;role:string;status:string;expiresAt:string}>>=>request(`/workspaces/${id}/invitations`,{signal:signal??null}),
@@ -91,6 +97,7 @@ export const atlasApi = {
   transferOwnership:(csrf:string,workspaceId:string,targetMembershipId:string,actorRole:string):Promise<void>=>request(`/workspaces/${workspaceId}/transfer-ownership`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({targetMembershipId,actorRole})}),
   listWorkspaceCompanies:(workspaceId:string,signal?:AbortSignal):Promise<Company[]>=>request(`/workspaces/${segment(workspaceId)}/companies`,{signal:signal??null}),
   createWorkspaceCompany:(csrf:string,workspaceId:string,input:CompanyInput,signal?:AbortSignal):Promise<Company>=>request(`/workspaces/${segment(workspaceId)}/companies`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null}),
+  createOnboardingCompany:(csrf:string,workspaceId:string,name:string):Promise<OnboardingCompanyResponse>=>request(`/workspaces/${segment(workspaceId)}/companies/onboarding`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({name})}),
   getWorkspaceCompany:(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<Company>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}`,{signal:signal??null}),
   listAssistantProfiles:(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<AssistantProfile[]>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles`,{signal:signal??null}),
   getAssistantProfile:(workspaceId:string,companyId:number,profileId:string,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}`,{signal:signal??null}),

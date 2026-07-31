@@ -57,6 +57,9 @@
 .inline-message--warning { color: var(--color-warning); background: var(--color-warning-bg); border-color: var(--color-warning-border); }
 .onboarding-form { display: grid; gap: var(--space-5); }
 .onboarding-actions { justify-content: flex-start; flex-wrap: wrap; }
+.guided-registration { animation: guided-registration-enter 180ms ease-out; }
+@keyframes guided-registration-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .guided-registration { animation: none; } }
 .processing-panel { display: flex; gap: var(--space-4); padding: var(--space-5); color: var(--color-processing); background: var(--color-processing-bg); border: 1px solid var(--color-processing-border); border-radius: var(--radius-md); }
 .processing-panel p { margin-block-start: var(--space-2); color: inherit; }
 .spinner { flex: 0 0 auto; inline-size: 16px; block-size: 16px; margin-block-start: 2px; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; animation: spin 800ms linear infinite; }

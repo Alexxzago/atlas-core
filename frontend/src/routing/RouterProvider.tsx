@@ -1,8 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { parsePortalRoute, type PortalRoute } from "./routes";
+import { parseAppRoute, parsePortalRoute, type AppRoute, type PortalRoute } from "./routes";
 
 interface RouterValue {
   readonly route: PortalRoute;
+  readonly appRoute: AppRoute;
+  readonly pathname: string;
+  readonly search: string;
   navigate: (path: string, options?: { readonly replace?: boolean }) => void;
 }
 
@@ -10,9 +13,12 @@ const RouterContext = createContext<RouterValue | null>(null);
 
 export function RouterProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const [route, setRoute] = useState<PortalRoute>(() => parsePortalRoute(window.location.pathname));
+  const [appRoute, setAppRoute] = useState<AppRoute>(() => parseAppRoute(window.location.pathname));
+  const [pathname, setPathname] = useState(() => window.location.pathname);
+  const [search, setSearch] = useState(() => window.location.search);
 
   useEffect(() => {
-    const onPopState = (): void => setRoute(parsePortalRoute(window.location.pathname));
+    const onPopState = (): void => { setRoute(parsePortalRoute(window.location.pathname)); setAppRoute(parseAppRoute(window.location.pathname)); setPathname(window.location.pathname); setSearch(window.location.search); };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -21,10 +27,10 @@ export function RouterProvider({ children }: { readonly children: ReactNode }): 
     if (path === window.location.pathname) return;
     if (options?.replace) window.history.replaceState({}, "", path);
     else window.history.pushState({}, "", path);
-    setRoute(parsePortalRoute(path));
+    setRoute(parsePortalRoute(path)); setAppRoute(parseAppRoute(path)); setPathname(path); setSearch("");
   }, []);
 
-  const value = useMemo<RouterValue>(() => ({ route, navigate }), [route, navigate]);
+  const value = useMemo<RouterValue>(() => ({ route, appRoute, pathname, search, navigate }), [route, appRoute, pathname, search, navigate]);
   return <RouterContext.Provider value={value}>{children}</RouterContext.Provider>;
 }
 

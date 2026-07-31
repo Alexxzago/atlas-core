@@ -67,6 +67,12 @@ export interface SessionBootstrapResponse {
   csrfToken: string;
   csrfGeneration: number;
 }
+export interface CreatedWorkspace { workspace: { id: string; name: string; timezone: string | null; defaultLocale: Locale | null }; membership: { id: string; role: string; status: string }; }
+export interface OnboardingCompanyResponse { data: { id: number }; }
+
+export interface RegistrationInput { fullName: string; email: string; password: string; confirmation: string; locale: Locale; }
+export type Locale = "en" | "es";
+export interface VerificationResponse { status: "verified" | "invalid_or_expired"; nextStep?: "login"; }
 
 export type AssistantProfileStatus = "draft" | "ready" | "disabled" | "archived";
 export type AssistantTone = "professional" | "friendly" | "concise" | "empathetic";
