@@ -100,12 +100,20 @@ import { MetaDeliveryStatusMapper } from "./whatsapp/services/MetaDeliveryStatus
 import { DeliveryLifecyclePolicy } from "./transport/domain/providerDelivery.js";
 import { OperatorConversationMessagingService } from "./conversation/services/operatorConversationMessagingService.js";
 import { createOperatorConversationMessageController } from "./controllers/operatorConversationMessagingController.js";
-import { configureProductionCompanyCoreControllers, configureProductionConversationMessageController, configureProductionConversationReadControllers } from "./routes/authorizedCompanies.js";
+import { configureProductionAssistantReadinessControllers, configureProductionCompanyCoreControllers, configureProductionConversationMessageController, configureProductionConversationReadControllers, configureProductionConversationControlControllers, configureProductionDefaultAssistantControllers } from "./routes/authorizedCompanies.js";
 import { createGetConversationController, createListConversationController } from "./controllers/conversationReadController.js";
+import { ConversationControlService } from "./conversation/services/conversationControlService.js";
+import { createConversationControlController } from "./controllers/conversationControlController.js";
 import { createActivateWhatsAppConnectionController, createConfigureWhatsAppCredentialsController, createDeactivateWhatsAppConnectionController, createGetWhatsAppConnectionController, createGetWhatsAppConnectionStatusController, createListWhatsAppConnectionsController, createUpdateWhatsAppConnectionController, createValidateWhatsAppConnectionController, createWhatsAppConnectionController } from "./controllers/WhatsAppConnectionController.js";
 import { CompanyDomainRepository } from "./repositories/companyDomainRepository.js";
 import { CompanyApplicationService } from "./company/application/companyApplicationService.js";
 import { createCompanyCoreControllers } from "./controllers/companyCoreController.js";
+import { AssistantReadinessAssessmentRepository } from "./repositories/assistantReadinessAssessmentRepository.js";
+import { AssistantReadinessService } from "./assistant/services/assistantReadinessService.js";
+import { DefaultAssistantRepository } from "./repositories/defaultAssistantRepository.js";
+import { DefaultAssistantService } from "./assistant/services/defaultAssistantService.js";
+import { createGetDefaultAssistantController, createPutDefaultAssistantController } from "./controllers/defaultAssistantController.js";
+import { createGetAssistantReadinessController, createRefreshAssistantReadinessController } from "./controllers/assistantReadinessController.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -157,7 +165,11 @@ const webChatConnectionService = new WebChatConnectionService(companyRepository,
 const whatsAppConnections = new WhatsAppConnectionRepository(database);
 const whatsAppCredentialCipher = new AesGcmWhatsAppCredentialCipher(whatsAppPlatformEncryptionKey(process.env.WHATSAPP_PLATFORM_ENCRYPTION_KEY));
 const whatsAppCredentialResolver = new WhatsAppCredentialResolver(whatsAppConnections, whatsAppCredentialCipher, process.env.WHATSAPP_ACCESS_TOKEN ?? "");
-const whatsAppConnectionService = new WhatsAppConnectionService(companyRepository, new AssistantProfileRepository(database), whatsAppConnections, identityClock, { credentials: whatsAppConnections, states: whatsAppConnections, cipher: whatsAppCredentialCipher, resolver: whatsAppCredentialResolver, validator: new WhatsAppCloudApiProvider("", process.env.WHATSAPP_GRAPH_API_VERSION ?? "v22.0"), knowledge: new CompanyKnowledgeRepository(database) });
+const defaultAssistantService = new DefaultAssistantService(new AssistantProfileRepository(database), new DefaultAssistantRepository(database), identityClock);
+configureProductionDefaultAssistantControllers({get:(context)=>createGetDefaultAssistantController(defaultAssistantService,context),put:(context,actor)=>createPutDefaultAssistantController(defaultAssistantService,context,actor.userId)});
+const assistantReadinessService = new AssistantReadinessService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), whatsAppConnections, new AssistantReadinessAssessmentRepository(database), defaultAssistantService, identityClock);
+configureProductionAssistantReadinessControllers({ get: (context) => createGetAssistantReadinessController(assistantReadinessService, context), refresh: (context) => createRefreshAssistantReadinessController(assistantReadinessService, context) });
+const whatsAppConnectionService = new WhatsAppConnectionService(companyRepository, new AssistantProfileRepository(database), whatsAppConnections, identityClock, { credentials: whatsAppConnections, states: whatsAppConnections, cipher: whatsAppCredentialCipher, resolver: whatsAppCredentialResolver, validator: new WhatsAppCloudApiProvider("", process.env.WHATSAPP_GRAPH_API_VERSION ?? "v22.0"), knowledge: new CompanyKnowledgeRepository(database) }, assistantReadinessService);
 export const conversationService = new ConversationService(new ConversationRepository(database), identityClock);
 const publicWebChatSessionService = new PublicWebChatSessionService(webChatConnectionService, conversationService, new WebChatSessionRepository(database), identityClock);
 export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock), new InMemoryConversationTurnLock(), "gemini", 20);
@@ -192,6 +204,8 @@ const whatsAppDeliveryStatusService = new WhatsAppDeliveryStatusService(new Prov
 const operatorConversationMessagingService = new OperatorConversationMessagingService(conversationService, new ConversationRepository(database), new ConversationRepository(database), new WhatsAppConversationRepository(database), whatsAppOutboundDeliveryService, identityClock);
 configureProductionConversationMessageController((context, actor) => createOperatorConversationMessageController(operatorConversationMessagingService, context, actor));
 configureProductionConversationReadControllers({ list: (context) => createListConversationController(conversationService, context), get: (context) => createGetConversationController(conversationService, context) });
+const conversationControlService = new ConversationControlService(conversationService, new ConversationRepository(database), identityClock);
+configureProductionConversationControlControllers({ takeover: (context, actor) => createConversationControlController(conversationControlService, context, actor, "takeover"), release: (context, actor) => createConversationControlController(conversationControlService, context, actor, "release"), resolve: (context, actor) => createConversationControlController(conversationControlService, context, actor, "resolve") });
 export const whatsAppWebhookService = new WhatsAppWebhookService({ appSecret: process.env.WHATSAPP_APP_SECRET ?? "", verifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? "" }, whatsAppConnectionService, new WhatsAppConversationRepository(database), new ChannelProviderEventRepository(database), conversationService, operationalConversationTurnService, identityClock, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), undefined, whatsAppCredentialResolver, (accessToken) => new WhatsAppCloudApiProvider(accessToken, process.env.WHATSAPP_GRAPH_API_VERSION ?? "v22.0"), new ConversationRepository(database), whatsAppOutboundDeliveryService, whatsAppDeliveryStatusService);
 const whatsAppWebhookRouter = createWhatsAppWebhookRouter(createWhatsAppWebhookControllers(whatsAppWebhookService));
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));

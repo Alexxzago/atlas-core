@@ -93,6 +93,11 @@ test("fresh database receives all migrations and the default workspace", () => {
     { id: 27, name: "0027_company_website_optional" },
     { id: 28, name: "0028_identity_registration_password_reset" },
     { id: 29, name: "0029_workspace_onboarding_settings" },
+    { id: 30, name: "0030_assistant_readiness_assessments" },
+    { id: 31, name: "0031_company_default_assistants" },
+    { id: 32, name: "0032_execution_snapshot_json" },
+    { id: 33, name: "0033_channel_execution_requests" },
+    { id: 34, name: "0034_outbound_delivery_attempt_outcomes" },
   ]);
   assert.ok(migrations.every((migration) => migration.checksum.length === 64 && migration.applied_at.length > 0));
   assert.equal(new WorkspaceRepository(database).resolveDefault().key, "default");
@@ -162,7 +167,7 @@ test("an already migrated database restarts idempotently", () => {
     const restarted = createDatabase(path);
     const migrationCount = restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number };
     const workspaceCount = restarted.prepare("SELECT COUNT(*) AS count FROM workspaces WHERE key = 'default'").get() as { count: number };
-    assert.equal(migrationCount.count, 29);
+    assert.equal(migrationCount.count, 34);
     assert.equal(workspaceCount.count, 1);
     assert.deepEqual(restarted.prepare("PRAGMA foreign_key_check").all(), []);
     restarted.close();

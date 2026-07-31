@@ -46,6 +46,11 @@ test("runtime persists an immutable minimal Profile snapshot and a published Kno
   assert.deepEqual(result.response, { outcome: "answered", answer: "Grounded answer" });
   assert.ok(stored); assert.equal(stored.state, "answered"); assert.equal(stored.provider, "test");
   assert.equal(stored.knowledgeSnapshot.versionId, knowledge.id); assert.equal(stored.knowledgeSnapshot.snapshotDigest, knowledge.snapshotDigest);
+  assert.equal(stored.executionSnapshot?.workspaceId, company.workspaceId);
+  assert.equal(stored.executionSnapshot?.assistantProfileId, ready.id);
+  assert.equal(stored.executionSnapshot?.knowledgeVersionId, knowledge.id);
+  assert.equal(stored.executionSnapshot?.providerModel, "test");
+  assert.match(stored.executionSnapshot?.configurationDigest ?? "", /^[0-9a-f]{64}$/);
   assert.deepEqual(Object.keys(stored.profileSnapshot).sort(), ["assistantLanguage", "audience", "businessRole", "fallbackMessage", "objective", "profileId", "tone"]);
   assert.equal(stored.profileSnapshot.objective, "Qualify inquiries"); assert.equal("name" in stored.profileSnapshot, false);
   const row = database.prepare("SELECT * FROM assistant_execution_records WHERE id=?").get(result.record.id) as Record<string, unknown>;

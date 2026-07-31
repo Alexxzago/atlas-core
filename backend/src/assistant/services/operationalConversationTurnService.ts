@@ -85,6 +85,7 @@ export class OperationalConversationTurnService {
       if (await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
       const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, history, {
         purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
+        snapshotContext: { conversationId: conversation.id, channelProvider: conversation.channel },
       });
       const outbound = this.conversations.addMessage(context, scopedCompanyId, conversation.id, {
         senderParticipantId: parsed.outboundParticipantId, direction: "outbound", content: executed.response.answer,
@@ -94,7 +95,7 @@ export class OperationalConversationTurnService {
     } finally { release(); }
   }
 
-  public async executePersistedInbound(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, input: { readonly assistantProfileId: string; readonly outboundParticipantId: string; readonly replyIdempotencyKey: string }, inbound: ConversationMessage, hooks?: Omit<OperationalConversationTurnHooks, "afterInbound">): Promise<OperationalConversationTurnResult> {
+  public async executePersistedInbound(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, input: { readonly assistantProfileId: string; readonly outboundParticipantId: string; readonly replyIdempotencyKey: string; readonly whatsAppConnectionId?: string; readonly whatsAppPhoneNumberId?: string }, inbound: ConversationMessage, hooks?: Omit<OperationalConversationTurnHooks, "afterInbound">): Promise<OperationalConversationTurnResult> {
     const scopedCompanyId = parseCompanyId(companyIdValue), conversationIdValueParsed = parseConversationId(conversationIdValue);
     const company = this.companies.findById(context, scopedCompanyId);
     if (!company) throw new OperationalConversationTurnNotFoundError("Company was not found.");
@@ -116,7 +117,15 @@ export class OperationalConversationTurnService {
       const knowledge = this.knowledge.loadCurrentVersion(context, scopedCompanyId);
       if (!knowledge) throw new OperationalConversationTurnKnowledgeUnavailableError("Published knowledge is unavailable.");
       if (await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
-      const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit), { purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true });
+      const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit), {
+        purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
+        snapshotContext: {
+          conversationId: conversation.id,
+          channelProvider: conversation.channel,
+          ...(input.whatsAppConnectionId ? { whatsAppConnectionId: input.whatsAppConnectionId } : {}),
+          ...(input.whatsAppPhoneNumberId ? { whatsAppPhoneNumberId: input.whatsAppPhoneNumberId } : {}),
+        },
+      });
       const outbound = this.conversations.addMessage(context, scopedCompanyId, conversation.id, { senderParticipantId: outboundParticipantId, direction: "outbound", content: executed.response.answer, idempotencyKey: input.replyIdempotencyKey, executionRecordId: executed.record.id });
       return Object.freeze({ inbound, outbound, response: executed.response, executionRecordId: executed.record.id });
     } finally { release(); }

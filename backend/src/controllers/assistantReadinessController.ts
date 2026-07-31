@@ -1,0 +1,10 @@
+import type { RequestHandler, Response } from "express";
+import { AssistantReadinessNotFoundError, AssistantReadinessService } from "../assistant/services/assistantReadinessService.js";
+import type { AssistantReadinessAssessment } from "../assistant/domain/assistantReadiness.js";
+import type { WorkspaceContext } from "../types/workspaceContext.js";
+
+export function createGetAssistantReadinessController(service: AssistantReadinessService, context: WorkspaceContext): RequestHandler { return (req, res): void => { try { res.json(assistantReadinessResponse(service.get(context, companyId(req.params.companyId)))); } catch (error: unknown) { respond(res, error); } }; }
+export function createRefreshAssistantReadinessController(service: AssistantReadinessService, context: WorkspaceContext): RequestHandler { return (req, res): void => { try { res.json(assistantReadinessResponse(service.refresh(context, companyId(req.params.companyId)))); } catch (error: unknown) { respond(res, error); } }; }
+export function assistantReadinessResponse(value: AssistantReadinessAssessment) { return { assistantIdentifier: value.assistantIdentifier, workspaceId: value.workspaceId, companyId: value.companyId, status: value.status, blockers: value.blockers, knowledgeVersionId: value.knowledgeVersionId, assistantProfileId: value.assistantProfileId, evaluatedAt: value.evaluatedAt, policyVersion: value.policyVersion, configurationDigest: value.configurationDigest }; }
+function companyId(value: unknown): number { const parsed = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN; if (!Number.isSafeInteger(parsed) || parsed < 1) throw new AssistantReadinessNotFoundError(); return parsed; }
+function respond(res: Response, error: unknown): void { if (error instanceof AssistantReadinessNotFoundError) { res.status(404).json({ error: { code: "assistant_readiness_not_found", message: "Assistant readiness is unavailable." } }); return; } res.status(500).json({ error: { code: "assistant_readiness_unavailable", message: "Assistant readiness is temporarily unavailable." } }); }

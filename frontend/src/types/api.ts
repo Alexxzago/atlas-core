@@ -44,7 +44,14 @@ export interface WorkspaceSummary {
   role: string;
   capabilities: Permission[];
 }
-export type Permission = "workspace:read"|"workspace:manage"|"company:read"|"company:manage"|"onboarding:run"|"chat:use"|"assistant:preview"|"knowledge:read"|"knowledge:ingest"|"knowledge:publish"|"knowledge:archive"|"membership:list"|"membership:invite"|"membership:manage"|"administrator:manage"|"owner:manage"|"owner:transfer";
+export type Permission = "workspace:read"|"workspace:manage"|"company:read"|"company:manage"|"onboarding:run"|"chat:use"|"conversation:message:send"|"conversation:manage"|"assistant:preview"|"knowledge:read"|"knowledge:ingest"|"knowledge:publish"|"knowledge:archive"|"membership:list"|"membership:invite"|"membership:manage"|"administrator:manage"|"owner:manage"|"owner:transfer";
+
+export type ConversationControlState = "automated" | "human_required" | "human_controlled";
+export interface ConversationDelivery { state: "pending" | "leased" | "accepted" | "delivered" | "read" | "retryable" | "permanent_failure" | "uncertain"; updatedAt: string; safeErrorCategory: string | null; }
+export interface ConversationInboxItem { conversationId: string; channel: "internal" | "web_chat" | "whatsapp"; state: "open" | "closed"; controlState: ConversationControlState; attentionReason: string | null; takenAt: string | null; releasedAt: string | null; lastOperatorActivityAt: string | null; resolvedAt: string | null; controlVersion: number; updatedAt: string; participant: string | null; preview: string | null; deliveryCategory: "received" | "sent" | null; lastActivityAt: string; delivery: ConversationDelivery | null; }
+export interface ConversationDetail extends ConversationInboxItem { messages: Array<{ messageId: string; participant: string; deliveryCategory: "received" | "sent"; content: string; createdAt: string; delivery: ConversationDelivery | null }>; }
+export interface ConversationControlResponse { control: Pick<ConversationInboxItem, "controlState" | "attentionReason" | "takenAt" | "releasedAt" | "lastOperatorActivityAt" | "resolvedAt" | "controlVersion" | "updatedAt">; outcome?: "resolved"; }
+export interface OperatorConversationMessageResult { messageId: string; delivery: { id: string; state: "pending" | "accepted" | "uncertain" }; }
 
 export type KnowledgeSourceKind="manual_text"|"public_url"|"pdf";
 export interface KnowledgeRevision { id:string;sourceId:string;revisionNumber:number;status:"pending"|"ready"|"failed";mediaType:string;normalizedText:string|null;extractedKnowledge:{services:string[];hours:string;locations:string[];faq:Array<{question:string;answer:string}>}|null;failureCode:string|null;createdAt:string;completedAt:string|null; }
@@ -166,3 +173,18 @@ export interface WhatsAppConnectionOperationalStatus {
   healthFailureCode: string | null;
   updatedAt: string;
 }
+
+export type AssistantReadinessStatus = "ready" | "blocked";
+export interface AssistantReadinessAssessment {
+  assistantIdentifier: "default";
+  workspaceId: number;
+  companyId: number;
+  status: AssistantReadinessStatus;
+  blockers: string[];
+  knowledgeVersionId: string | null;
+  assistantProfileId: string | null;
+  evaluatedAt: string;
+  policyVersion: string;
+  configurationDigest: string;
+}
+export interface DefaultAssistantAssignment { companyId:number; assistantProfileId:string; version:number; assignedAt:string; updatedAt:string; assignedByActorId:string|null; source:string|null; }

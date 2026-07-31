@@ -1,4 +1,4 @@
-import type { ChannelProviderEvent, ChannelProviderEventId, OutboundDelivery, OutboundDeliveryId, ProviderEventProcessingState, ProviderMessageRecord, ProviderMessageRecordId } from "../domain/providerDelivery.js";
+import type { ChannelExecutionRequest, ChannelExecutionRequestId, ChannelProviderEvent, ChannelProviderEventId, OutboundDelivery, OutboundDeliveryId, ProviderEventProcessingState, ProviderMessageRecord, ProviderMessageRecordId } from "../domain/providerDelivery.js";
 import type { ConversationMessage } from "../../conversation/domain/conversation.js";
 
 export interface ChannelProviderEventRepositoryPort {
@@ -8,6 +8,10 @@ export interface ChannelProviderEventRepositoryPort {
   captureInbound(event: ChannelProviderEvent, inbound: ConversationMessage, providerMessage: ProviderMessageRecord): { readonly event: ChannelProviderEvent; readonly inbound: ConversationMessage; readonly claimed: boolean };
   listRecoverable(transportProvider: string, limit: number): ChannelProviderEvent[];
   acquireForRecovery(id: ChannelProviderEventId, staleBefore: string, updatedAt: string): ChannelProviderEvent | null;
+  captureInboundExecution(event: ChannelProviderEvent, inbound: ConversationMessage, providerMessage: ProviderMessageRecord, request: ChannelExecutionRequest): { readonly event: ChannelProviderEvent; readonly inbound: ConversationMessage; readonly request: ChannelExecutionRequest; readonly claimed: boolean };
+  leaseExecutionRequests(owner: string, now: string, expiresAt: string, limit: number): ChannelExecutionRequest[];
+  completeExecutionRequest(id: ChannelExecutionRequestId, owner: string, state: "completed" | "failed", outcome: string | null, updatedAt: string): ChannelExecutionRequest | null;
+  captureUnsupportedExecution(event: ChannelProviderEvent, request: ChannelExecutionRequest): { readonly event: ChannelProviderEvent; readonly request: ChannelExecutionRequest; readonly claimed: boolean };
 }
 
 export interface ProviderMessageRecordRepositoryPort {
@@ -27,4 +31,5 @@ export interface OutboundDeliveryRepositoryPort {
   leaseReady(owner: string, now: string, expiresAt: string, limit: number): OutboundDelivery[];
   completeLease(id: OutboundDeliveryId, owner: string, state: "accepted" | "uncertain", safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null;
   retryLease(id: OutboundDeliveryId, owner: string, nextAttemptAt: string, safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null;
+  settleLease(id: OutboundDeliveryId, owner: string, outcome: "accepted" | "retryable" | "permanent_failure", nextAttemptAt: string | null, safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null;
 }

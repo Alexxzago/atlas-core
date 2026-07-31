@@ -21,12 +21,33 @@ export interface PublishedKnowledgeSnapshotReference {
   readonly snapshotDigest: string;
 }
 
+export interface ImmutableExecutionSnapshot {
+  readonly version: "execution-snapshot-v1";
+  readonly workspaceId: number;
+  readonly companyId: number;
+  readonly assistantIdentifier: "default";
+  readonly assistantProfileId: AssistantProfileId;
+  readonly assistantProfileStatus: string;
+  readonly knowledgeVersionId: string;
+  readonly whatsAppConnectionId: string | null;
+  readonly whatsAppPhoneNumberId: string | null;
+  readonly conversationId: string | null;
+  readonly channelProvider: string | null;
+  readonly executionPolicyVersion: "assistant-profile-execution-v1";
+  readonly safetyPolicyVersion: "assistant-safety-v1";
+  readonly providerModel: string;
+  readonly runtimeVersion: "operational-runtime-v1";
+  readonly configurationDigest: string;
+  readonly createdAt: string;
+}
+
 export interface AssistantExecutionRecord {
   readonly id: AssistantExecutionRecordId;
   readonly companyId: number;
   readonly profileId: AssistantProfileId;
   readonly profileSnapshot: AssistantProfileRuntimeSnapshot;
   readonly knowledgeSnapshot: PublishedKnowledgeSnapshotReference;
+  readonly executionSnapshot: ImmutableExecutionSnapshot | null;
   readonly provider: string;
   readonly purpose: AssistantRuntimePurpose;
   readonly state: AssistantExecutionRecordState;

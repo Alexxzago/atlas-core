@@ -5,7 +5,7 @@ import type { ConversationRepositoryPort } from "../../conversation/application/
 import { reconstructConversationControl } from "../../conversation/domain/conversationControl.js";
 import { conversationMessageId, reconstructConversationMessage } from "../../conversation/domain/conversation.js";
 import type { ConversationService } from "../../conversation/services/conversationService.js";
-import { channelProviderEventId, reconstructChannelProviderEvent } from "../../transport/domain/providerDelivery.js";
+import { channelExecutionRequestId, channelProviderEventId, reconstructChannelExecutionRequest, reconstructChannelProviderEvent } from "../../transport/domain/providerDelivery.js";
 import type { ChannelProviderEventRepositoryPort } from "../../transport/application/ports.js";
 import type { ProviderMessageRecordRepositoryPort, OutboundDeliveryRepositoryPort } from "../../transport/application/ports.js";
 import { outboundDeliveryId, providerMessageRecordId, reconstructOutboundDelivery, reconstructProviderMessageRecord } from "../../transport/domain/providerDelivery.js";
@@ -20,9 +20,11 @@ export interface WhatsAppWebhookConfiguration { readonly appSecret: string; read
 export interface WhatsAppInboundTextMessage { readonly phoneNumberId: string; readonly waId: string; readonly wamid: string; readonly text: string; }
 export interface WhatsAppMessageStatusEvent { readonly kind: "message_status"; readonly phoneNumberId: string; readonly externalMessageId: string; readonly status: "sent" | "delivered" | "read" | "failed"; readonly providerTimestamp: string | null; readonly safeFailureCategory: "provider_unavailable" | null; }
 export interface WhatsAppInboundTextEvent extends WhatsAppInboundTextMessage { readonly kind: "inbound_text"; }
-export type WhatsAppWebhookEvent = WhatsAppInboundTextEvent | WhatsAppMessageStatusEvent;
+export interface WhatsAppUnsupportedInboundEvent { readonly kind: "inbound_unsupported"; readonly phoneNumberId: string; readonly waId: string; readonly wamid: string; }
+export type WhatsAppWebhookEvent = WhatsAppInboundTextEvent | WhatsAppUnsupportedInboundEvent | WhatsAppMessageStatusEvent;
 
 export class WhatsAppWebhookService {
+  private readonly executionOwner = `whatsapp-execution-${randomUUID()}`;
   public constructor(private readonly configuration: WhatsAppWebhookConfiguration, private readonly connections?: WhatsAppConnectionService, private readonly bindings?: WhatsAppConversationRepositoryPort, private readonly events?: ChannelProviderEventRepositoryPort, private readonly conversations?: ConversationService, private readonly turns?: OperationalConversationTurnService, private readonly clock: { now(): string } = { now: () => new Date().toISOString() }, private readonly messages?: ProviderMessageRecordRepositoryPort, private readonly deliveries?: OutboundDeliveryRepositoryPort, private readonly api?: WhatsAppCloudApiPort, private readonly credentials?: WhatsAppCredentialResolverPort, private readonly apiFactory?: (accessToken: string) => WhatsAppCloudApiPort, private readonly controls?: ConversationRepositoryPort, private readonly outbound?: WhatsAppOutboundDeliveryService, private readonly statuses?: WhatsAppDeliveryStatusService) {}
   public verify(mode: unknown, token: unknown, challenge: unknown): string | null { return this.configuration.verifyToken.length > 0 && mode === "subscribe" && typeof token === "string" && token === this.configuration.verifyToken && typeof challenge === "string" ? challenge : null; }
   public signatureValid(raw: Buffer, header: unknown): boolean {
@@ -44,7 +46,9 @@ export class WhatsAppWebhookService {
         if (typeof payload.metadata?.phone_number_id !== "string") continue;
         if (Array.isArray(payload.messages)) for (const message of payload.messages) if (message && typeof message === "object") {
           const input = message as { type?: unknown; from?: unknown; id?: unknown; text?: { body?: unknown } };
-          if (input.type === "text" && typeof input.from === "string" && typeof input.id === "string" && typeof input.text?.body === "string" && input.text.body.normalize("NFKC").trim()) messages.push({ kind: "inbound_text", phoneNumberId: payload.metadata.phone_number_id, waId: input.from, wamid: input.id, text: input.text.body.normalize("NFKC").trim() });
+          if (typeof input.from !== "string" || typeof input.id !== "string" || typeof input.type !== "string") continue;
+          if (input.type === "text" && typeof input.text?.body === "string" && input.text.body.normalize("NFKC").trim()) messages.push({ kind: "inbound_text", phoneNumberId: payload.metadata.phone_number_id, waId: input.from, wamid: input.id, text: input.text.body.normalize("NFKC").trim() });
+          else if (input.type !== "text") messages.push({ kind: "inbound_unsupported", phoneNumberId: payload.metadata.phone_number_id, waId: input.from, wamid: input.id });
         }
         if (Array.isArray(payload.statuses)) for (const status of payload.statuses) if (status && typeof status === "object") {
           const input = status as { id?: unknown; status?: unknown; timestamp?: unknown; errors?: unknown };
@@ -57,23 +61,65 @@ export class WhatsAppWebhookService {
     }
     return messages;
   }
-  public async receive(raw: Buffer): Promise<void> { for (const event of this.parseEvents(raw)) { if (this.connections && "recordWebhookActivity" in this.connections) this.connections.recordWebhookActivity(event.phoneNumberId); if (event.kind === "inbound_text") await this.process(event); else this.statuses?.process(event); } }
+  public async receive(raw: Buffer): Promise<void> { for (const event of this.parseEvents(raw)) { if (this.connections && "recordWebhookActivity" in this.connections) this.connections.recordWebhookActivity(event.phoneNumberId); if (event.kind === "inbound_text") await this.process(event); else if (event.kind === "inbound_unsupported") await this.captureUnsupported(event); else this.statuses?.process(event); } }
+  public async acknowledge(raw: Buffer): Promise<void> {
+    for (const event of this.parseEvents(raw)) {
+      if (this.connections && "recordWebhookActivity" in this.connections) this.connections.recordWebhookActivity(event.phoneNumberId);
+      if (event.kind === "inbound_text") await this.capture(event); else if (event.kind === "inbound_unsupported") await this.captureUnsupported(event); else this.statuses?.process(event);
+    }
+  }
   public async resumeIncomplete(limit = 25): Promise<void> {
     if (!this.connections || !this.bindings || !this.events || !this.conversations || !this.turns) return;
-    for (const event of this.events.listRecoverable("meta_whatsapp_cloud", limit)) {
-      const connection = this.connections.resolveForRecovery(event.transportConnectionId as import("../domain/whatsappConnection.js").WhatsAppConnectionId);
-      if (!connection || !event.conversationId || !event.conversationMessageId) continue;
-      const context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, binding = this.bindings.findBindingByConversation(context, connection.companyId, event.conversationId);
-      const inbound = this.conversations.listMessages(context, connection.companyId, event.conversationId).find((value) => value.id === event.conversationMessageId);
-      const claimed = inbound ? this.events.acquireForRecovery(event.id, new Date(Date.parse(this.clock.now()) - 60_000).toISOString(), this.clock.now()) : null;
-      if (!binding || !inbound || !claimed) continue;
-      try {
-        const turn = await this.turns.executePersistedInbound(context, connection.companyId, binding.conversationId, { assistantProfileId: connection.assistantProfileId, outboundParticipantId: binding.assistantParticipantId, replyIdempotencyKey: key("reply", event.externalEventId) }, inbound, { beforeRuntime: () => this.allowsAutomation(context, connection.companyId, binding.conversationId) });
-        if (turn.response.outcome === "safe_fallback") this.markHumanRequired(context, connection.companyId, binding.conversationId);
-        if (this.outbound) await this.outbound.deliverWhatsAppText(context, connection.companyId, { conversationId: binding.conversationId, conversationMessageId: turn.outbound.id, whatsAppConnectionId: connection.id, recipientWaId: binding.waId });
-        this.events.updateState(claimed.id, "processing", "completed", this.clock.now());
-      } catch { this.events.updateState(claimed.id, "processing", "failed", this.clock.now()); }
+    {
+      const now = this.clock.now(), leased = this.events.leaseExecutionRequests(this.executionOwner, now, new Date(Date.parse(now) + 60_000).toISOString(), limit);
+      for (const request of leased) {
+        const snapshot = request.snapshot;
+        const connection = typeof snapshot.whatsAppConnectionId === "string" ? this.connections.resolveForRecovery(snapshot.whatsAppConnectionId as import("../domain/whatsappConnection.js").WhatsAppConnectionId) : null;
+        const conversationId = typeof snapshot.conversationId === "string" ? snapshot.conversationId : null;
+        const externalEventId = typeof snapshot.externalEventId === "string" ? snapshot.externalEventId : null;
+        const assistantParticipantId = typeof snapshot.assistantParticipantId === "string" ? snapshot.assistantParticipantId : null;
+        const recipientWaId = typeof snapshot.recipientWaId === "string" ? snapshot.recipientWaId : null;
+        const replyIdempotencyKey = typeof snapshot.replyIdempotencyKey === "string" ? snapshot.replyIdempotencyKey : null;
+        const assistantProfileId = typeof snapshot.assistantProfileId === "string" ? snapshot.assistantProfileId : null;
+        if (!connection || !conversationId || !externalEventId || !assistantParticipantId || !recipientWaId || !replyIdempotencyKey || !assistantProfileId || assistantProfileId !== connection.assistantProfileId) { this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "unsupported", this.clock.now()); continue; }
+        const context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, event = this.events.findByTransportProviderAndExternalEventId("meta_whatsapp_cloud", externalEventId), binding = this.bindings.findBindingByConversation(context, connection.companyId, conversationId as import("../../conversation/domain/conversation.js").ConversationId);
+        const inbound = event?.conversationMessageId ? this.conversations.listMessages(context, connection.companyId, conversationId as import("../../conversation/domain/conversation.js").ConversationId).find((value) => value.id === event.conversationMessageId) : null;
+        if (!event || !binding || !inbound) { this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "unsupported", this.clock.now()); continue; }
+        try {
+          const current = this.controls?.ensureConversationControl(context, connection.companyId, binding.conversationId);
+          this.reopenForInbound(context, connection.companyId, binding.conversationId);
+          if (current && current.state !== "automated") { const completedAt = this.clock.now(); this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", "unsupported", completedAt); this.events.updateState(event.id, "claimed", "completed", completedAt); continue; }
+          const turn = await this.turns.executePersistedInbound(context, connection.companyId, binding.conversationId, { assistantProfileId, outboundParticipantId: assistantParticipantId, replyIdempotencyKey, whatsAppConnectionId: connection.id, whatsAppPhoneNumberId: connection.phoneNumberId }, inbound, { beforeRuntime: () => this.allowsAutomation(context, connection.companyId, binding.conversationId) });
+          if (turn.response.outcome === "safe_fallback") this.markHumanRequired(context, connection.companyId, binding.conversationId);
+          if (this.outbound) await this.outbound.deliverWhatsAppText(context, connection.companyId, { conversationId: binding.conversationId, conversationMessageId: turn.outbound.id, whatsAppConnectionId: connection.id, recipientWaId });
+          const completedAt = this.clock.now(); this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", turn.response.outcome, completedAt); this.events.updateState(event.id, "claimed", "completed", completedAt);
+        } catch (error: unknown) { const failedAt = this.clock.now(); if (!(error instanceof OperationalConversationTurnSuppressedError)) this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "provider_unavailable", failedAt); this.events.updateState(event.id, "claimed", "failed", failedAt); }
+      }
+      return;
     }
+  }
+  private async capture(message: WhatsAppInboundTextMessage): Promise<void> {
+    if (!this.connections || !this.bindings || !this.events || !this.conversations) return;
+    const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) return;
+    const now = this.clock.now(), context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, existing = this.bindings.findBinding(connection.id, message.waId);
+    const binding = existing ?? (() => { const conversation = this.conversations!.open(context, connection.companyId, "whatsapp"), customer = this.conversations!.addParticipant(context, connection.companyId, conversation.id, { type: "whatsapp_contact", reference: message.waId }), assistant = this.conversations!.addParticipant(context, connection.companyId, conversation.id, { type: "assistant", reference: connection.assistantProfileId }); return this.bindings!.createBinding(reconstructWhatsAppConversationBinding({ id: whatsAppConversationBindingId(`wcb_${randomUUID().replaceAll("-", "")}`), whatsAppConnectionId: connection.id, waId: message.waId, conversationId: conversation.id, customerParticipantId: customer.id, assistantParticipantId: assistant.id, createdAt: now, updatedAt: now })); })();
+    if (!binding) return;
+    const externalEventId = message.wamid;
+    this.events.captureInboundExecution(
+      reconstructChannelProviderEvent({ id: channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: connection.id, externalEventId, state: "claimed", conversationId: null, conversationMessageId: null, createdAt: now, updatedAt: now }),
+      reconstructConversationMessage({ id: conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`), conversationId: binding.conversationId, senderParticipantId: binding.customerParticipantId, direction: "inbound", content: message.text, idempotencyKey: key("inbound", message.wamid), executionRecordId: null, createdAt: now }),
+      reconstructProviderMessageRecord({ id: providerMessageRecordId(`pmr_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", direction: "inbound", transportConnectionId: connection.id, conversationMessageId: conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`), externalMessageId: message.wamid, createdAt: now, updatedAt: now }),
+      reconstructChannelExecutionRequest({ id: channelExecutionRequestId(`cex_${randomUUID().replaceAll("-", "")}`), channelProviderEventId: channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), state: "pending", snapshot: { version: "whatsapp-execution-request-v1", externalEventId, conversationId: binding.conversationId, assistantProfileId: connection.assistantProfileId, assistantParticipantId: binding.assistantParticipantId, whatsAppConnectionId: connection.id, recipientWaId: binding.waId, replyIdempotencyKey: key("reply", message.wamid) }, leaseOwner: null, leaseExpiresAt: null, outcome: null, createdAt: now, updatedAt: now }),
+    );
+  }
+  private async captureUnsupported(message: WhatsAppUnsupportedInboundEvent): Promise<void> {
+    if (!this.connections || !this.events) return;
+    const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) return;
+    const now = this.clock.now();
+    this.events.captureUnsupportedExecution(
+      reconstructChannelProviderEvent({ id: channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: connection.id, externalEventId: message.wamid, state: "completed", conversationId: null, conversationMessageId: null, createdAt: now, updatedAt: now }),
+      reconstructChannelExecutionRequest({ id: channelExecutionRequestId(`cex_${randomUUID().replaceAll("-", "")}`), channelProviderEventId: channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), state: "unsupported", snapshot: { version: "whatsapp-execution-request-v1", externalEventId: message.wamid, whatsAppConnectionId: connection.id, recipientWaId: message.waId }, leaseOwner: null, leaseExpiresAt: null, outcome: "unsupported", createdAt: now, updatedAt: now }),
+    );
   }
   private async process(message: WhatsAppInboundTextMessage): Promise<void> {
     if (!this.connections || !this.bindings || !this.events || !this.conversations || !this.turns) return;
@@ -102,7 +148,7 @@ export class WhatsAppWebhookService {
         this.reopenForInbound(context, connection.companyId, binding.conversationId);
       } else {
         this.reopenForInbound(context, connection.companyId, binding.conversationId);
-        turn = await this.turns.executePersistedInbound(context, connection.companyId, binding.conversationId, { assistantProfileId: connection.assistantProfileId, outboundParticipantId: binding.assistantParticipantId, replyIdempotencyKey: replyKey }, inbound, {
+        turn = await this.turns.executePersistedInbound(context, connection.companyId, binding.conversationId, { assistantProfileId: connection.assistantProfileId, outboundParticipantId: binding.assistantParticipantId, replyIdempotencyKey: replyKey, whatsAppConnectionId: connection.id, whatsAppPhoneNumberId: connection.phoneNumberId }, inbound, {
           beforeRuntime: () => this.allowsAutomation(context, connection.companyId, binding.conversationId),
         });
       }

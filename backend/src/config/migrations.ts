@@ -986,6 +986,36 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 30,
+    name: "0030_assistant_readiness_assessments",
+    checksumSource: "assistant-readiness-v1|default-assistant|append-only-assessments|configuration-digest",
+    apply(database): void {
+      database.exec(`
+        CREATE TABLE assistant_readiness_assessments (
+          id TEXT PRIMARY KEY,
+          assistant_identifier TEXT NOT NULL CHECK(assistant_identifier = 'default'),
+          workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
+          company_id INTEGER NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('ready','blocked')),
+          blockers_json TEXT NOT NULL,
+          knowledge_version_id TEXT REFERENCES company_knowledge_versions(id) ON DELETE SET NULL,
+          assistant_profile_id TEXT REFERENCES assistant_profiles(id) ON DELETE SET NULL,
+          whatsapp_connection_id TEXT REFERENCES whatsapp_connections(id) ON DELETE SET NULL,
+          policy_version TEXT NOT NULL CHECK(policy_version = 'assistant-readiness-v1'),
+          configuration_digest TEXT NOT NULL,
+          evaluated_at TEXT NOT NULL,
+          FOREIGN KEY(company_id, workspace_id) REFERENCES companies(id, workspace_id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_assistant_readiness_company_connection_evaluated
+          ON assistant_readiness_assessments(workspace_id, company_id, whatsapp_connection_id, evaluated_at DESC, id DESC);
+      `);
+    },
+  },
+  { id:31,name:"0031_company_default_assistants",checksumSource:"one-default-assistant-per-company|profile-ownership|versioned-assignment",apply(database):void{database.exec(`CREATE TABLE company_default_assistants(workspace_id INTEGER NOT NULL,company_id INTEGER PRIMARY KEY,assistant_profile_id TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>0),assigned_at TEXT NOT NULL,updated_at TEXT NOT NULL,assigned_by_actor_id TEXT,source TEXT,FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,FOREIGN KEY(company_id,workspace_id) REFERENCES companies(id,workspace_id) ON DELETE CASCADE,FOREIGN KEY(assistant_profile_id) REFERENCES assistant_profiles(id) ON DELETE RESTRICT);CREATE INDEX idx_company_default_assistants_workspace_company ON company_default_assistants(workspace_id,company_id);`);}},
+  { id:32,name:"0032_execution_snapshot_json",checksumSource:"execution-snapshot-v1|legacy-null-compatible",apply(database):void{database.exec("ALTER TABLE assistant_execution_records ADD COLUMN execution_snapshot_json TEXT;");}},
+  { id:33,name:"0033_channel_execution_requests",checksumSource:"durable-channel-execution-request-v1|event-idempotency|leased-recovery",apply(database):void{database.exec(`CREATE TABLE channel_execution_requests(id TEXT PRIMARY KEY,channel_provider_event_id TEXT NOT NULL UNIQUE REFERENCES channel_provider_events(id) ON DELETE CASCADE,state TEXT NOT NULL CHECK(state IN ('pending','leased','completed','failed','unsupported')),snapshot_json TEXT NOT NULL,lease_owner TEXT,lease_expires_at TEXT,outcome TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,CHECK((lease_owner IS NULL AND lease_expires_at IS NULL) OR (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)));CREATE INDEX idx_channel_execution_requests_ready ON channel_execution_requests(state,created_at,id);CREATE INDEX idx_channel_execution_requests_lease ON channel_execution_requests(state,lease_expires_at,id);`);}},
+  { id:34,name:"0034_outbound_delivery_attempt_outcomes",checksumSource:"outbound-delivery-append-only-attempt-telemetry|atomic-lease-settlement",apply(database):void{database.exec(`CREATE TABLE outbound_delivery_attempts(id TEXT PRIMARY KEY,outbound_delivery_id TEXT NOT NULL REFERENCES outbound_deliveries(id) ON DELETE CASCADE,attempt_number INTEGER NOT NULL CHECK(attempt_number>0),outcome TEXT NOT NULL CHECK(outcome IN ('accepted','retryable','permanent_failure')),safe_error_category TEXT,occurred_at TEXT NOT NULL,UNIQUE(outbound_delivery_id,attempt_number));CREATE INDEX idx_outbound_delivery_attempts_delivery ON outbound_delivery_attempts(outbound_delivery_id,attempt_number);`);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

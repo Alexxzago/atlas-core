@@ -27,6 +27,8 @@ interface ContextualAssistantControllers {
   preview: (context: WorkspaceContext) => RequestHandler;
   execution?: (context: WorkspaceContext) => RequestHandler;
 }
+interface ContextualAssistantReadinessControllers { get: (context: WorkspaceContext) => RequestHandler; refresh: (context: WorkspaceContext) => RequestHandler; }
+interface ContextualDefaultAssistantControllers { get:(context:WorkspaceContext)=>RequestHandler; put:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler; }
 
 interface ContextualWebChatConnectionControllers {
   list: (context: WorkspaceContext) => RequestHandler;
@@ -49,6 +51,7 @@ interface ContextualConversationReadControllers {
   list: (context: WorkspaceContext) => RequestHandler;
   get: (context: WorkspaceContext) => RequestHandler;
 }
+interface ContextualConversationControlControllers { takeover: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; release: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; resolve: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; }
 
 interface AuthorizedCompanyDependencies {
   authentication: AuthenticationService;
@@ -58,20 +61,29 @@ interface AuthorizedCompanyDependencies {
   controllers: ContextualControllers;
   companyCoreControllers?: CompanyCoreControllers;
   assistantControllers: ContextualAssistantControllers;
+  assistantReadinessControllers?: ContextualAssistantReadinessControllers;
+  defaultAssistantControllers?: ContextualDefaultAssistantControllers;
   webChatConnectionControllers?: ContextualWebChatConnectionControllers;
   whatsAppConnectionControllers?: ContextualWhatsAppConnectionControllers;
   knowledgeControllers?: Record<string, (context: WorkspaceContext, actor: ActorContext) => RequestHandler>;
   conversationMessageController?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
   conversationReadControllers?: ContextualConversationReadControllers;
+  conversationControlControllers?: ContextualConversationControlControllers;
   pdfBodyParser?: RequestHandler;
 }
 
 let productionConversationMessageController: ((context: WorkspaceContext, actor: ActorContext) => RequestHandler) | null = null;
 let productionConversationReadControllers: ContextualConversationReadControllers | null = null;
+let productionConversationControlControllers: ContextualConversationControlControllers | null = null;
 let productionCompanyCoreControllers: CompanyCoreControllers | null = null;
+let productionAssistantReadinessControllers: ContextualAssistantReadinessControllers | null = null;
+let productionDefaultAssistantControllers: ContextualDefaultAssistantControllers | null = null;
 export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
 export function configureProductionConversationReadControllers(controllers: ContextualConversationReadControllers): void { productionConversationReadControllers = controllers; }
+export function configureProductionConversationControlControllers(controllers: ContextualConversationControlControllers): void { productionConversationControlControllers = controllers; }
 export function configureProductionCompanyCoreControllers(controllers: CompanyCoreControllers): void { productionCompanyCoreControllers = controllers; }
+export function configureProductionAssistantReadinessControllers(controllers: ContextualAssistantReadinessControllers): void { productionAssistantReadinessControllers = controllers; }
+export function configureProductionDefaultAssistantControllers(controllers: ContextualDefaultAssistantControllers): void { productionDefaultAssistantControllers = controllers; }
 
 function rawCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -154,6 +166,13 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   router.patch("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId", authorize("company:manage", true, dependencies.assistantControllers.update));
   router.post("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/transitions", authorize("company:manage", true, dependencies.assistantControllers.transition));
   router.post("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/preview", authorize("assistant:preview", true, dependencies.assistantControllers.preview));
+  const readiness = dependencies.assistantReadinessControllers ?? productionAssistantReadinessControllers;
+  if (readiness) {
+    router.get("/:workspaceId/companies/:companyId/assistant/readiness", authorize("company:read", false, readiness.get));
+    router.post("/:workspaceId/companies/:companyId/assistant/readiness/refresh", authorize("company:manage", true, readiness.refresh));
+  }
+  const defaults=dependencies.defaultAssistantControllers??productionDefaultAssistantControllers;
+  if(defaults){router.get("/:workspaceId/companies/:companyId/assistant/default",authorize("company:read",false,defaults.get));router.put("/:workspaceId/companies/:companyId/assistant/default",authorize("company:manage",true,defaults.put));}
   const operationalJson = json({ type: "application/json", limit: 8 * 1024 });
   const operationalExecution = dependencies.assistantControllers.execution ? authorize("chat:use", true, (context) => (req, res, next) => {
     if (!req.is("application/json")) {
@@ -177,6 +196,12 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   if (conversationReads) {
     router.get("/:workspaceId/companies/:companyId/conversations", authorize("company:read", false, conversationReads.list));
     router.get("/:workspaceId/companies/:companyId/conversations/:conversationId", authorize("company:read", false, conversationReads.get));
+  }
+  const conversationControls = dependencies.conversationControlControllers ?? productionConversationControlControllers;
+  if (conversationControls) {
+    router.post("/:workspaceId/companies/:companyId/conversations/:conversationId/takeover", authorize("conversation:manage", true, conversationControls.takeover));
+    router.post("/:workspaceId/companies/:companyId/conversations/:conversationId/release", authorize("conversation:manage", true, conversationControls.release));
+    router.post("/:workspaceId/companies/:companyId/conversations/:conversationId/resolve", authorize("conversation:manage", true, conversationControls.resolve));
   }
   const webChat = dependencies.webChatConnectionControllers;
   if (webChat) {

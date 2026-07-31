@@ -1,17 +1,23 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Clock } from "../../identity/application/ports.js";
 import type { Company } from "../../types/company.js";
 import type { CompanyKnowledgeVersion } from "../../knowledge/domain/knowledge.js";
 import { AnswerGenerationUnavailableError, buildAssistantExecution, type AssistantConversationHistoryEntry, type AssistantExecutionResult } from "../application/assistantExecution.js";
 import type { AssistantExecutionPort } from "../application/assistantExecutionPort.js";
 import type { AssistantExecutionRecordRepositoryPort } from "../application/operationalAssistantRuntime.js";
-import { assistantExecutionRecordId, createProfileRuntimeSnapshot, createPublishedKnowledgeSnapshotReference, type AssistantExecutionRecord, type AssistantRuntimePurpose } from "../domain/operationalAssistantRuntime.js";
+import { assistantExecutionRecordId, createProfileRuntimeSnapshot, createPublishedKnowledgeSnapshotReference, type AssistantExecutionRecord, type AssistantRuntimePurpose, type ImmutableExecutionSnapshot } from "../domain/operationalAssistantRuntime.js";
 import type { AssistantProfile } from "../domain/assistantProfile.js";
 
 export interface OperationalAssistantRuntimeContext {
   readonly purpose: AssistantRuntimePurpose;
   readonly provider: string;
   readonly fallbackOnUnavailable: boolean;
+  readonly snapshotContext?: {
+    readonly whatsAppConnectionId?: string;
+    readonly whatsAppPhoneNumberId?: string;
+    readonly conversationId?: string;
+    readonly channelProvider?: string;
+  };
 }
 
 export interface OperationalAssistantRuntimeResult {
@@ -72,6 +78,7 @@ export class OperationalAssistantRuntime {
       profileId: profile.id,
       profileSnapshot: createProfileRuntimeSnapshot(profile),
       knowledgeSnapshot: createPublishedKnowledgeSnapshotReference(knowledge),
+      executionSnapshot: snapshot(company,profile,knowledge,context,startedAt),
       provider: providerName(context.provider),
       purpose: context.purpose,
       state: "started",
@@ -97,6 +104,31 @@ export class OperationalAssistantRuntime {
   private persistCompletion(record: AssistantExecutionRecord): void {
     if (!this.records.complete(record, "started")) throw new Error("Assistant execution record state changed.");
   }
+}
+function snapshot(company: Company, profile: AssistantProfile, knowledge: CompanyKnowledgeVersion, context: OperationalAssistantRuntimeContext, createdAt: string): ImmutableExecutionSnapshot {
+  const value = {
+    version: "execution-snapshot-v1" as const,
+    workspaceId: company.workspaceId,
+    companyId: company.id,
+    assistantIdentifier: "default" as const,
+    assistantProfileId: profile.id,
+    assistantProfileStatus: profile.status,
+    knowledgeVersionId: knowledge.id,
+    whatsAppConnectionId: context.snapshotContext?.whatsAppConnectionId ?? null,
+    whatsAppPhoneNumberId: context.snapshotContext?.whatsAppPhoneNumberId ?? null,
+    conversationId: context.snapshotContext?.conversationId ?? null,
+    channelProvider: context.snapshotContext?.channelProvider ?? null,
+    executionPolicyVersion: "assistant-profile-execution-v1" as const,
+    safetyPolicyVersion: "assistant-safety-v1" as const,
+    providerModel: providerName(context.provider),
+    runtimeVersion: "operational-runtime-v1" as const,
+    configurationDigest: "",
+    createdAt,
+  };
+  return Object.freeze({
+    ...value,
+    configurationDigest: createHash("sha256").update(JSON.stringify(value)).digest("hex"),
+  });
 }
 
 function providerName(value: string): string {

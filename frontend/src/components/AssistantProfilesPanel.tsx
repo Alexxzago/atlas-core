@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { atlasApi } from "../api/atlasApi";
 import { useI18n } from "../i18n/I18nContext";
 import { markReadyDisabled, missingReadyFields, visibleTransitions, type FormMode, type ReadyAdvisoryField } from "../state/authenticatedPortalState";
-import type { AssistantProfile, AssistantProfileStatus, CreateAssistantProfileInput, Permission, UpdateAssistantProfileInput } from "../types/api";
+import type { AssistantProfile, AssistantProfileStatus, CreateAssistantProfileInput, DefaultAssistantAssignment, Permission, UpdateAssistantProfileInput } from "../types/api";
 import { AssistantProfileForm } from "./AssistantProfileForm";
 import { AssistantStatusBadge } from "./AssistantStatusBadge";
 import { AssistantPreviewPanel } from "./AssistantPreviewPanel";
@@ -41,6 +42,8 @@ const fieldKeys: Record<ReadyAdvisoryField, Parameters<ReturnType<typeof useI18n
 
 export function AssistantProfilesPanel(props: Props): React.JSX.Element {
   const { t, formatDate } = useI18n(); const [confirmArchive, setConfirmArchive] = useState<AssistantProfile | null>(null);
+  const [defaultAssistant,setDefaultAssistant]=useState<DefaultAssistantAssignment|null>(null);
+  useEffect(()=>{if(!props.workspaceId||!props.companyId)return;void atlasApi.getDefaultAssistant(props.workspaceId,props.companyId).then(setDefaultAssistant).catch(()=>setDefaultAssistant(null));},[props.workspaceId,props.companyId,props.profiles]);
   const selected = props.selectedProfile;
   const missing = selected ? missingReadyFields(selected) : [];
   const transition = (profile: AssistantProfile, target: AssistantProfileStatus): void => {
@@ -66,11 +69,11 @@ export function AssistantProfilesPanel(props: Props): React.JSX.Element {
     <div className="assistant-profile-layout">
       {props.profiles.length > 0 && <div className="assistant-profile-list" aria-label={t("profiles.listLabel")}>{props.profiles.map((profile) => <button type="button" key={profile.id} className={`assistant-profile-item${selected?.id === profile.id ? " is-selected" : ""}`} aria-current={selected?.id === profile.id ? "true" : undefined} onClick={() => props.onSelectProfile(profile.id)}><span><strong>{profile.name}</strong><small>{t(`profiles.tone.${profile.tone}`)} · {profile.assistantLanguage.toUpperCase()}</small></span><AssistantStatusBadge status={profile.status}/></button>)}</div>}
       {selected && <div className="assistant-profile-detail">
-        <div className="workspace-title-row"><div><h3>{selected.name}</h3><p>{t("profiles.updatedAt", { date: formatDate(selected.updatedAt) })}</p></div><AssistantStatusBadge status={selected.status}/></div>
+        <div className="workspace-title-row"><div><h3>{selected.name}</h3><p>{t("profiles.updatedAt", { date: formatDate(selected.updatedAt) })}</p>{defaultAssistant?.assistantProfileId===selected.id&&<p role="status">Default Assistant</p>}</div><AssistantStatusBadge status={selected.status}/></div>
         {props.formMode === "edit" ? <AssistantProfileForm mode="edit" profile={selected} submitting={props.submitting} onSubmit={props.onSubmitForm} onCancel={props.onCloseForm}/> : <>
           <dl className="assistant-profile-summary"><div><dt>{t("profiles.field.businessRole")}</dt><dd>{selected.businessRole ?? t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.objective")}</dt><dd>{selected.objective ?? t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.audience")}</dt><dd>{selected.audience ?? t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.language")}</dt><dd>{selected.assistantLanguage.toUpperCase()}</dd></div><div><dt>{t("profiles.field.tone")}</dt><dd>{t(`profiles.tone.${selected.tone}`)}</dd></div><div><dt>{t("profiles.field.welcomeMessage")}</dt><dd>{selected.welcomeMessage ?? t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.fallbackMessage")}</dt><dd>{selected.fallbackMessage}</dd></div></dl>
           {missing.length > 0 && <div className="inline-message inline-message--warning" role="status"><strong>{t("profiles.readyWarning")}</strong><ul>{missing.map((field) => <li key={field}>{t(fieldKeys[field])}</li>)}</ul></div>}
-          <div className="action-row"><button className="button button--secondary" type="button" disabled={selected.status === "archived" || props.submitting} onClick={props.onOpenEdit}>{t("common.edit")}</button>{visibleTransitions(selected.status).map((target) => <button key={target} className={`button ${target === "archived" ? "button--danger-quiet" : target === "ready" && missing.length === 0 ? "button--primary" : "button--secondary"}`} type="button" disabled={target === "ready" ? markReadyDisabled(selected, props.transitionTarget !== null) : props.transitionTarget !== null} onClick={() => transition(selected, target)}>{props.transitionTarget === target ? t("profiles.transitioning") : transitionLabel(target)}</button>)}</div>
+           <div className="action-row"><button className="button button--secondary" type="button" disabled={selected.status === "archived" || props.submitting} onClick={props.onOpenEdit}>{t("common.edit")}</button>{props.workspaceId&&props.companyId&&selected.status!=="archived"&&<button className="button button--secondary" type="button" onClick={()=>void atlasApi.setDefaultAssistant(props.csrf,props.workspaceId!,props.companyId!,selected.id,defaultAssistant?.version).then(setDefaultAssistant)}>Set default</button>}{visibleTransitions(selected.status).map((target) => <button key={target} className={`button ${target === "archived" ? "button--danger-quiet" : target === "ready" && missing.length === 0 ? "button--primary" : "button--secondary"}`} type="button" disabled={target === "ready" ? markReadyDisabled(selected, props.transitionTarget !== null) : props.transitionTarget !== null} onClick={() => transition(selected, target)}>{props.transitionTarget === target ? t("profiles.transitioning") : transitionLabel(target)}</button>)}</div>
            {props.workspaceId && props.companyId && props.companyName && <AssistantPreviewPanel csrf={props.csrf} workspaceId={props.workspaceId} companyId={props.companyId} companyName={props.companyName} profile={selected} allowed={previewAllowed(props.workspaceRole)}/>}
            {props.workspaceId && props.companyId && props.companyName && <OperationalAssistantExecutionPanel csrf={props.csrf} workspaceId={props.workspaceId} companyId={props.companyId} companyName={props.companyName} profile={selected} capabilities={props.capabilities}/>}
         </>}

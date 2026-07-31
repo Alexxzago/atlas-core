@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
 import { ApiError, atlasApi } from "../api/atlasApi";
 import { useI18n } from "../i18n/I18nContext";
-import type { AssistantProfile, CompanyStatus, Permission, WhatsAppConnection, WhatsAppConnectionOperationalStatus } from "../types/api";
+import type { AssistantProfile, AssistantReadinessAssessment, CompanyStatus, Permission, WhatsAppConnection, WhatsAppConnectionOperationalStatus } from "../types/api";
 
-interface Props { readonly csrf: string; readonly workspaceId: string | null; readonly companyId: number | null; readonly companyStatus: CompanyStatus | null; readonly profiles: readonly AssistantProfile[]; readonly capabilities: readonly Permission[]; }
+interface Props { readonly csrf: string; readonly workspaceId: string | null; readonly companyId: number | null; readonly companyStatus?: CompanyStatus | null; readonly profiles: readonly AssistantProfile[]; readonly capabilities: readonly Permission[]; }
 
 function errorMessage(error: unknown): string { return error instanceof ApiError ? error.message : "WhatsApp setup is temporarily unavailable."; }
 
-export function WhatsAppOnboardingPanel({ csrf, workspaceId, companyId, companyStatus, profiles, capabilities }: Props): React.JSX.Element | null {
+export function WhatsAppOnboardingPanel({ csrf, workspaceId, companyId, profiles, capabilities }: Props): React.JSX.Element | null {
   const { t, formatDate } = useI18n();
   const [connections, setConnections] = useState<readonly WhatsAppConnection[]>([]);
   const [connectionId, setConnectionId] = useState("");
   const [status, setStatus] = useState<WhatsAppConnectionOperationalStatus | null>(null);
+  const [readiness, setReadiness] = useState<AssistantReadinessAssessment | null>(null);
   const [profileId, setProfileId] = useState("");
   const [phoneNumberId, setPhoneNumberId] = useState("");
   const [businessAccountId, setBusinessAccountId] = useState("");
@@ -22,19 +23,21 @@ export function WhatsAppOnboardingPanel({ csrf, workspaceId, companyId, companyS
   const [notice, setNotice] = useState<string | null>(null);
   const readable = capabilities.includes("company:read"), manageable = capabilities.includes("company:manage");
   const readyProfiles = profiles.filter((profile) => profile.status === "ready");
+  const readinessValue = readiness && Array.isArray(readiness.blockers) ? readiness : null;
   const activeConnection = connections.find((connection) => connection.id === connectionId) ?? null;
 
   const loadStatus = async (id: string): Promise<void> => {
     if (!workspaceId || !companyId) return;
     setStatus(await atlasApi.getWhatsAppConnectionStatus(workspaceId, companyId, id));
   };
+  const refreshReadiness = async (): Promise<void> => { if (!workspaceId || !companyId) return; setReadiness(await atlasApi.refreshAssistantReadiness(csrf, workspaceId, companyId)); };
 
   useEffect(() => {
     let current = true;
-    setConnections([]); setConnectionId(""); setStatus(null); setError(null); setNotice(null);
+    setConnections([]); setConnectionId(""); setStatus(null); setReadiness(null); setError(null); setNotice(null);
     if (!workspaceId || !companyId || !readable) return () => { current = false; };
     setLoading(true);
-    void atlasApi.listWhatsAppConnections(workspaceId, companyId).then((value) => { if (current) setConnections(value); }).catch((cause: unknown) => { if (current) setError(errorMessage(cause)); }).finally(() => { if (current) setLoading(false); });
+    void Promise.all([atlasApi.listWhatsAppConnections(workspaceId, companyId), atlasApi.getAssistantReadiness(workspaceId, companyId).catch(() => atlasApi.refreshAssistantReadiness(csrf, workspaceId, companyId))]).then(([value, assessment]) => { if (current) { setConnections(value); setReadiness(Array.isArray(assessment.blockers) ? assessment : null); } }).catch((cause: unknown) => { if (current) setError(errorMessage(cause)); }).finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
   }, [workspaceId, companyId, readable]);
 
@@ -49,20 +52,20 @@ export function WhatsAppOnboardingPanel({ csrf, workspaceId, companyId, companyS
     setPending(true); setError(null); setNotice(null);
     try {
       const created = await atlasApi.createWhatsAppConnection(csrf, workspaceId, companyId, { assistantProfileId: profileId, phoneNumberId: phoneNumberId.trim(), whatsappBusinessAccountId: businessAccountId.trim() });
-      setConnections((current) => [...current, created]); setConnectionId(created.id); setProfileId(""); setPhoneNumberId(""); setBusinessAccountId(""); await loadStatus(created.id); setNotice(t("whatsapp.connectionCreated"));
+      setConnections((current) => [...current, created]); setConnectionId(created.id); setProfileId(""); setPhoneNumberId(""); setBusinessAccountId(""); await loadStatus(created.id); await refreshReadiness(); setNotice(t("whatsapp.connectionCreated"));
     } catch (cause: unknown) { setError(errorMessage(cause)); } finally { setPending(false); }
   };
   const configureCredentials = async (): Promise<void> => {
     if (!workspaceId || !companyId || !connectionId || !accessToken.trim() || pending) return;
     setPending(true); setError(null); setNotice(null);
-    try { setStatus(await atlasApi.configureWhatsAppCredentials(csrf, workspaceId, companyId, connectionId, accessToken.trim())); setAccessToken(""); setNotice(t("whatsapp.credentialsSaved")); } catch (cause: unknown) { setError(errorMessage(cause)); } finally { setPending(false); }
+    try { setStatus(await atlasApi.configureWhatsAppCredentials(csrf, workspaceId, companyId, connectionId, accessToken.trim())); await refreshReadiness(); setAccessToken(""); setNotice(t("whatsapp.credentialsSaved")); } catch (cause: unknown) { setError(errorMessage(cause)); } finally { setPending(false); }
   };
   const operation = async (action: "validate" | "activate" | "deactivate"): Promise<void> => {
     if (!workspaceId || !companyId || !connectionId || pending) return;
     setPending(true); setError(null); setNotice(null);
     try {
       const updated = action === "validate" ? await atlasApi.validateWhatsAppConnection(csrf, workspaceId, companyId, connectionId) : action === "activate" ? await atlasApi.activateWhatsAppConnection(csrf, workspaceId, companyId, connectionId) : await atlasApi.deactivateWhatsAppConnection(csrf, workspaceId, companyId, connectionId);
-      setStatus(updated); setConnections((current) => current.map((connection) => connection.id === updated.connection.id ? updated.connection : connection)); setNotice(t(action === "validate" ? "whatsapp.validated" : action === "activate" ? "whatsapp.activated" : "whatsapp.deactivated"));
+      setStatus(updated); setConnections((current) => current.map((connection) => connection.id === updated.connection.id ? updated.connection : connection)); await refreshReadiness(); setNotice(t(action === "validate" ? "whatsapp.validated" : action === "activate" ? "whatsapp.activated" : "whatsapp.deactivated"));
     } catch (cause: unknown) { setError(errorMessage(cause)); } finally { setPending(false); }
   };
 
@@ -74,14 +77,15 @@ export function WhatsAppOnboardingPanel({ csrf, workspaceId, companyId, companyS
     {error && <div className="inline-message inline-message--error" role="alert">{error}</div>}
     {notice && <div className="inline-message inline-message--success" role="status">{notice}</div>}
     <ol className="whatsapp-steps">
-      <li className={companyStatus === "ready" ? "is-complete" : ""}><strong>{t("whatsapp.step.company")}</strong><span>{companyStatus === "ready" ? t("whatsapp.companyReady") : t("whatsapp.companyNotReady")}</span></li>
-      <li className={readyProfiles.length > 0 ? "is-complete" : ""}><strong>{t("whatsapp.step.profile")}</strong><span>{readyProfiles.length > 0 ? t("whatsapp.profileReady") : t("whatsapp.profileRequired")}</span></li>
+       <li className={readinessValue?.status === "ready" ? "is-complete" : ""}><strong>{t("whatsapp.step.company")}</strong><span>{readinessValue?.status === "ready" ? t("whatsapp.companyReady") : t("whatsapp.companyNotReady")}</span></li>
+       <li className={readinessValue?.assistantProfileId ? "is-complete" : ""}><strong>{t("whatsapp.step.profile")}</strong><span>{readinessValue?.assistantProfileId ? t("whatsapp.profileReady") : t("whatsapp.profileRequired")}</span></li>
       <li className={activeConnection ? "is-complete" : ""}><strong>{t("whatsapp.step.configuration")}</strong><span>{activeConnection ? t("whatsapp.connectionSelected") : t("whatsapp.connectionRequired")}</span></li>
       <li className={status?.credentialsConfigured ? "is-complete" : ""}><strong>{t("whatsapp.step.credentials")}</strong><span>{status?.credentialsConfigured ? t("whatsapp.credentialsConfigured") : t("whatsapp.credentialsRequired")}</span></li>
       <li className={validationValid ? "is-complete" : ""}><strong>{t("whatsapp.step.validation")}</strong><span>{validationValid ? t("whatsapp.validationValid") : t("whatsapp.validationRequired")}</span></li>
       <li className={status?.connection.status === "active" ? "is-complete" : ""}><strong>{t("whatsapp.step.activation")}</strong><span>{status?.connection.status === "active" ? t("whatsapp.active") : t("whatsapp.inactive")}</span></li>
       <li><strong>{t("whatsapp.step.status")}</strong><span>{status ? t(status.healthState === "healthy" ? "whatsapp.health.healthy" : status.healthState === "degraded" ? "whatsapp.health.degraded" : "whatsapp.health.inactive") : t("whatsapp.statusUnavailable")}</span></li>
-    </ol>
+     </ol>
+     {readinessValue && <p role="status">{readinessValue.status === "ready" ? "Ready" : `Blocked: ${readinessValue.blockers.join(", ")}`}</p>}
     {manageable && <div className="whatsapp-workflow">
       <label className="form-field"><span>{t("whatsapp.connectionSelect")}</span><select value={connectionId} onChange={(event) => void selectConnection(event.target.value)} disabled={loading || pending}><option value="">{t("whatsapp.connectionPlaceholder")}</option>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.phoneNumberId}</option>)}</select></label>
       {!activeConnection && <div className="whatsapp-create"><label className="form-field"><span>{t("whatsapp.profileSelect")}</span><select value={profileId} onChange={(event) => setProfileId(event.target.value)} disabled={pending}><option value="">{t("whatsapp.profilePlaceholder")}</option>{readyProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label><label className="form-field"><span>{t("whatsapp.phoneNumberId")}</span><input value={phoneNumberId} onChange={(event) => setPhoneNumberId(event.target.value)} disabled={pending}/></label><label className="form-field"><span>{t("whatsapp.businessAccountId")}</span><input value={businessAccountId} onChange={(event) => setBusinessAccountId(event.target.value)} disabled={pending}/></label><button className="button button--secondary" type="button" onClick={() => void create()} disabled={!profileId || !phoneNumberId.trim() || !businessAccountId.trim() || pending}>{t("whatsapp.createConnection")}</button></div>}

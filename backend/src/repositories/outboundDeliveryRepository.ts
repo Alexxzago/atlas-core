@@ -45,4 +45,15 @@ export class OutboundDeliveryRepository implements OutboundDeliveryRepositoryPor
     const result = this.db.prepare("UPDATE outbound_deliveries SET state='retryable',next_attempt_at=?,lease_owner=NULL,lease_expires_at=NULL,safe_error_category=?,updated_at=? WHERE id=? AND state='leased' AND lease_owner=?").run(nextAttemptAt, safeErrorCategory, updatedAt, id, owner);
     return result.changes === 1 ? this.findById(id) : null;
   }
+  public settleLease(id: OutboundDeliveryId, owner: string, outcome: "accepted" | "retryable" | "permanent_failure", nextAttemptAt: string | null, safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null {
+    this.db.exec("BEGIN IMMEDIATE;");
+    try {
+      const current = this.db.prepare("SELECT attempt_count FROM outbound_deliveries WHERE id=? AND state='leased' AND lease_owner=?").get(id, owner) as { attempt_count: number } | undefined;
+      if (!current) { this.db.exec("COMMIT;"); return null; }
+      const result = this.db.prepare("UPDATE outbound_deliveries SET state=?,next_attempt_at=COALESCE(?,next_attempt_at),lease_owner=NULL,lease_expires_at=NULL,safe_error_category=?,updated_at=? WHERE id=? AND state='leased' AND lease_owner=?").run(outcome, nextAttemptAt, safeErrorCategory, updatedAt, id, owner);
+      if (result.changes === 1) this.db.prepare("INSERT INTO outbound_delivery_attempts(id,outbound_delivery_id,attempt_number,outcome,safe_error_category,occurred_at) VALUES('oda_' || lower(hex(randomblob(16))),?,?,?,?,?)").run(id, current.attempt_count, outcome, safeErrorCategory, updatedAt);
+      this.db.exec("COMMIT;");
+      return result.changes === 1 ? this.findById(id) : null;
+    } catch (error: unknown) { if (this.db.isTransaction) this.db.exec("ROLLBACK;"); throw error; }
+  }
 }
