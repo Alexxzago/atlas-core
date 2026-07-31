@@ -11,7 +11,7 @@ import {
 
 interface CompanyUpdate {
   name?: string;
-  website?: string;
+  website?: string | null;
   phone?: string;
   email?: string;
 }
@@ -29,7 +29,7 @@ export class CompanyService {
 
   public create(context: WorkspaceContext, value: unknown): Company {
     const input = this.validateCreate(value);
-    if (this.companies.findByWebsite(context, input.website)) {
+    if (input.website !== null && this.companies.findByWebsite(context, input.website)) {
       throw new DuplicateWebsiteError("A company already uses this website.");
     }
     return this.companies.create(context, input);
@@ -38,8 +38,8 @@ export class CompanyService {
   public update(context: WorkspaceContext, companyIdValue: unknown, value: unknown): Company {
     const current = this.get(context, companyIdValue);
     const changes = this.validateUpdate(value);
-    const website = changes.website ?? current.website;
-    const websiteOwner = this.companies.findByWebsite(context, website);
+    const website = changes.website === undefined ? current.website : changes.website;
+    const websiteOwner = website === null ? null : this.companies.findByWebsite(context, website);
     if (websiteOwner && websiteOwner.id !== current.id) {
       throw new DuplicateWebsiteError("A company already uses this website.");
     }
@@ -64,7 +64,7 @@ export class CompanyService {
 
   private validateCreate(value: unknown): {
     name: string;
-    website: string;
+    website: string | null;
     phone?: string;
     email?: string;
   } {
@@ -74,9 +74,9 @@ export class CompanyService {
       throw new CompanyValidationError("Request contains unsupported fields.");
     }
     const name = requiredString(value.name, "Name");
-    const result: { name: string; website: string; phone?: string; email?: string } = {
+    const result: { name: string; website: string | null; phone?: string; email?: string } = {
       name,
-      website: normalizeWebsiteUrl(value.website),
+      website: value.website === undefined || value.website === null ? null : normalizeWebsiteUrl(value.website),
     };
     if (value.phone !== undefined) result.phone = optionalString(value.phone, "Phone");
     if (value.email !== undefined) result.email = optionalString(value.email, "Email");
@@ -93,7 +93,7 @@ export class CompanyService {
     }
     const result: CompanyUpdate = {};
     if (value.name !== undefined) result.name = requiredString(value.name, "Name");
-    if (value.website !== undefined) result.website = normalizeWebsiteUrl(value.website);
+    if (value.website !== undefined) result.website = value.website === null ? null : normalizeWebsiteUrl(value.website);
     if (value.phone !== undefined) result.phone = optionalString(value.phone, "Phone");
     if (value.email !== undefined) result.email = optionalString(value.email, "Email");
     return result;

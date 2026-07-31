@@ -45,6 +45,7 @@ test("Company value objects normalize valid values and reject invalid values", (
   assert.equal(companyName("  Atlas Realty "), "Atlas Realty");
   assert.equal(companySlug("  Atlas-Realty "), "atlas-realty");
   assert.equal(websiteUrl("https://atlas.example/path"), "https://atlas.example/path");
+  assert.equal(websiteUrl(null), null);
   assert.equal(companyTimezone("America/Argentina/Buenos_Aires"), "America/Argentina/Buenos_Aires");
   assert.equal(companyLocale("es-ar"), "es-AR");
   assert.throws(() => companyId(0));
@@ -54,6 +55,12 @@ test("Company value objects normalize valid values and reject invalid values", (
   assert.throws(() => websiteUrl("https://user:password@atlas.example"));
   assert.throws(() => companyTimezone("Not/A_Timezone"));
   assert.throws(() => companyLocale("not a locale"));
+});
+
+test("Company identity accepts an absent website", () => {
+  const company = createCompany({ id: 9, workspaceId: 2, identity: { name: "Offline Realty", slug: "offline-realty" }, createdAt });
+  assert.equal(company.website, null);
+  assert.equal(updateCompanyIdentity(company, { name: "Offline Realty", slug: "offline-realty", website: null }, changedAt).website, null);
 });
 
 test("Branding, operating locale and business hours validate their structural invariants", () => {

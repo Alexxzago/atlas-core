@@ -17,7 +17,8 @@ export function AuthenticatedCompanySelector(props: Props): React.JSX.Element {
   const { t } = useI18n();
   const create = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault(); const form = event.currentTarget; const data = new FormData(form);
-    const created = await props.onCreate({ name: String(data.get("name") ?? ""), website: String(data.get("website") ?? "") });
+    const website = String(data.get("website") ?? "").trim();
+    const created = await props.onCreate({ name: String(data.get("name") ?? ""), website: website || null });
     if (created) form.reset();
   };
   return <section className="authenticated-section company-context" aria-busy={props.loading}>
@@ -27,7 +28,7 @@ export function AuthenticatedCompanySelector(props: Props): React.JSX.Element {
       <h3>{t("companies.createTitle")}</h3>
       <fieldset disabled={props.creating}>
         <label className="form-field"><span>{t("companies.fields.name")}</span><input name="name" required placeholder={t("companies.placeholders.name")} /></label>
-        <label className="form-field"><span>{t("companies.fields.website")}</span><input name="website" type="url" required placeholder={t("companies.placeholders.website")} /></label>
+        <label className="form-field"><span>{t("companies.fields.website")} <small>{t("common.optional")}</small></span><input name="website" type="url" placeholder={t("companies.placeholders.website")} /></label>
         <button className="button button--primary">{props.creating ? t("common.saving") : t("companies.create")}</button>
       </fieldset>
     </form>}

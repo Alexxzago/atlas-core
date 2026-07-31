@@ -103,6 +103,26 @@ test("migration 26 rejects duplicate normalized legacy names without recording t
   db.close();
 });
 
+test("migration 27 makes Company websites nullable without losing related records", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys=ON;");
+  runMigrations(db, 26);
+  const workspace = db.prepare("SELECT id FROM workspaces WHERE key='default'").get() as { id: number };
+  db.prepare("INSERT INTO companies(workspace_id,name,website,status,created_at,slug,name_normalized,lifecycle_state,version,updated_at,lifecycle_changed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(workspace.id, "Legacy Company", "https://legacy.example", "ready", createdAt, "legacy-company", "legacy company", "draft", 1, createdAt, createdAt);
+  const company = db.prepare("SELECT id FROM companies").get() as { id: number };
+  db.prepare("INSERT INTO company_events(id,company_id,workspace_id,event_type,aggregate_version,event_sequence,occurred_at,payload_json) VALUES(?,?,?,?,?,?,?,?)").run("event-legacy", company.id, workspace.id, "CompanyCreated", 1, 1, createdAt, "{}");
+  runMigrations(db);
+  const migrated = db.prepare("SELECT website FROM companies WHERE id=?").get(company.id) as { website: string | null };
+  assert.equal(migrated.website, "https://legacy.example");
+  db.prepare("INSERT INTO companies(workspace_id,name,website,status,created_at,slug,name_normalized,lifecycle_state,version,updated_at,lifecycle_changed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(workspace.id, "No Website One", null, "processing", createdAt, "no-website-one", "no website one", "draft", 1, createdAt, createdAt);
+  db.prepare("INSERT INTO companies(workspace_id,name,website,status,created_at,slug,name_normalized,lifecycle_state,version,updated_at,lifecycle_changed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(workspace.id, "No Website Two", null, "processing", createdAt, "no-website-two", "no website two", "draft", 1, createdAt, createdAt);
+  assert.equal((db.prepare("SELECT COUNT(*) AS count FROM company_events WHERE company_id=?").get(company.id) as { count: number }).count, 1);
+  assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  runMigrations(db);
+  assert.equal((db.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=27").get() as { count: number }).count, 1);
+  db.close();
+});
+
 test("Company event foreign keys reject missing and tenant-mismatched references", () => {
   const db = createDatabase(":memory:"), workspaces = new WorkspaceRepository(db), first = workspaces.resolveDefault(), second = workspaces.createForSystemUse({ key: "other", name: "Other" });
   const context = createWorkspaceContext(first), repository = new CompanyDomainRepository(db), stored = company(801, first.id);

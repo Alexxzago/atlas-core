@@ -6,6 +6,7 @@ import { reconstructUser, type User, type UserId, type UserState } from "../iden
 interface UserRow {
   id: string;
   status: UserState["status"];
+  full_name: string | null;
   locale: UserState["locale"];
   created_at: string;
   updated_at: string;
@@ -47,6 +48,7 @@ function mapUser(row: UserRow, identities: AuthenticationIdentityRow[]): User {
   return reconstructUser({
     id: row.id,
     status: row.status,
+    fullName: row.full_name,
     locale: row.locale,
     authenticationIdentities: identities.map((identity) => ({
       id: identity.id,
@@ -66,7 +68,7 @@ export class UserRepository implements UserRepositoryPort {
 
   public findById(id: UserId): User | null {
     const row = this.db.prepare(`
-      SELECT id, status, locale, created_at, updated_at
+      SELECT id, status, full_name, locale, created_at, updated_at
       FROM users
       WHERE id = ?
     `).get(id) as UserRow | undefined;
@@ -75,7 +77,7 @@ export class UserRepository implements UserRepositoryPort {
 
   public findByNormalizedEmail(email: NormalizedEmail): User | null {
     const row = this.db.prepare(`
-      SELECT users.id, users.status, users.locale, users.created_at, users.updated_at
+      SELECT users.id, users.status, users.full_name, users.locale, users.created_at, users.updated_at
       FROM authentication_identities
       INNER JOIN users ON users.id = authentication_identities.user_id
       WHERE authentication_identities.normalized_email = ?
@@ -92,9 +94,9 @@ export class UserRepository implements UserRepositoryPort {
     try {
       if (ownsTransaction) this.db.exec("BEGIN IMMEDIATE;");
       this.db.prepare(`
-        INSERT INTO users (id, status, locale, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(user.id, user.status, user.locale, user.createdAt, user.updatedAt);
+        INSERT INTO users (id, status, full_name, locale, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(user.id, user.status, user.fullName, user.locale, user.createdAt, user.updatedAt);
       const insertIdentity = this.db.prepare(`
         INSERT INTO authentication_identities (
           id, user_id, email, normalized_email, email_verified, created_at, updated_at
@@ -126,9 +128,9 @@ export class UserRepository implements UserRepositoryPort {
       if (ownsTransaction) this.db.exec("BEGIN IMMEDIATE;");
       const updated = this.db.prepare(`
         UPDATE users
-        SET status = ?, locale = ?, updated_at = ?
+        SET status = ?, full_name = ?, locale = ?, updated_at = ?
         WHERE id = ?
-      `).run(user.status, user.locale, user.updatedAt, user.id);
+      `).run(user.status, user.fullName, user.locale, user.updatedAt, user.id);
       if (updated.changes === 0) {
         if (ownsTransaction) this.db.exec("ROLLBACK;");
         return null;

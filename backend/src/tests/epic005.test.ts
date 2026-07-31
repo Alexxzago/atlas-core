@@ -143,7 +143,7 @@ test("DELETE removes the company and cascades related knowledge", async () => {
   });
 });
 
-test("company-targeted onboarding updates the same company without creating another", async () => {
+test("company-targeted onboarding creates Knowledge without changing Company identity", async () => {
   await withApi(async ({ companies, knowledge, context, database, baseUrl }) => {
     const company = companies.create(context, { name: "Original", website: "https://old.test" });
     const response = await fetch(`${baseUrl}/companies/${company.id}/onboard`, {
@@ -156,7 +156,7 @@ test("company-targeted onboarding updates the same company without creating anot
     assert.equal(result.companyId, company.id);
     assert.equal(result.status, "ready");
     assert.equal(companies.list(context).length, 1);
-    assert.equal(companies.findById(context, company.id)?.website, "https://new.test");
+    assert.equal(companies.findById(context, company.id)?.website, "https://old.test");
     assert.ok(knowledge.load(context, company.id));
   });
 });

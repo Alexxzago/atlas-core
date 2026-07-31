@@ -8,6 +8,7 @@ import {
   CompanyHttpValidationError,
   parseCompanyId,
   parseCreateCompanyRequest,
+  parseCreateOnboardingCompanyRequest,
   parseListCompaniesQuery,
   parseSlug,
   parseUpdateBrandingRequest,
@@ -21,6 +22,7 @@ import {
 export interface CompanyCoreControllers {
   readonly list: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
   readonly create: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
+  readonly createOnboarding: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
   readonly get: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
   readonly getBySlug: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
   readonly updateIdentity: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
@@ -46,6 +48,13 @@ export function createCompanyCoreControllers(service: CompanyApplicationService)
       try {
         const request = parseCreateCompanyRequest(req.body);
         const result = service.createCompany(context, { ...request, id: randomInt(1, 2_147_483_647), actorId: actor.userId });
+        if (result.status === "success") res.status(201).json({ data: toCompanyResponse(result.company) }); else respondApplication(res, result);
+      } catch (error: unknown) { respondError(res, error); }
+    },
+    createOnboarding: (context, actor) => (req, res) => {
+      try {
+        const request = parseCreateOnboardingCompanyRequest(req.body);
+        const result = service.createOnboardingCompany(context, { ...request, actorId: actor.userId });
         if (result.status === "success") res.status(201).json({ data: toCompanyResponse(result.company) }); else respondApplication(res, result);
       } catch (error: unknown) { respondError(res, error); }
     },

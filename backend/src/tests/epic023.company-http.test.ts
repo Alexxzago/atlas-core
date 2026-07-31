@@ -53,6 +53,9 @@ test("Company Core HTTP API validates DTOs, maps application outcomes, and retur
     assert.equal(createdBody.data.normalizedName, undefined);
     assert.equal(typeof createdBody.data.id, "number");
     assert.equal(createdBody.data.slug, "atlas-realty");
+    const websiteLess = await fetch(base, { method: "POST", headers: manageHeaders, body: JSON.stringify({ identity: { name: "Offline Realty", slug: "offline-realty" } }) });
+    assert.equal(websiteLess.status, 201);
+    assert.equal((await websiteLess.json() as { data: { website: string | null } }).data.website, null);
     assert.equal((await fetch(`${base}/slug/atlas-realty`, { headers: { cookie: "atlas=read" } })).status, 200);
     const companyId = createdBody.data.id as number;
     assert.equal((await fetch(`${base}/${companyId}/identity`, { method: "PATCH", headers: manageHeaders, body: JSON.stringify({ expectedVersion: 1, identity: { name: "Atlas Updated", slug: "atlas-updated", website: "https://atlas.example" } }) })).status, 200);

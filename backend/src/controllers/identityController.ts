@@ -1,6 +1,6 @@
 import type { RequestHandler } from "express";
 import { InvalidEmailAddressError } from "../identity/domain/email.js";
-import type { Locale } from "../identity/domain/user.js";
+import { InvalidIdentityStateError, type Locale } from "../identity/domain/user.js";
 import type { RegistrationService } from "../identity/services/registrationService.js";
 import type { ResendEmailVerificationService } from "../identity/services/resendEmailVerificationService.js";
 import type { VerifyEmailService } from "../identity/services/verifyEmailService.js";
@@ -9,16 +9,18 @@ import { PasswordPolicyError } from "../identity/domain/authentication.js";
 import type { RequestOriginPolicy } from "../identity/infrastructure/requestOriginPolicy.js";
 import { EffectiveRequestAuthorityResolver } from "../identity/infrastructure/requestOriginPolicy.js";
 import { PlatformBootstrapConflict, PlatformBootstrapError, type PlatformBootstrapService } from "../identity/services/platformBootstrapService.js";
+import { PasswordResetError, type PasswordResetService } from "../identity/services/passwordResetService.js";
 
-function registrationInput(body: unknown): { email: string; locale: Locale } {
+function registrationInput(body: unknown): { fullName: string; email: string; password: string; confirmation: string; locale: Locale } {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new InvalidEmailAddressError();
   const record = body as Record<string, unknown>;
-  if (Object.keys(record).some((key) => key !== "email" && key !== "locale")
-    || typeof record.email !== "string" || (record.locale !== "en" && record.locale !== "es")) {
+  if (Object.keys(record).some((key) => key !== "fullName" && key !== "email" && key !== "password" && key !== "confirmation" && key !== "locale")
+    || typeof record.fullName !== "string" || typeof record.email !== "string" || typeof record.password !== "string" || typeof record.confirmation !== "string" || (record.locale !== "en" && record.locale !== "es")) {
     throw new InvalidEmailAddressError();
   }
-  return { email: record.email, locale: record.locale };
+  return { fullName: record.fullName, email: record.email, password: record.password, confirmation: record.confirmation, locale: record.locale };
 }
+function verificationRequestInput(body: unknown): { email: string; locale: Locale } { const input = record(body); if (Object.keys(input).some((key) => key !== "email" && key !== "locale") || typeof input.email !== "string" || (input.locale !== "en" && input.locale !== "es")) throw new InvalidEmailAddressError(); return { email: input.email, locale: input.locale }; }
 
 function record(body:unknown):Record<string,unknown>{if(!body||typeof body!=="object"||Array.isArray(body))throw new AuthenticationFailure();return body as Record<string,unknown>;}
 function stringField(body:Record<string,unknown>,name:string):string{const value=body[name];if(typeof value!=="string")throw new AuthenticationFailure();return value;}
@@ -47,10 +49,10 @@ export function createRegistrationController(service: RegistrationService): Requ
   return async (request, response) => {
     try {
       const input = registrationInput(request.body);
-      await service.register(input.email, input.locale);
+      await service.register(input.email, input.locale, input.fullName, input.password, input.confirmation);
       response.status(202).json({ status: "verification_requested" });
     } catch (error: unknown) {
-      if (error instanceof InvalidEmailAddressError) { response.status(400).json({ error: "Invalid registration input." }); return; }
+      if (error instanceof InvalidEmailAddressError || error instanceof InvalidIdentityStateError || error instanceof PasswordPolicyError) { response.status(400).json({ error: "Invalid registration input." }); return; }
       response.status(202).json({ status: "verification_requested" });
     }
   };
@@ -59,7 +61,7 @@ export function createRegistrationController(service: RegistrationService): Requ
 export function createResendVerificationController(service: ResendEmailVerificationService): RequestHandler {
   return async (request, response) => {
     try {
-      const input = registrationInput(request.body);
+      const input = verificationRequestInput(request.body);
       await service.resend(input.email, input.locale);
       response.status(202).json({ status: "verification_requested" });
     } catch (error: unknown) {
@@ -78,10 +80,30 @@ export function createVerifyEmailController(service: VerifyEmailService): Reques
     }
     try {
       const result = service.verify(proof);
-      response.status(result === "verified" ? 200 : 400).json({ status: result });
+      response.status(result === "verified" ? 200 : 400).json(result === "verified" ? { status: result, nextStep: "login" } : { status: result });
     } catch {
       response.status(503).json({ error: "Verification is temporarily unavailable." });
     }
+  };
+}
+
+export function createPasswordResetControllers(service: PasswordResetService): Record<"requestPasswordReset" | "completePasswordReset", RequestHandler> {
+  return {
+    requestPasswordReset: async (request, response) => {
+      try { const input = verificationRequestInput(request.body); await service.request(input.email, input.locale); } catch { /* Enumeration-safe response. */ }
+      response.status(202).json({ status: "password_reset_requested" });
+    },
+    completePasswordReset: async (request, response) => {
+      try {
+        const input = record(request.body);
+        if (Object.keys(input).some((key) => key !== "proof" && key !== "password" && key !== "confirmation")) throw new PasswordResetError();
+        await service.complete(stringField(input, "proof"), stringField(input, "password"), stringField(input, "confirmation"));
+        response.status(204).end();
+      } catch (error: unknown) {
+        if (error instanceof PasswordPolicyError) { response.status(400).json({ error: "Password does not meet policy." }); return; }
+        response.status(400).json({ error: "Reset proof is invalid or expired." });
+      }
+    },
   };
 }
 

@@ -16,10 +16,10 @@ function validUrl(value: string): boolean {
 
 export function OnboardingPanel({ company, onStart, onComplete, onFailure }: Props): React.JSX.Element {
   const { t } = useI18n();
-  const [url, setUrl] = useState(company.website);
+  const [url, setUrl] = useState(company.website ?? "");
   const [loading, setLoading] = useState(false);
   const [state, setState] = useState<"idle" | "success" | "error">("idle");
-  useEffect(() => { setUrl(company.website); setState("idle"); }, [company.id, company.website]);
+  useEffect(() => { setUrl(company.website ?? ""); setState("idle"); }, [company.id, company.website]);
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();

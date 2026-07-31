@@ -4,12 +4,16 @@ export function createIdentityRouter(controllers: {
   register: RequestHandler;
   resend: RequestHandler;
   verify: RequestHandler;
-  requestEnrollment?:RequestHandler; completeEnrollment?:RequestHandler; login?:RequestHandler; bootstrap?:RequestHandler; refresh?:RequestHandler; current?:RequestHandler; replacePassword?:RequestHandler; logout?:RequestHandler; bootstrapStatus?: RequestHandler; platformBootstrap?: RequestHandler;
+  requestEnrollment?:RequestHandler; completeEnrollment?:RequestHandler; requestPasswordReset?:RequestHandler; completePasswordReset?:RequestHandler; login?:RequestHandler; bootstrap?:RequestHandler; refresh?:RequestHandler; current?:RequestHandler; replacePassword?:RequestHandler; logout?:RequestHandler; bootstrapStatus?: RequestHandler; platformBootstrap?: RequestHandler;
 }): Router {
   const router = Router();
   router.post("/register", controllers.register);
   router.post("/resend-verification", controllers.resend);
   router.get("/verify-email", controllers.verify);
+  if (controllers.requestPasswordReset && controllers.completePasswordReset) {
+    router.post("/password-reset/request", controllers.requestPasswordReset);
+    router.post("/password-reset/complete", controllers.completePasswordReset);
+  }
   if (controllers.bootstrapStatus && controllers.platformBootstrap) {
     router.get("/bootstrap/status", controllers.bootstrapStatus);
     router.post("/bootstrap", controllers.platformBootstrap);

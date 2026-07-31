@@ -13,13 +13,13 @@ import { authorizeCurrentEmailVerification, consumeVerification, invalidateVerif
 import { formatVerificationProof, InvalidVerificationProofError, parseVerificationProof } from "../identity/domain/proof.js";
 import { activateUserFromEmailVerification, createPendingUser, InvalidIdentityStateError, userId } from "../identity/domain/user.js";
 import { DevelopmentVerificationDelivery } from "../identity/infrastructure/developmentVerificationDelivery.js";
-import { SecureRandomProvider, Sha256VerificationHashProvider } from "../identity/infrastructure/securityProviders.js";
+import { ScryptPasswordProvider, SecureRandomProvider, Sha256VerificationHashProvider } from "../identity/infrastructure/securityProviders.js";
 import { DeterministicRandomProvider, DeterministicVerificationHashProvider, InMemoryVerificationDelivery } from "../identity/infrastructure/testingAdapters.js";
 import { RegistrationService } from "../identity/services/registrationService.js";
 import { ResendEmailVerificationService } from "../identity/services/resendEmailVerificationService.js";
 import { VerifyEmailService } from "../identity/services/verifyEmailService.js";
 import { EmailVerificationRepository } from "../repositories/emailVerificationRepository.js";
-import { SqliteIdentityTransaction } from "../repositories/identityTransaction.js";
+import { SqliteAuthenticationTransaction, SqliteIdentityTransaction } from "../repositories/identityTransaction.js";
 import { UserRepository } from "../repositories/userRepository.js";
 import { createIdentityRouter } from "../routes/identity.js";
 
@@ -39,20 +39,20 @@ class ThrowingHash implements VerificationHashProvider {
 
 function bytes(length: number, value: number): Uint8Array { return new Uint8Array(length).fill(value); }
 function randomForRegistration(seed = 1): DeterministicRandomProvider {
-  return new DeterministicRandomProvider([bytes(16, seed), bytes(16, seed + 1), bytes(32, seed + 2), bytes(16, seed + 3)]);
+  return new DeterministicRandomProvider([bytes(16, seed), bytes(16, seed + 1), bytes(32, seed + 2), bytes(16, seed + 3), bytes(16, seed + 4)]);
 }
 function randomForResend(seed = 10): DeterministicRandomProvider {
   return new DeterministicRandomProvider([bytes(32, seed), bytes(16, seed + 1)]);
 }
 
 function services(database: DatabaseSync, delivery: EmailVerificationDeliveryPort, clock = new FixedClock(), random = randomForRegistration()) {
-  const transaction = new SqliteIdentityTransaction(database);
+  const transaction = new SqliteAuthenticationTransaction(database);
   const hash = new DeterministicVerificationHashProvider();
   return {
     clock,
     hash,
     transaction,
-    registration: new RegistrationService(transaction, random, hash, clock, delivery, "http://atlas.test", 3_600_000),
+    registration: new RegistrationService(transaction, random, hash, clock, delivery, "http://atlas.test", 3_600_000, new ScryptPasswordProvider()),
     resend: (resendRandom = randomForResend()) => new ResendEmailVerificationService(
       transaction, resendRandom, hash, clock, delivery, "http://atlas.test", 3_600_000, 60_000,
     ),
@@ -68,7 +68,7 @@ function proofFrom(delivery: InMemoryVerificationDelivery, index = 0): string {
 
 test("verification purpose, proof formatting, workflow lifecycle and expiration are strict", () => {
   assert.equal(verificationPurpose("email_verification"), "email_verification");
-  assert.throws(() => verificationPurpose("password_reset"));
+  assert.equal(verificationPurpose("password_reset"), "password_reset");
   assert.throws(() => reconstructEmailVerification({
     id: "unsupported", userId: "user" as never, authenticationIdentityId: "identity" as never,
     purpose: "email_verification", digestVersion: "sha256-v2" as never, tokenDigest: "digest" as never,
@@ -325,7 +325,7 @@ test("migration 4 upgrades migration-3 identity data and rejects checksum tamper
     const upgraded = createDatabase(path);
     assert.equal(new UserRepository(upgraded).findById(userId("preserved-user"))?.locale, "es");
     assert.equal((upgraded.prepare("SELECT COUNT(*) AS count FROM workspaces WHERE key = 'default'").get() as { count: number }).count, 1);
-    assert.equal((upgraded.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 26);
+    assert.equal((upgraded.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 29);
     upgraded.prepare("UPDATE schema_migrations SET checksum = ? WHERE id = 4").run("tampered");
     upgraded.close();
     assert.throws(() => createDatabase(path), /checksum mismatch/i);
@@ -353,7 +353,7 @@ test("HTTP registration, resend and verification are controlled and leak no iden
     assert.equal(invalidLocale.status, 400);
     const workspace = await fetch(`http://127.0.0.1:${port}/identity/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "user@example.com", locale: "en", workspaceId: 1 }) });
     assert.equal(workspace.status, 400);
-    const registered = await fetch(`http://127.0.0.1:${port}/identity/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "user@example.com", locale: "en" }) });
+    const registered = await fetch(`http://127.0.0.1:${port}/identity/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fullName: "User Example", email: "user@example.com", password: "a sufficiently long unique password", confirmation: "a sufficiently long unique password", locale: "en" }) });
     const body = await registered.json() as Record<string, unknown>;
     assert.equal(registered.status, 202);
     assert.deepEqual(body, { status: "verification_requested" });
@@ -361,7 +361,7 @@ test("HTTP registration, resend and verification are controlled and leak no iden
     const resent = await fetch(`http://127.0.0.1:${port}/identity/resend-verification`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "missing@example.com", locale: "es" }) });
     assert.deepEqual(await resent.json(), { status: "verification_requested" });
     const verified = await fetch(`http://127.0.0.1:${port}/identity/verify-email?proof=${encodeURIComponent(proofFrom(delivery))}`);
-    assert.deepEqual(await verified.json(), { status: "verified" });
+    assert.deepEqual(await verified.json(), { status: "verified", nextStep: "login" });
     const replay = await fetch(`http://127.0.0.1:${port}/identity/verify-email?proof=${encodeURIComponent(proofFrom(delivery))}`);
     assert.equal(replay.status, 400);
     assert.deepEqual(await replay.json(), { status: "invalid_or_expired" });

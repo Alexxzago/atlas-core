@@ -51,4 +51,3 @@ function mergeArray(values: readonly string[], maximum: number, maximumLength: n
   return [...byKey.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, value]) => value);
 }
 function assertLength(value: string, limit: number, field: string): void { if (codePoints(value) > limit) throw new KnowledgeDomainError("knowledge_limit_exceeded", "Knowledge field exceeds its limit.", { field }); }
-

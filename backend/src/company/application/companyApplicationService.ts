@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import {
   CompanyDomainError,
   applyReadinessAssessment,
@@ -40,6 +40,12 @@ export interface CreateCompanyCommand extends CompanyCommand {
   readonly id: number;
   readonly identity: CompanyIdentityInput;
   readonly branding?: BrandingInput;
+}
+
+export interface CreateOnboardingCompanyCommand extends CompanyCommand {
+  readonly name: string;
+  readonly website?: string | null;
+  readonly logoAssetReference?: string | null;
 }
 
 export interface UpdateCompanyIdentityCommand extends CompanyVersionedCommand {
@@ -119,6 +125,28 @@ export class CompanyApplicationService {
       const persisted = this.companies.createWithEvents(context, company, this.events(company, command.actorId, [{ type: "CompanyCreated", payload: { companyId: company.id } }]));
       if (persisted.status === "created") return { status: "success", company: persisted.company };
       return persisted;
+    } catch (error: unknown) {
+      return this.failure(error);
+    }
+  }
+
+  public createOnboardingCompany(context: WorkspaceContext, command: CreateOnboardingCompanyCommand): CompanyCommandResult {
+    try {
+      const baseSlug = this.onboardingSlug(command.name);
+      for (let suffix = 1; suffix <= 100; suffix += 1) {
+        const slug = suffix === 1 ? baseSlug : `${baseSlug.slice(0, 80 - String(suffix).length - 1)}-${suffix}`;
+        if (this.companies.existsBySlug(context, companySlug(slug))) continue;
+        const company = createCompany({
+          id: randomInt(1, 2_147_483_647), workspaceId: context.workspaceId,
+          identity: { name: command.name, slug, ...(command.website === undefined ? {} : { website: command.website }) },
+          ...(command.logoAssetReference === undefined ? {} : { branding: { logoAssetReference: command.logoAssetReference } }),
+          createdAt: this.clock.now(),
+        });
+        const persisted = this.companies.createWithEvents(context, company, this.events(company, command.actorId, [{ type: "CompanyCreated", payload: { companyId: company.id } }]));
+        if (persisted.status === "created") return { status: "success", company: persisted.company };
+        if (persisted.status !== "slug_conflict") return persisted;
+      }
+      return { status: "slug_conflict" };
     } catch (error: unknown) {
       return this.failure(error);
     }
@@ -225,6 +253,11 @@ export class CompanyApplicationService {
 
   private events(company: Company, actorId: string | null | undefined, definitions: readonly { readonly type: CompanyEventType; readonly payload: Readonly<Record<string, unknown>> }[]): readonly CompanyEvent[] {
     return definitions.map((definition, index) => ({ id: this.eventIds.next(), type: definition.type, aggregateVersion: company.version, sequence: index + 1, occurredAt: company.updatedAt, actorId: actorId ?? null, payload: definition.payload }));
+  }
+
+  private onboardingSlug(name: string): string {
+    const value = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80).replace(/-+$/g, "");
+    return companySlug(value);
   }
 
   private failure(error: unknown): CompanyApplicationFailure {

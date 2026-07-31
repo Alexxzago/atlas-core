@@ -30,6 +30,7 @@ export interface EmailVerificationRepositoryPort {
 export interface IdentityRepositories {
   users: UserRepositoryPort;
   verifications: EmailVerificationRepositoryPort;
+  credentials: PasswordCredentialRepositoryPort;
 }
 
 export interface IdentityTransactionPort {
@@ -50,6 +51,18 @@ export interface EmailVerificationDeliveryPort {
   deliver(request: EmailVerificationDeliveryRequest): Promise<VerificationDeliveryOutcome>;
 }
 
+export interface PasswordResetDeliveryRequest {
+  recipient: EmailAddress;
+  locale: Locale;
+  resetUrl: string;
+  expiresAt: string;
+  workflowId: string;
+}
+
+export interface PasswordResetDeliveryPort {
+  deliver(request: PasswordResetDeliveryRequest): Promise<VerificationDeliveryOutcome>;
+}
+
 export interface PasswordProtection { algorithm: "scrypt"; algorithmVersion: "scrypt-v1"; parameters: string; salt: string; confirmation: string; }
 export interface PasswordVerificationResult { matches: boolean; needsUpgrade: boolean; }
 export interface PasswordHashProvider { protect(password: string): Promise<PasswordProtection>; }
@@ -61,7 +74,7 @@ export interface PasswordCredentialRepositoryPort { findCurrent(authenticationId
 export interface CredentialEnrollmentRepositoryPort { findCurrent(authenticationIdentityId: string): CredentialEnrollment | null; findByDigest(digest: string): CredentialEnrollment | null; create(value: CredentialEnrollment): CredentialEnrollment; update(value: CredentialEnrollment, expectedStatus: CredentialEnrollment["status"]): boolean; setDeliveryStatus(id: string, status: CredentialEnrollment["deliveryStatus"], updatedAt: string): boolean; }
 export interface SessionRepositoryPort { findByDigest(digest: string): Session | null; create(value: Session): Session; replace(currentId: string, expectedState: Session["state"], replacement: Session): boolean; rotateCsrf(id:string,expectedGeneration:number,csrfDigest:string,at:string,idleExpiresAt:string):boolean; revoke(id: string, at: string, reason: string): boolean; revokeAll(userId: string, at: string, reason: string): number; touch(id: string, at: string, idleExpiresAt: string): boolean; }
 export interface LoginThrottleRepositoryPort { recordFailure(identityKey: string, originKey: string, at: string, expiresAt: string): number; isBlocked(identityKey: string, originKey: string, now: string, maximum: number): boolean; clear(identityKey: string, originKey: string): void; cleanup(now: string): number; }
-export interface AuthenticationRepositories extends IdentityRepositories { credentials: PasswordCredentialRepositoryPort; enrollments: CredentialEnrollmentRepositoryPort; sessions: SessionRepositoryPort; throttles: LoginThrottleRepositoryPort; }
+export interface AuthenticationRepositories extends IdentityRepositories { enrollments: CredentialEnrollmentRepositoryPort; sessions: SessionRepositoryPort; throttles: LoginThrottleRepositoryPort; }
 export interface AuthenticationTransactionPort { execute<T>(operation: (repositories: AuthenticationRepositories) => T): T; }
 export interface CredentialEnrollmentDeliveryRequest { recipient: EmailAddress; locale: Locale; enrollmentUrl: string; expiresAt: string; workflowId: string; }
 export interface CredentialEnrollmentDeliveryPort { deliver(request: CredentialEnrollmentDeliveryRequest): Promise<VerificationDeliveryOutcome>; }

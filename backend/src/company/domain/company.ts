@@ -73,7 +73,7 @@ export interface CompanyIdentityInput {
   readonly name: string;
   readonly slug: string;
   readonly description?: string | null;
-  readonly website: string;
+  readonly website?: string | null;
 }
 
 export interface CreateCompanyInput {
@@ -91,7 +91,7 @@ export interface Company {
   readonly normalizedName: string;
   readonly slug: CompanySlug;
   readonly description: CompanyDescription | null;
-  readonly website: WebsiteUrl;
+  readonly website: WebsiteUrl | null;
   readonly branding: Branding;
   readonly configuration: CompanyConfiguration | null;
   readonly lifecycle: CompanyLifecycleState;
@@ -110,7 +110,7 @@ export interface CompanyState {
   readonly normalizedName: string;
   readonly slug: string;
   readonly description: string | null;
-  readonly website: string;
+  readonly website: string | null;
   readonly branding: BrandingInput;
   readonly configuration: CompanyConfigurationInput | null;
   readonly lifecycle: string;
@@ -208,7 +208,8 @@ export function companyDescription(value: string | null | undefined): CompanyDes
   return normalized === null ? null : normalized as CompanyDescription;
 }
 
-export function websiteUrl(value: string): WebsiteUrl {
+export function websiteUrl(value: string | null | undefined): WebsiteUrl | null {
+  if (value === undefined || value === null) return null;
   const normalized = requiredText(value, "Website URL", 2_048);
   let parsed: URL;
   try { parsed = new URL(normalized); } catch { throw new CompanyDomainError("Website URL must be valid."); }

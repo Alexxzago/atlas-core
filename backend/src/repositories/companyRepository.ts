@@ -6,7 +6,7 @@ import type { WorkspaceContext } from "../types/workspaceContext.js";
 import { normalizeCompanyName } from "../company/domain/company.js";
 import { randomUUID } from "node:crypto";
 
-interface CompanyRow { id: number; workspace_id: number; name: string; website: string; phone: string; email: string; status: CompanyStatus; created_at: string; }
+interface CompanyRow { id: number; workspace_id: number; name: string; website: string | null; phone: string; email: string; status: CompanyStatus; created_at: string; }
 function mapCompany(row: CompanyRow): Company { return { id: row.id, workspaceId: row.workspace_id, name: row.name, website: row.website, phone: row.phone, email: row.email, status: row.status, createdAt: row.created_at }; }
 
 export class CompanyRepository implements CompanyRepositoryPort {
@@ -23,7 +23,7 @@ export class CompanyRepository implements CompanyRepositoryPort {
   public list(context: WorkspaceContext): Company[] { return (this.db.prepare("SELECT id, workspace_id, name, website, phone, email, status, created_at FROM companies WHERE workspace_id = ? ORDER BY id DESC").all(context.workspaceId) as unknown as CompanyRow[]).map(mapCompany); }
   public create(context: WorkspaceContext, input: CompanyCreateInput): Company {
     if (!this.domainColumnsAvailable()) {
-      const result = this.db.prepare("INSERT INTO companies (workspace_id, name, website, phone, email, status) VALUES (?, ?, ?, ?, ?, ?)").run(context.workspaceId, input.name, input.website, input.phone ?? "", input.email ?? "", input.status ?? "processing");
+      const result = this.db.prepare("INSERT INTO companies (workspace_id, name, website, phone, email, status) VALUES (?, ?, ?, ?, ?, ?)").run(context.workspaceId, input.name, input.website ?? null, input.phone ?? "", input.email ?? "", input.status ?? "processing");
       const company = this.findById(context, Number(result.lastInsertRowid));
       if (!company) throw new Error("Company could not be created.");
       return company;
@@ -31,7 +31,7 @@ export class CompanyRepository implements CompanyRepositoryPort {
     const timestamp = new Date().toISOString();
     let companyId = 0;
     this.transaction(() => {
-      const result = this.db.prepare("INSERT INTO companies (workspace_id, name, name_normalized, slug, website, phone, email, status, lifecycle_state, version, created_at, updated_at, lifecycle_changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, ?)").run(context.workspaceId, input.name, normalizeCompanyName(input.name), `legacy-${randomUUID().replaceAll("-", "")}`, input.website, input.phone ?? "", input.email ?? "", input.status ?? "processing", timestamp, timestamp, timestamp);
+      const result = this.db.prepare("INSERT INTO companies (workspace_id, name, name_normalized, slug, website, phone, email, status, lifecycle_state, version, created_at, updated_at, lifecycle_changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, ?)").run(context.workspaceId, input.name, normalizeCompanyName(input.name), `legacy-${randomUUID().replaceAll("-", "")}`, input.website ?? null, input.phone ?? "", input.email ?? "", input.status ?? "processing", timestamp, timestamp, timestamp);
       companyId = Number(result.lastInsertRowid);
       this.recordLegacyEvent(context, companyId, 1, timestamp, "CompanyCreated", { status: input.status ?? "processing" });
     });

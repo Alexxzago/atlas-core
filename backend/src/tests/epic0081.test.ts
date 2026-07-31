@@ -221,6 +221,9 @@ test("identity migration is additive, creates no users, and preserves the defaul
     { id: 24, name: "0024_operator_message_idempotency" },
     { id: 25, name: "0025_outbound_delivery_lifecycle" },
     { id: 26, name: "0026_company_domain_persistence" },
+    { id: 27, name: "0027_company_website_optional" },
+    { id: 28, name: "0028_identity_registration_password_reset" },
+    { id: 29, name: "0029_workspace_onboarding_settings" },
   ]);
   assert.equal((database.prepare("SELECT COUNT(*) AS count FROM users").get() as { count: number }).count, 0);
   assert.equal(new WorkspaceRepository(database).resolveDefault().key, "default");
@@ -237,7 +240,7 @@ test("identity migration restarts safely with persisted aggregate state", () => 
     database.close();
 
     const restarted = createDatabase(path);
-    assert.equal((restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 26);
+    assert.equal((restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 29);
     assert.equal(new UserRepository(restarted).findById(userId("user-1"))?.authenticationIdentities.length, 1);
     assert.deepEqual(restarted.prepare("PRAGMA foreign_key_check").all(), []);
     restarted.close();

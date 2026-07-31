@@ -23,10 +23,10 @@ export function CompanyCreateForm({ onCreate, onClose }: Props): React.JSX.Eleme
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     if (!name.trim()) { setError(t("companies.validation.name")); return; }
-    if (!isValidUrl(website)) { setError(t("companies.validation.website")); return; }
+    if (website.trim() && !isValidUrl(website)) { setError(t("companies.validation.website")); return; }
     setSubmitting(true); setError(null);
     try {
-      const input: CompanyInput = { name: name.trim(), website: website.trim() };
+      const input: CompanyInput = { name: name.trim(), website: website.trim() || null };
       if (phone.trim()) input.phone = phone.trim();
       if (email.trim()) input.email = email.trim();
       await onCreate(input);
@@ -39,7 +39,7 @@ export function CompanyCreateForm({ onCreate, onClose }: Props): React.JSX.Eleme
     <form className="sidebar-form" onSubmit={(event) => void submit(event)} noValidate>
       <div className="section-heading"><h2>{t("companies.createTitle")}</h2><button className="button button--quiet button--compact" type="button" onClick={onClose}>{t("common.close")}</button></div>
       <label className="form-field"><span>{t("companies.fields.name")}</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("companies.placeholders.name")} required /></label>
-      <label className="form-field"><span>{t("companies.fields.website")}</span><input type="url" value={website} onChange={(event) => setWebsite(event.target.value)} placeholder={t("companies.placeholders.website")} required /></label>
+      <label className="form-field"><span>{t("companies.fields.website")} <small>{t("common.optional")}</small></span><input type="url" value={website} onChange={(event) => setWebsite(event.target.value)} placeholder={t("companies.placeholders.website")} /></label>
       <label className="form-field"><span>{t("companies.fields.phone")} <small>{t("common.optional")}</small></span><input type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder={t("companies.placeholders.phone")} /></label>
       <label className="form-field"><span>{t("companies.fields.email")} <small>{t("common.optional")}</small></span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t("companies.placeholders.email")} /></label>
       {error && <p className="inline-message inline-message--error" role="alert">{error}</p>}

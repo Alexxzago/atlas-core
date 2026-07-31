@@ -129,6 +129,7 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   if (companyCore) {
     router.get("/:workspaceId/companies", authorize("company:read", false, companyCore.list));
     router.post("/:workspaceId/companies", authorize("company:manage", true, companyCore.create));
+    router.post("/:workspaceId/companies/onboarding", authorize("company:manage", true, companyCore.createOnboarding));
     router.get("/:workspaceId/companies/slug/:slug", authorize("company:read", false, companyCore.getBySlug));
     router.get("/:workspaceId/companies/:companyId", authorize("company:read", false, companyCore.get));
     router.patch("/:workspaceId/companies/:companyId/identity", authorize("company:manage", true, companyCore.updateIdentity));
