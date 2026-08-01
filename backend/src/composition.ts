@@ -68,6 +68,8 @@ import { OperationalAssistantExecutionService } from "./assistant/services/opera
 import type { AssistantExecutionPort } from "./assistant/application/assistantExecutionPort.js";
 import type { AppRouters } from "./app.js";
 import { smtpConfiguration, SmtpEmailDelivery } from "./providers/smtpEmailDelivery.js";
+import { emailDeliveryMode } from "./providers/emailDeliveryMode.js";
+import { ResendEmailDelivery, resendConfiguration } from "./providers/resendEmailDelivery.js";
 import { SqlitePlatformBootstrapTransaction } from "./repositories/platformBootstrapTransaction.js";
 import { PlatformBootstrapService } from "./identity/services/platformBootstrapService.js";
 import { ConversationRepository } from "./repositories/conversationRepository.js";
@@ -130,14 +132,11 @@ const identityClock = new SystemClock();
 const production=process.env.NODE_ENV==="production";
 if (production && (process.env.ATLAS_BOOTSTRAP_SECRET?.length ?? 0) < 32) throw new Error("Production requires ATLAS_BOOTSTRAP_SECRET with at least 32 characters.");
 if (production && (!(process.env.WHATSAPP_APP_SECRET?.trim()) || !(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim()))) throw new Error("Production requires WhatsApp webhook credentials.");
-const deliverySelection = process.env.ATLAS_VERIFICATION_DELIVERY;
-const useDevelopmentDelivery = !production && deliverySelection !== "smtp";
-const smtpDelivery = useDevelopmentDelivery
-  ? null
-  : new SmtpEmailDelivery(smtpConfiguration());
-const verificationDelivery = useDevelopmentDelivery
+const deliveryMode = emailDeliveryMode(process.env.ATLAS_VERIFICATION_DELIVERY, production);
+const providerDelivery = deliveryMode === "smtp" ? new SmtpEmailDelivery(smtpConfiguration()) : deliveryMode === "resend" ? new ResendEmailDelivery(resendConfiguration()) : null;
+const verificationDelivery = deliveryMode === "development"
   ? new DevelopmentVerificationDelivery(process.env.NODE_ENV ?? "development", (message) => console.info(message))
-  : smtpDelivery ?? new UnavailableVerificationDelivery();
+  : providerDelivery ?? new UnavailableVerificationDelivery();
 const verificationOrigin = process.env.ATLAS_VERIFICATION_ORIGIN ?? "http://localhost:3000";
 const verificationLifetimeMilliseconds = 24 * 60 * 60 * 1000;
 const verificationCooldownMilliseconds = 60 * 1000;
@@ -153,7 +152,7 @@ const authenticationService=new AuthenticationService(authenticationTransaction,
 const passwordResetControllers = createPasswordResetControllers(new PasswordResetService(authenticationTransaction, randomProvider, verificationHashProvider, passwordProvider, identityClock, verificationDelivery, verificationOrigin));
 const requestOriginPolicy=new ExactRequestOriginPolicy(production?[verificationOrigin]:[verificationOrigin,"http://localhost:5173"],production);
 const authenticationControllers=createAuthenticationControllers(authenticationService,requestOriginPolicy);
-const invitationDelivery=useDevelopmentDelivery?new DevelopmentInvitationDelivery(process.env.NODE_ENV??"development",message=>console.info(message)):smtpDelivery??new UnavailableInvitationDelivery();
+const invitationDelivery=deliveryMode==="development"?new DevelopmentInvitationDelivery(process.env.NODE_ENV??"development",message=>console.info(message)):providerDelivery??new UnavailableInvitationDelivery();
 const workspaceAdministrationService=new WorkspaceAdministrationService(new SqliteWorkspaceAdministrationTransaction(database),new SecureInvitationProofProvider(),identityClock,invitationDelivery,verificationOrigin);
 const platformBootstrapService = new PlatformBootstrapService(new SqlitePlatformBootstrapTransaction(database), randomProvider,
   new ScryptPasswordProvider(), new Sha256SessionIdentifierProvider(), identityClock, process.env.ATLAS_BOOTSTRAP_SECRET ?? "");

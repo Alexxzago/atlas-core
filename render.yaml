@@ -17,6 +17,8 @@ services:
         sync: false
       - key: ATLAS_VERIFICATION_ORIGIN
         sync: false
+      - key: ATLAS_VERIFICATION_DELIVERY
+        value: resend
       - key: ATLAS_BOOTSTRAP_SECRET
         sync: false
       - key: SMTP_HOST
@@ -32,6 +34,12 @@ services:
       - key: SMTP_FROM
         sync: false
       - key: SMTP_REPLY_TO
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        sync: false
+      - key: RESEND_REPLY_TO
         sync: false
       - key: GEMINI_API_KEY
         sync: false
