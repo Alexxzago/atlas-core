@@ -5,27 +5,7 @@
       "destination": "https://atlas-backend-tuph.onrender.com/:path*"
     },
     {
-      "source": "/chat/:path*",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/dashboard",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/companies/:path*",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/conversations",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/analytics",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/settings",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
