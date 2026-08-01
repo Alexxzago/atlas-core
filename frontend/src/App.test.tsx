@@ -1,0 +1,105 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import App from "./App";
+import { I18nProvider } from "./i18n/I18nContext";
+import { RouterProvider } from "./routing/RouterProvider";
+import { AuthenticationProvider } from "./state/AuthenticationContext";
+
+const identity = { userId: "user", email: "customer@example.test", locale: "en", status: "active", idleExpiresAt: "2026-01-01", absoluteExpiresAt: "2026-01-01" };
+const workspace = { id: "workspace", name: "Workspace", role: "owner", capabilities: ["company:read", "company:manage"] };
+const readyCompany = { id: 1, name: "Company", website: null, phone: "", email: "", status: "ready", createdAt: "2026-01-01", updatedAt: "2026-01-01" };
+
+function json(value: unknown, status = 200): Response { return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } }); }
+function renderApp(): void { render(<I18nProvider><RouterProvider><AuthenticationProvider><App /></AuthenticationProvider></RouterProvider></I18nProvider>); }
+function authenticatedFetch(workspaces: unknown[], companies: unknown[]): void {
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/session/bootstrap")) return Promise.resolve(json({ status: "authenticated", identity, csrfToken: "csrf", csrfGeneration: 1 }));
+    if (url.endsWith("/workspaces") && !url.includes("selected")) return Promise.resolve(json(workspaces));
+    if (url.endsWith("/workspaces/selected") || url.endsWith("/workspaces/workspace/select")) return Promise.resolve(json(workspace));
+    if (url.endsWith("/workspaces/workspace/companies")) return Promise.resolve(json(companies));
+    if (url.endsWith("/assistant-readiness")) return Promise.resolve(json({ status: "blocked", blockers: [] }));
+    return Promise.resolve(json({}, 404));
+  }));
+}
+
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState({}, "", "/"); });
+
+test("sends an unauthenticated root visitor to sign in with account recovery actions", async () => {
+  window.history.replaceState({}, "", "/");
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({}, 401))));
+  renderApp();
+  await screen.findByRole("heading", { name: "Continue with Atlas" });
+  expect(window.location.pathname).toBe("/sign-in");
+  expect(screen.getByRole("button", { name: "Create account" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Reset password" })).toBeTruthy();
+});
+
+test("keeps registration public for an unauthenticated visitor", async () => {
+  window.history.replaceState({}, "", "/register");
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({}, 401))));
+  renderApp();
+  await screen.findByRole("heading", { name: "Meet Atlas" });
+  expect(window.location.pathname).toBe("/register");
+});
+
+test("routes an authenticated returning user from root to the dashboard", async () => {
+  window.history.replaceState({}, "", "/");
+  authenticatedFetch([workspace], [readyCompany]);
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
+});
+
+test("routes an authenticated user without a workspace to workspace setup", async () => {
+  window.history.replaceState({}, "", "/");
+  authenticatedFetch([], []);
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/onboarding/workspace"));
+});
+
+test("routes an authenticated user with an empty workspace to company setup", async () => {
+  window.history.replaceState({}, "", "/");
+  authenticatedFetch([workspace], []);
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/onboarding/company"));
+});
+
+test("redirects an authenticated registration visit to its existing portal", async () => {
+  window.history.replaceState({}, "", "/register");
+  authenticatedFetch([workspace], [readyCompany]);
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
+});
+
+test("restores a valid session on refresh", async () => {
+  window.history.replaceState({}, "", "/");
+  authenticatedFetch([workspace], [readyCompany]);
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
+  expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/session/bootstrap"))).toBe(true);
+});
+
+test("treats an expired session as unauthenticated", async () => {
+  window.history.replaceState({}, "", "/");
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({}, 401))));
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/sign-in"));
+});
+
+test("routes a single processing company to activation pending", async () => {
+  window.history.replaceState({}, "", "/");
+  authenticatedFetch([workspace], [{ ...readyCompany, status: "processing" }]);
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/activation-pending"));
+  await screen.findByRole("heading", { name: "Knowledge imported successfully" });
+});
+
+test("redirects a direct protected route without a session to sign in", async () => {
+  window.history.replaceState({}, "", "/dashboard");
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({}, 401))));
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/sign-in"));
+  await screen.findByRole("heading", { name: "Continue with Atlas" });
+});

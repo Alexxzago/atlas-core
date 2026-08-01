@@ -20,6 +20,7 @@ test("builds canonical company paths", () => {
 });
 
 test("classifies public and authenticated application routes", () => {
+  assert.deepEqual(parseAppRoute("/"), { kind: "public", name: "guided", route: { name: "landing" } });
   assert.deepEqual(parseAppRoute("/onboarding/company"), { kind: "public", name: "guided", route: { name: "company-setup" } });
   assert.deepEqual(parseAppRoute("/chat/public_connection"), { kind: "public", name: "chat", connectionPublicId: "public_connection" });
   assert.deepEqual(parseAppRoute("/companies"), { kind: "portal", route: { name: "companies" } });

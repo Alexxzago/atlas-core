@@ -8,6 +8,7 @@ import { AuthenticatedPortalProvider, useAuthenticatedPortal } from "../state/Au
 import { GuidedAssistantSetup } from "./GuidedAssistantSetup";
 import { GuidedRegistration } from "./GuidedRegistration";
 import { GuidedSignIn } from "./GuidedSignIn";
+import { ActivationPending } from "./ActivationPending";
 import { Button, Container, Stack, Surface } from "../design-system/primitives";
 
 const pageKeys = {
@@ -28,8 +29,9 @@ export function GuidedSetupFoundation(): React.JSX.Element {
 
 function AuthenticatedGuidedSetup(): React.JSX.Element {
   const { state, selectedWorkspace, selectedCompany } = useAuthenticatedPortal(); const { t } = useI18n();
-  if (state.workspacesLoading || state.pendingWorkspaceId !== null) return <main><Skeleton label={t("guided.loading")} /></main>;
-  const guardState: GuidedSetupGuardState = !selectedWorkspace ? "authenticated-needs-workspace" : !selectedCompany ? "authenticated-needs-company" : "authenticated-ready";
+  if (state.workspacesLoading || state.pendingWorkspaceId !== null || state.companiesLoading) return <main><Skeleton label={t("guided.loading")} /></main>;
+  const activationPending = selectedCompany?.status === "processing" || (state.companies.length === 1 && state.companies[0]?.status === "processing");
+  const guardState: GuidedSetupGuardState = !selectedWorkspace ? "authenticated-needs-workspace" : state.companies.length === 0 ? "authenticated-needs-company" : activationPending ? "authenticated-activation-pending" : "authenticated-ready";
   return <GuidedSetupContent guardState={guardState} />;
 }
 
@@ -46,6 +48,7 @@ function GuidedSetupContent({ guardState }: { readonly guardState: GuidedSetupGu
   if (pageRoute.name === "verify-email") return <AccountLayout><GuidedRegistration verificationProof={new URLSearchParams(search).get("proof") ?? ""} onContinue={() => navigate("/sign-in")} /></AccountLayout>;
   if (pageRoute.name === "sign-in") return <AccountLayout><GuidedSignIn /></AccountLayout>;
   if (pageRoute.name === "workspace-setup" || pageRoute.name === "company-setup") return <OnboardingLayout><GuidedAssistantSetup /></OnboardingLayout>;
+  if (pageRoute.name === "activation-pending") return <OnboardingLayout><ActivationPending /></OnboardingLayout>;
   const page = pageKeys[pageRoute.name];
   return <PublicLayout><Surface tone="raised"><Stack gap="4"><h1 tabIndex={-1}>{t(page.title)}</h1><p>{t(page.description)}</p><Button onClick={() => navigate(pageRoute.name === "landing" ? "/register" : pageRoute.name === "forgot-password" ? "/reset-password" : "/")}>{t("guided.action")}</Button><Skeleton label={t("guided.loading")} /></Stack></Surface></PublicLayout>;
 }
