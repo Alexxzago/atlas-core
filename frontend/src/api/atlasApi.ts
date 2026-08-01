@@ -74,6 +74,8 @@ export const atlasApi = {
     try { return await request(`/identity/verify-email?proof=${segment(proof)}`); }
     catch (error: unknown) { if (error instanceof ApiError && error.status === 400) return { status: "invalid_or_expired" }; throw error; }
   },
+  requestPasswordReset:(email:string,locale:"en"|"es"):Promise<{status:"password_reset_requested"}>=>request("/identity/password-reset/request",{method:"POST",body:JSON.stringify({email,locale})}),
+  completePasswordReset:(proof:string,password:string,confirmation:string):Promise<void>=>request("/identity/password-reset/complete",{method:"POST",body:JSON.stringify({proof,password,confirmation})}),
   requestCredentialEnrollment:(email:string):Promise<void>=>request("/identity/credential-enrollment/request",{method:"POST",body:JSON.stringify({email})}),
   completeCredentialEnrollment:(proof:string,password:string,confirmation:string):Promise<void>=>request("/identity/credential-enrollment/complete",{method:"POST",body:JSON.stringify({proof,password,confirmation})}),
   login:(email:string,password:string):Promise<{status:string;csrfToken:string;csrfGeneration:number}>=>request("/identity/login",{method:"POST",body:JSON.stringify({email,password})}),

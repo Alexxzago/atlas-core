@@ -9,6 +9,8 @@ import { GuidedAssistantSetup } from "./GuidedAssistantSetup";
 import { GuidedRegistration } from "./GuidedRegistration";
 import { GuidedSignIn } from "./GuidedSignIn";
 import { ActivationPending } from "./ActivationPending";
+import { GuidedForgotPassword } from "./GuidedForgotPassword";
+import { GuidedResetPassword } from "./GuidedResetPassword";
 import { Button, Container, Stack, Surface } from "../design-system/primitives";
 
 const pageKeys = {
@@ -47,8 +49,10 @@ function GuidedSetupContent({ guardState }: { readonly guardState: GuidedSetupGu
   if (pageRoute.name === "register") return <AccountLayout><GuidedRegistration /></AccountLayout>;
   if (pageRoute.name === "verify-email") return <AccountLayout><GuidedRegistration verificationProof={new URLSearchParams(search).get("proof") ?? ""} onContinue={() => navigate("/sign-in")} /></AccountLayout>;
   if (pageRoute.name === "sign-in") return <AccountLayout><GuidedSignIn /></AccountLayout>;
+  if (pageRoute.name === "forgot-password") return <AccountLayout><GuidedForgotPassword onSignIn={() => navigate("/sign-in")} /></AccountLayout>;
+  if (pageRoute.name === "reset-password") return <AccountLayout><GuidedResetPassword proof={new URLSearchParams(search).get("proof") ?? ""} onSignIn={() => navigate("/sign-in")} /></AccountLayout>;
   if (pageRoute.name === "workspace-setup" || pageRoute.name === "company-setup") return <OnboardingLayout><GuidedAssistantSetup /></OnboardingLayout>;
   if (pageRoute.name === "activation-pending") return <OnboardingLayout><ActivationPending /></OnboardingLayout>;
-  const page = pageKeys[pageRoute.name];
-  return <PublicLayout><Surface tone="raised"><Stack gap="4"><h1 tabIndex={-1}>{t(page.title)}</h1><p>{t(page.description)}</p><Button onClick={() => navigate(pageRoute.name === "landing" ? "/register" : pageRoute.name === "forgot-password" ? "/reset-password" : "/")}>{t("guided.action")}</Button><Skeleton label={t("guided.loading")} /></Stack></Surface></PublicLayout>;
+  const page = pageKeys.landing;
+  return <PublicLayout><Surface tone="raised"><Stack gap="4"><h1 tabIndex={-1}>{t(page.title)}</h1><p>{t(page.description)}</p><Button onClick={() => navigate("/register")}>{t("guided.action")}</Button><Skeleton label={t("guided.loading")} /></Stack></Surface></PublicLayout>;
 }
