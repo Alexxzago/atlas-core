@@ -30,11 +30,18 @@ export function GuidedSetupFoundation(): React.JSX.Element {
 }
 
 function AuthenticatedGuidedSetup(): React.JSX.Element {
-  const { state, selectedWorkspace, selectedCompany } = useAuthenticatedPortal(); const { t } = useI18n();
+  const { state, selectedWorkspace, selectedCompany, refresh, refreshCompanies } = useAuthenticatedPortal(); const { t } = useI18n();
   if (state.workspacesLoading || state.pendingWorkspaceId !== null || state.companiesLoading) return <main><Skeleton label={t("guided.loading")} /></main>;
+  if (state.workspaceError) return <OnboardingLoadFailure message={t("assistantSetup.error.unavailable")} onRetry={() => void refresh()} />;
+  if (selectedWorkspace && state.companyError) return <OnboardingLoadFailure message={t("portal.companiesError")} onRetry={refreshCompanies} />;
   const activationPending = selectedCompany?.status === "processing" || (state.companies.length === 1 && state.companies[0]?.status === "processing");
   const guardState: GuidedSetupGuardState = !selectedWorkspace ? "authenticated-needs-workspace" : state.companies.length === 0 ? "authenticated-needs-company" : activationPending ? "authenticated-activation-pending" : "authenticated-ready";
   return <GuidedSetupContent guardState={guardState} />;
+}
+
+function OnboardingLoadFailure({ message, onRetry }: { readonly message: string; readonly onRetry: () => void }): React.JSX.Element {
+  const { t } = useI18n();
+  return <OnboardingLayout><Surface tone="raised"><Stack gap="4"><p role="alert">{message}</p><Button onClick={onRetry}>{t("common.retry")}</Button></Stack></Surface></OnboardingLayout>;
 }
 
 function GuidedSetupContent({ guardState }: { readonly guardState: GuidedSetupGuardState }): React.JSX.Element {

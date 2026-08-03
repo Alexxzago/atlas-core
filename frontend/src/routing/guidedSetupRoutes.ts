@@ -31,8 +31,8 @@ export function resolveGuidedSetupRoute(route: GuidedSetupRoute, state: GuidedSe
   if (state === "unauthenticated") return route.name === "register" || route.name === "verify-email" || route.name === "sign-in" || route.name === "forgot-password" || route.name === "reset-password" ? route : { redirect: "/sign-in" };
   const destination = state === "authenticated-needs-workspace" ? "/onboarding/workspace" : state === "authenticated-needs-company" ? "/onboarding/company" : state === "authenticated-activation-pending" ? "/activation-pending" : "/dashboard";
   if (route.name === "landing" || publicRoute) return { redirect: destination };
-  if (state === "authenticated-needs-workspace") return { redirect: "/onboarding/workspace" };
-  if (state === "authenticated-needs-company") return { redirect: "/onboarding/company" };
+  if (state === "authenticated-needs-workspace") return route.name === "workspace-setup" ? route : { redirect: "/onboarding/workspace" };
+  if (state === "authenticated-needs-company") return route.name === "company-setup" ? route : { redirect: "/onboarding/company" };
   if (state === "authenticated-activation-pending") return route.name === "activation-pending" ? route : { redirect: "/activation-pending" };
   return { redirect: "/dashboard" };
 }

@@ -59,6 +59,14 @@ test("routes an authenticated user without a workspace to workspace setup", asyn
   await waitFor(() => expect(window.location.pathname).toBe("/onboarding/workspace"));
 });
 
+test("renders workspace setup instead of a blank self-redirect when no workspace exists", async () => {
+  window.history.replaceState({}, "", "/onboarding/workspace");
+  authenticatedFetch([], []);
+  renderApp();
+  await screen.findByRole("heading", { name: "Great! Your account is ready." });
+  expect(window.location.pathname).toBe("/onboarding/workspace");
+});
+
 test("routes an authenticated user with an empty workspace to company setup", async () => {
   window.history.replaceState({}, "", "/");
   authenticatedFetch([workspace], []);
@@ -79,6 +87,33 @@ test("restores a valid session on refresh", async () => {
   renderApp();
   await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
   expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/session/bootstrap"))).toBe(true);
+});
+
+test("waits for workspace loading before resolving a direct onboarding refresh", async () => {
+  let resolveWorkspaces!: (response: Response) => void;
+  window.history.replaceState({}, "", "/onboarding/workspace");
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/session/bootstrap")) return Promise.resolve(json({ status: "authenticated", identity, csrfToken: "csrf", csrfGeneration: 1 }));
+    if (url.endsWith("/workspaces") && !url.includes("selected")) return new Promise<Response>((resolve) => { resolveWorkspaces = resolve; });
+    if (url.endsWith("/workspaces/selected") || url.endsWith("/workspaces/workspace/select")) return Promise.resolve(json(workspace));
+    if (url.endsWith("/workspaces/workspace/companies")) return Promise.resolve(json([readyCompany]));
+    return Promise.resolve(json({}, 404));
+  }));
+  renderApp();
+  await screen.findByRole("status", { name: "Loading" });
+  await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/workspaces"))).toBe(true));
+  expect(window.location.pathname).toBe("/onboarding/workspace");
+  resolveWorkspaces(json([workspace]));
+  await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
+});
+
+test("redirects a direct onboarding refresh with an existing workspace and company to the dashboard", async () => {
+  window.history.replaceState({}, "", "/onboarding/workspace");
+  authenticatedFetch([workspace], [readyCompany]);
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
+  await screen.findByRole("heading", { name: "Company overview" });
 });
 
 test("treats an expired session as unauthenticated", async () => {

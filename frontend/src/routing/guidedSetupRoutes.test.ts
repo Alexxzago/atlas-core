@@ -28,3 +28,8 @@ test("enforces workspace then company setup before the portal", () => {
   expect(resolveGuidedSetupRoute({ name: "register" }, "authenticated-activation-pending")).toEqual({ redirect: "/activation-pending" });
   expect(resolveGuidedSetupRoute({ name: "company-setup" }, "authenticated-ready")).toEqual({ redirect: "/dashboard" });
 });
+
+test("renders the required onboarding route instead of self-redirecting", () => {
+  expect(resolveGuidedSetupRoute({ name: "workspace-setup" }, "authenticated-needs-workspace")).toEqual({ name: "workspace-setup" });
+  expect(resolveGuidedSetupRoute({ name: "company-setup" }, "authenticated-needs-company")).toEqual({ name: "company-setup" });
+});

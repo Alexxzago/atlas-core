@@ -80,6 +80,20 @@ test("restores the selected workspace before routing to company setup", async ()
   await waitFor(() => expect(window.location.pathname).toBe("/onboarding/company"));
 });
 
+test("shows a retryable error instead of workspace setup when workspace loading fails", async () => {
+  window.history.replaceState({}, "", "/onboarding/workspace");
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/session/bootstrap")) return Promise.resolve(json({ status: "authenticated", identity, csrfToken: "csrf", csrfGeneration: 1 }));
+    if (url.endsWith("/workspaces") && !url.includes("selected")) return Promise.resolve(json({}, 503));
+    return Promise.resolve(json({}, 404));
+  }));
+  renderGuided();
+  expect((await screen.findByRole("alert")).textContent).toBe("We cannot continue right now. Try again.");
+  expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  expect(window.location.pathname).toBe("/onboarding/workspace");
+});
+
 test("redirects unauthenticated onboarding access through the shared guard", async () => {
   window.history.replaceState({}, "", "/onboarding/company");
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({}, 401))));
