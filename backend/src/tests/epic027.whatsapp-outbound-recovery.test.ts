@@ -57,16 +57,17 @@ test("EPIC-027 Phase 5 logs only sanitized Meta outbound failure diagnostics", a
   const original = console.info, logs: string[] = [];
   console.info = (value: unknown): void => { logs.push(String(value)); };
   try {
-    const value = setup(new WhatsAppCloudApiError(400, null, { graphApiVersion: "v26.0", httpStatus: 400, providerCode: 131030, providerSubcode: 123, errorType: "OAuthException", transient: false, sanitizedDetailsCategory: "outside_test_recipient_set" }));
+    const value = setup(new WhatsAppCloudApiError(400, null, { graphApiVersion: "v26.0", httpStatus: 400, providerCode: 131030, providerSubcode: 123, errorType: "OAuthException", transient: false, sanitizedDetailsCategory: "outside_test_recipient_set", sanitizedReason: "recipient_not_in_allowed_list" }));
     await value.service.dispatchReady("worker");
   } finally { console.info = original; }
   assert.equal(logs.length, 1);
   const diagnostic = JSON.parse(logs[0]!) as Record<string, unknown>;
-  assert.deepEqual(Object.keys(diagnostic).sort(), ["connectionId", "errorType", "event", "graphApiVersion", "httpStatus", "operation", "outboundDeliveryId", "providerCode", "providerSubcode", "sanitizedDetailsCategory", "timestamp", "transient"]);
+  assert.deepEqual(Object.keys(diagnostic).sort(), ["connectionId", "errorType", "event", "graphApiVersion", "httpStatus", "operation", "outboundDeliveryId", "providerCode", "providerSubcode", "sanitizedDetailsCategory", "sanitizedReason", "timestamp", "transient"]);
   assert.equal(diagnostic.event, "whatsapp_provider_outbound_failed");
   assert.equal(diagnostic.sanitizedDetailsCategory, "outside_test_recipient_set");
+  assert.equal(diagnostic.sanitizedReason, "recipient_not_in_allowed_list");
   const text = logs[0]!;
-  assert.equal(text.includes("token") || text.includes("Reply") || text.includes('"wa"'), false);
+  assert.equal(text.includes("token") || text.includes("Reply") || text.includes('"wa"') || text.includes("phone") || text.includes("private Meta detail") || text.includes("trace-id"), false);
 });
 
 test("EPIC-027 Phase 5 accepts eventually, terminates exhausted retries, and recovers expired leases", async () => {

@@ -15,7 +15,7 @@ export interface WhatsAppOutboundDeliveryResult {
   readonly id: string;
   readonly state: "pending" | "accepted" | "uncertain";
 }
-type OutboundFailureLog = { readonly event: "whatsapp_provider_outbound_failed"; readonly operation: "send_text"; readonly graphApiVersion: string | null; readonly httpStatus: number | null; readonly providerCode: number | null; readonly providerSubcode: number | null; readonly errorType: string | null; readonly transient: boolean | null; readonly sanitizedDetailsCategory: WhatsAppOutboundFailureDiagnostic["sanitizedDetailsCategory"]; readonly connectionId: string; readonly outboundDeliveryId: string; readonly timestamp: string; };
+type OutboundFailureLog = { readonly event: "whatsapp_provider_outbound_failed"; readonly operation: "send_text"; readonly graphApiVersion: string | null; readonly httpStatus: number | null; readonly providerCode: number | null; readonly providerSubcode: number | null; readonly errorType: string | null; readonly transient: boolean | null; readonly sanitizedDetailsCategory: WhatsAppOutboundFailureDiagnostic["sanitizedDetailsCategory"]; readonly sanitizedReason: WhatsAppOutboundFailureDiagnostic["sanitizedReason"]; readonly connectionId: string; readonly outboundDeliveryId: string; readonly timestamp: string; };
 
 export class WhatsAppOutboundDeliveryService {
   public constructor(
@@ -83,7 +83,7 @@ export class WhatsAppOutboundDeliveryService {
     const nextAttemptAt = outcome === "retryable" ? retryAt(now, delivery.attemptCount, result.retryAfterMilliseconds) : null;
     this.deliveries.settleLease(delivery.id, owner, outcome, nextAttemptAt, result.safeErrorCategory, now);
   }
-  private logFailure(error: unknown, connectionId: string, outboundDeliveryId: string): void { const diagnostic = error instanceof WhatsAppCloudApiError ? error.diagnostic : null; console.info(JSON.stringify({ event: "whatsapp_provider_outbound_failed", operation: "send_text", graphApiVersion: diagnostic?.graphApiVersion ?? null, httpStatus: diagnostic?.httpStatus ?? null, providerCode: diagnostic?.providerCode ?? null, providerSubcode: diagnostic?.providerSubcode ?? null, errorType: diagnostic?.errorType ?? null, transient: diagnostic?.transient ?? null, sanitizedDetailsCategory: diagnostic?.sanitizedDetailsCategory ?? "provider_rejected", connectionId, outboundDeliveryId, timestamp: new Date().toISOString() } satisfies OutboundFailureLog)); }
+  private logFailure(error: unknown, connectionId: string, outboundDeliveryId: string): void { const diagnostic = error instanceof WhatsAppCloudApiError ? error.diagnostic : null; console.info(JSON.stringify({ event: "whatsapp_provider_outbound_failed", operation: "send_text", graphApiVersion: diagnostic?.graphApiVersion ?? null, httpStatus: diagnostic?.httpStatus ?? null, providerCode: diagnostic?.providerCode ?? null, providerSubcode: diagnostic?.providerSubcode ?? null, errorType: diagnostic?.errorType ?? null, transient: diagnostic?.transient ?? null, sanitizedDetailsCategory: diagnostic?.sanitizedDetailsCategory ?? "provider_rejected", sanitizedReason: diagnostic?.sanitizedReason ?? "provider_rejected", connectionId, outboundDeliveryId, timestamp: new Date().toISOString() } satisfies OutboundFailureLog)); }
 }
 
 function safe(value: OutboundDelivery): WhatsAppOutboundDeliveryResult {
