@@ -15,7 +15,7 @@ export class AssistantReadinessNotFoundError extends Error {}
 export class AssistantReadinessService {
   private readonly policy = new AssistantProfileExecutionPolicy();
   public constructor(private readonly companies: CompanyRepositoryPort, private readonly knowledge: KnowledgeRepositoryPort, private readonly profiles: AssistantProfileRepositoryPort, private readonly connections: WhatsAppConnectionRepositoryPort & WhatsAppConnectionCredentialRepositoryPort & WhatsAppConnectionOperationalStateRepositoryPort, private readonly assessments: AssistantReadinessAssessmentRepositoryPort, private readonly defaults: DefaultAssistantService, private readonly clock: { now(): string }) {}
-  public get(context: WorkspaceContext, companyId: number): AssistantReadinessAssessment { const value = this.assessments.findLatest(context, companyId, null); if (!value) throw new AssistantReadinessNotFoundError(); return value; }
+  public get(context: WorkspaceContext, companyId: number): AssistantReadinessAssessment { return this.refresh(context, companyId); }
   public refresh(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId | null = null): AssistantReadinessAssessment {
     if (!this.companies.findById(context, companyId)) throw new AssistantReadinessNotFoundError();
     const blockers: AssistantReadinessBlocker[] = [], knowledge = this.knowledge.loadCurrentVersion(context, companyId);

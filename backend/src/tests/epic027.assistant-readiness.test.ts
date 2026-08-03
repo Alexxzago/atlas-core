@@ -33,6 +33,12 @@ test("assistant readiness is reproducible, persisted on repeated refresh, and sc
   assert.throws(() => value.service.refresh({ workspaceId: 2, workspaceKey: "other" }, 1));
 });
 
+test("readiness reads the current default assignment and immutable publication instead of an older assessment", () => {
+  let knowledge: { id: string; snapshotDigest: string } | null = null, assignment: { assistantProfileId: typeof profile.id } | null = null; const saved: unknown[] = [];
+  const service = new AssistantReadinessService({ findById: () => ({ id: 1 }) } as never, { loadCurrentVersion: () => knowledge } as never, { listActive: () => ({ status: "found", profiles: [profile] }), findById: () => profile } as never, { findById: () => null, findCredentials: () => null, findOperationalState: () => null } as never, { create: (_c: typeof context, value: unknown) => { saved.push(value); return value; }, findLatest: () => ({ status: "blocked", blockers: ["default_assistant_missing", "published_knowledge_missing"] }) } as never, { get: () => assignment, bootstrap: () => null } as never, { now: () => "2026-01-02T00:00:00.000Z" });
+  assert.deepEqual(service.get(context, 1).blockers, ["default_assistant_missing", "published_knowledge_missing"]); assignment = { assistantProfileId: profile.id }; knowledge = { id: "kver_current", snapshotDigest: "current" }; assert.deepEqual(service.get(context, 1).blockers, []); assert.equal(saved.length, 2);
+});
+
 test("WhatsApp activation rejects the persisted readiness result instead of legacy company status", async () => {
   const service = new WhatsAppConnectionService({ findById: () => ({ id: 1, status: "ready" }) } as never, {} as never, { findById: () => connection, updateStatus: () => connection } as never, { now: () => "2026-01-02T00:00:00.000Z" }, undefined, { refresh: () => ({ status: "blocked" }) } as never);
   await assert.rejects(() => service.activate(context, 1, connection.id), WhatsAppConnectionConflictError);
