@@ -54,6 +54,17 @@ test("EPIC-018 migration is additive, restart safe, and seeds no credential mate
   } finally { database.close(); }
 });
 
+test("migration 35 preserves operational states and accepts expanded validation failure codes", () => {
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec("PRAGMA foreign_keys = ON;"); runMigrations(database, 34);
+    const workspaces = new WorkspaceRepository(database), context = createWorkspaceContext(workspaces.resolveDefault()), companies = new CompanyRepository(database), company = companies.create(context, { name: "Migration", website: "https://migration.test" }), profiles = new AssistantProfileRepository(database), profile = reconstructAssistantProfile({ id: assistantProfileId("asp_11111111111111111111111111111111"), companyId: company.id, name: "Migration", normalizedName: "migration", description: null, businessRole: null, objective: null, audience: null, tone: "friendly", assistantLanguage: "en", welcomeMessage: null, fallbackMessage: "Fallback", status: "ready", createdAt: now, updatedAt: now, archivedAt: null }), repository = new WhatsAppConnectionRepository(database), id = whatsAppConnectionId("wac_11111111111111111111111111111111");
+    profiles.create(context, company.id, profile); repository.create(context, reconstructWhatsAppConnection({ id, workspaceId: context.workspaceId, companyId: company.id, assistantProfileId: profile.id, phoneNumberId: "phone-migration", whatsappBusinessAccountId: "waba-migration", status: "inactive", createdAt: now, updatedAt: now }));
+    runMigrations(database); assert.equal(repository.findOperationalState(context, company.id, id)?.validationState, "not_validated");
+    const saved = repository.replaceOperationalState(context, company.id, reconstructWhatsAppConnectionOperationalState({ whatsAppConnectionId: id, validationState: "invalid", validatedAt: now, validationFailureCode: "provider_timeout", healthState: "degraded", lastProviderActivityAt: null, lastWebhookActivityAt: null, healthFailureCode: "provider_timeout", updatedAt: now })); assert.equal(saved?.validationFailureCode, "provider_timeout"); assert.equal((database.prepare("SELECT COUNT(*) count FROM schema_migrations WHERE id=35").get() as { count: number }).count, 1); runMigrations(database);
+  } finally { database.close(); }
+});
+
 test("EPIC-018 persists ciphertext and redacted operational state only through the owning connection", () => {
   const database = createDatabase(":memory:"), workspaces = new WorkspaceRepository(database), context = createWorkspaceContext(workspaces.resolveDefault()), companies = new CompanyRepository(database), company = companies.create(context, { name: "Company", website: "https://company.test", status: "ready" }), profiles = new AssistantProfileRepository(database), profile = reconstructAssistantProfile({ id: assistantProfileId("asp_0123456789abcdef0123456789abcdef"), companyId: company.id, name: "WhatsApp", normalizedName: "whatsapp", description: null, businessRole: "Advisor", objective: "Help", audience: null, tone: "friendly", assistantLanguage: "en", welcomeMessage: "Welcome", fallbackMessage: "Fallback", status: "ready", createdAt: now, updatedAt: now, archivedAt: null }), repository = new WhatsAppConnectionRepository(database);
   try {
