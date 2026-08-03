@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { AppShell } from "../components/AppShell";
 import { I18nProvider } from "../i18n/I18nContext";
+import { ThemeProvider } from "../design-system/theme";
 import { buildDashboardViewModel } from "./dashboardPresentation";
 import { DashboardPage } from "./DashboardPage";
 
@@ -35,7 +36,7 @@ test("uses translated new-customer guidance and localized skeleton announcements
 });
 
 test("composes inside the existing application shell", () => {
-  render(<I18nProvider><AppShell route={{ name: "dashboard" }} workspace={workspace} workspaces={[workspace]} companies={[company]} selectedCompany={company} email="operator@example.test" onNavigate={() => {}} onSelectWorkspace={() => {}} onSelectCompany={() => {}} onPassword={() => {}} onLogout={() => {}}><DashboardPage model={buildDashboardViewModel(workspace, [company], company)} onNavigate={() => {}} /></AppShell></I18nProvider>);
+  render(<ThemeProvider><I18nProvider><AppShell route={{ name: "dashboard" }} workspace={workspace} workspaces={[workspace]} companies={[company]} selectedCompany={company} email="operator@example.test" onNavigate={() => {}} onSelectWorkspace={() => {}} onSelectCompany={() => {}} onPassword={() => {}} onLogout={() => {}}><DashboardPage model={buildDashboardViewModel(workspace, [company], company)} onNavigate={() => {}} /></AppShell></I18nProvider></ThemeProvider>);
   expect(screen.getByRole("main").querySelector(".dashboard-grid")).toBeTruthy();
   expect(screen.getByLabelText("Current Workspace")).toBeTruthy();
   expect(screen.getByLabelText("Current company")).toBeTruthy();

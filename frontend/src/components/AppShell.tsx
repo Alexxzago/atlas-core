@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useI18n } from "../i18n/I18nContext";
 import type { Company, WorkspaceSummary } from "../types/api";
 import type { PortalRoute } from "../routing/routes";
+import { ThemeSelector } from "./ThemeSelector";
 
 type Navigate = (path: string) => void;
 
@@ -106,8 +107,8 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
   </nav>;
 
   return <div className="app-shell"><SkipLink /><aside className="app-sidebar" aria-label={t("shell.applicationNavigation")}><div className="app-sidebar__brand">ATLAS</div>{navigation}</aside>
-    <header className="app-topbar"><button ref={trigger} className="mobile-navigation-trigger" type="button" aria-expanded={mobileOpen} aria-controls="mobile-navigation" onClick={() => setMobileOpen(true)}>{t("shell.openNavigation")}</button><div className="app-topbar__context"><WorkspaceSwitcher workspaces={props.workspaces} workspace={props.workspace} onSelect={props.onSelectWorkspace} /><CompanySwitcher companies={props.companies} company={props.selectedCompany} onSelect={props.onSelectCompany} /></div><div className="app-topbar__account"><span>{props.email}</span><button className="button button--quiet" type="button" onClick={props.onPassword}>{t("portal.password")}</button><button className="button button--secondary" type="button" onClick={props.onLogout}>{t("portal.logout")}</button></div></header>
-    {mobileOpen && <><div className="mobile-navigation-backdrop" onMouseDown={closeMobile} aria-hidden="true" /><aside ref={drawer} id="mobile-navigation" className="mobile-navigation is-open" aria-label={t("shell.mobileNavigation")}><div className="mobile-navigation__header"><strong>ATLAS</strong><button type="button" className="button button--quiet" onClick={closeMobile}>{t("shell.closeNavigation")}</button></div>{navigation}</aside></>}
+    <header className="app-topbar"><button ref={trigger} className="mobile-navigation-trigger" type="button" aria-expanded={mobileOpen} aria-controls="mobile-navigation" onClick={() => setMobileOpen(true)}>{t("shell.openNavigation")}</button><div className="app-topbar__context"><WorkspaceSwitcher workspaces={props.workspaces} workspace={props.workspace} onSelect={props.onSelectWorkspace} /><CompanySwitcher companies={props.companies} company={props.selectedCompany} onSelect={props.onSelectCompany} /></div><div className="app-topbar__account"><ThemeSelector /><span>{props.email}</span><button className="button button--quiet" type="button" onClick={props.onPassword}>{t("portal.password")}</button><button className="button button--secondary" type="button" onClick={props.onLogout}>{t("portal.logout")}</button></div></header>
+    {mobileOpen && <><div className="mobile-navigation-backdrop" onMouseDown={closeMobile} aria-hidden="true" /><aside ref={drawer} id="mobile-navigation" className="mobile-navigation is-open" aria-label={t("shell.mobileNavigation")}><div className="mobile-navigation__header"><strong>ATLAS</strong><button type="button" className="button button--quiet" onClick={closeMobile}>{t("shell.closeNavigation")}</button></div>{navigation}<ThemeSelector /></aside></>}
     <main id="main-content" className="app-main" tabIndex={-1}>{props.children}</main>
   </div>;
 }

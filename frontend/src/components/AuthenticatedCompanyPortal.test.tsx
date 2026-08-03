@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { I18nProvider } from "../i18n/I18nContext";
+import { ThemeProvider } from "../design-system/theme";
 import { RouterProvider } from "../routing/RouterProvider";
 import { AuthenticatedCompanyPortal } from "./AuthenticatedCompanyPortal";
 import { AuthenticatedCompanySelector } from "./AuthenticatedCompanySelector";
@@ -41,7 +42,7 @@ test("does not render Company A assistant content while Company B validates", as
     return Promise.resolve(new Response("", { status: 404 }));
   }));
 
-  render(<I18nProvider><RouterProvider><AuthenticatedCompanyPortal csrf="csrf" email="operator@example.test" onPassword={() => {}} onLogout={() => {}} /></RouterProvider></I18nProvider>);
+  render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticatedCompanyPortal csrf="csrf" email="operator@example.test" onPassword={() => {}} onLogout={() => {}} /></RouterProvider></I18nProvider></ThemeProvider>);
   await screen.findByText("Assistant A");
 
   act(() => {
@@ -71,7 +72,7 @@ test("dashboard distinguishes selection state after company and workspace transi
     return Promise.resolve(new Response("", { status: 404 }));
   }));
 
-  render(<I18nProvider><RouterProvider><AuthenticatedCompanyPortal csrf="csrf" email="operator@example.test" onPassword={() => {}} onLogout={() => {}} /></RouterProvider></I18nProvider>);
+  render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticatedCompanyPortal csrf="csrf" email="operator@example.test" onPassword={() => {}} onLogout={() => {}} /></RouterProvider></I18nProvider></ThemeProvider>);
   await screen.findByText("Select a company");
   expect(screen.getByText("Select an existing company to view its operational context.")).toBeTruthy();
 

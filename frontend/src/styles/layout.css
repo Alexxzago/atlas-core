@@ -67,6 +67,7 @@
   .app-topbar__context { min-inline-size: 0; flex: 1; }
   .app-topbar__context .shell-context-button { max-inline-size: min(24vw, 140px); }
   .app-topbar__account > span, .app-topbar__account .button--quiet { display: none; }
+  .app-topbar__account > .theme-selector { display: none; }
   .app-topbar__account .button { min-block-size: 36px; padding-inline: var(--atlas-space-3); }
   .app-main { padding: var(--atlas-space-5); }
   .mobile-navigation-backdrop { position: fixed; z-index: calc(var(--atlas-z-drawer) - 1); inset: 0; display: block; background: rgb(17 24 39 / 28%); }

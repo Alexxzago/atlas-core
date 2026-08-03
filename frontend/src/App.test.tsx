@@ -1,18 +1,19 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import App from "./App";
 import { I18nProvider } from "./i18n/I18nContext";
 import { RouterProvider } from "./routing/RouterProvider";
 import { AuthenticationProvider } from "./state/AuthenticationContext";
+import { ThemeProvider } from "./design-system/theme";
 
 const identity = { userId: "user", email: "customer@example.test", locale: "en", status: "active", idleExpiresAt: "2026-01-01", absoluteExpiresAt: "2026-01-01" };
 const workspace = { id: "workspace", name: "Workspace", role: "owner", capabilities: ["company:read", "company:manage"] };
 const readyCompany = { id: 1, name: "Company", website: null, phone: "", email: "", status: "ready", createdAt: "2026-01-01", updatedAt: "2026-01-01" };
 
 function json(value: unknown, status = 200): Response { return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } }); }
-function renderApp(): void { render(<I18nProvider><RouterProvider><AuthenticationProvider><App /></AuthenticationProvider></RouterProvider></I18nProvider>); }
+function renderApp(): void { render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticationProvider><App /></AuthenticationProvider></RouterProvider></I18nProvider></ThemeProvider>); }
 function authenticatedFetch(workspaces: unknown[], companies: unknown[]): void {
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
     const url = String(input);
@@ -31,10 +32,10 @@ test("sends an unauthenticated root visitor to sign in with account recovery act
   window.history.replaceState({}, "", "/");
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({}, 401))));
   renderApp();
-  await screen.findByRole("heading", { name: "Continue with Atlas" });
+  await screen.findByRole("heading", { name: "Welcome back" });
   expect(window.location.pathname).toBe("/sign-in");
-  expect(screen.getByRole("button", { name: "Create account" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Reset password" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Create account" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Forgot your password?" })).toBeTruthy();
 });
 
 test("keeps registration public for an unauthenticated visitor", async () => {
@@ -50,6 +51,28 @@ test("routes an authenticated returning user from root to the dashboard", async 
   authenticatedFetch([workspace], [readyCompany]);
   renderApp();
   await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
+});
+
+test("shows a branded startup state until session bootstrap resolves", async () => {
+  let resolve!: (response: Response) => void;
+  vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((next) => { resolve = next; })));
+  renderApp();
+  expect(screen.getByRole("status", { name: "Preparing your workspace…" })).toBeTruthy();
+  expect(screen.getByText("ATLAS")).toBeTruthy();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  resolve(json({}, 401));
+  await screen.findByRole("heading", { name: "Welcome back" });
+});
+
+test("shows a safe bootstrap failure state and retries without exposing transport details", async () => {
+  let attempts = 0;
+  vi.stubGlobal("fetch", vi.fn(() => { attempts += 1; return attempts === 1 ? Promise.reject(new TypeError("ECONNREFUSED /api/session/bootstrap")) : Promise.resolve(json({}, 401)); }));
+  renderApp();
+  await screen.findByRole("heading", { name: "We couldn't connect to Atlas." });
+  expect(screen.queryByText(/ECONNREFUSED/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByRole("heading", { name: "Welcome back" });
+  expect(attempts).toBe(2);
 });
 
 test("routes an authenticated user without a workspace to workspace setup", async () => {
@@ -101,7 +124,7 @@ test("waits for workspace loading before resolving a direct onboarding refresh",
     return Promise.resolve(json({}, 404));
   }));
   renderApp();
-  await screen.findByRole("status", { name: "Loading" });
+  await screen.findByRole("status", { name: "Preparing your workspace…" });
   await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/workspaces"))).toBe(true));
   expect(window.location.pathname).toBe("/onboarding/workspace");
   resolveWorkspaces(json([workspace]));
@@ -165,5 +188,5 @@ test("redirects a direct protected route without a session to sign in", async ()
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({}, 401))));
   renderApp();
   await waitFor(() => expect(window.location.pathname).toBe("/sign-in"));
-  await screen.findByRole("heading", { name: "Continue with Atlas" });
+  await screen.findByRole("heading", { name: "Welcome back" });
 });
