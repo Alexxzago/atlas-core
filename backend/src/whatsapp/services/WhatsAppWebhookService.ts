@@ -100,11 +100,13 @@ export class WhatsAppWebhookService {
   }
   private async capture(message: WhatsAppInboundTextMessage): Promise<void> {
     if (!this.connections || !this.bindings || !this.events || !this.conversations) return;
-    const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) return;
+    const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) { this.diagnostic("whatsapp_webhook_connection_unmatched", { phoneNumberId: message.phoneNumberId, messageId: message.wamid }); return; }
     const now = this.clock.now(), context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, existing = this.bindings.findBinding(connection.id, message.waId);
-    const binding = existing ?? (() => { const conversation = this.conversations!.open(context, connection.companyId, "whatsapp"), customer = this.conversations!.addParticipant(context, connection.companyId, conversation.id, { type: "whatsapp_contact", reference: message.waId }), assistant = this.conversations!.addParticipant(context, connection.companyId, conversation.id, { type: "assistant", reference: connection.assistantProfileId }); return this.bindings!.createBinding(reconstructWhatsAppConversationBinding({ id: whatsAppConversationBindingId(`wcb_${randomUUID().replaceAll("-", "")}`), whatsAppConnectionId: connection.id, waId: message.waId, conversationId: conversation.id, customerParticipantId: customer.id, assistantParticipantId: assistant.id, createdAt: now, updatedAt: now })); })();
+    let binding = existing;
+    if (!binding) { this.diagnostic("whatsapp_webhook_conversation_creating", { phoneNumberId: message.phoneNumberId, messageId: message.wamid, connectionId: connection.id }); const conversation = this.conversations.open(context, connection.companyId, "whatsapp"), customer = this.conversations.addParticipant(context, connection.companyId, conversation.id, { type: "whatsapp_contact", reference: message.waId }), assistant = this.conversations.addParticipant(context, connection.companyId, conversation.id, { type: "assistant", reference: connection.assistantProfileId }); binding = this.bindings.createBinding(reconstructWhatsAppConversationBinding({ id: whatsAppConversationBindingId(`wcb_${randomUUID().replaceAll("-", "")}`), whatsAppConnectionId: connection.id, waId: message.waId, conversationId: conversation.id, customerParticipantId: customer.id, assistantParticipantId: assistant.id, createdAt: now, updatedAt: now })); }
     if (!binding) return;
     const externalEventId = message.wamid;
+    this.diagnostic("whatsapp_webhook_inbound_enqueuing", { phoneNumberId: message.phoneNumberId, messageId: message.wamid, connectionId: connection.id });
     this.events.captureInboundExecution(
       reconstructChannelProviderEvent({ id: channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: connection.id, externalEventId, state: "claimed", conversationId: null, conversationMessageId: null, createdAt: now, updatedAt: now }),
       reconstructConversationMessage({ id: conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`), conversationId: binding.conversationId, senderParticipantId: binding.customerParticipantId, direction: "inbound", content: message.text, idempotencyKey: key("inbound", message.wamid), executionRecordId: null, createdAt: now }),
@@ -114,7 +116,7 @@ export class WhatsAppWebhookService {
   }
   private async captureUnsupported(message: WhatsAppUnsupportedInboundEvent): Promise<void> {
     if (!this.connections || !this.events) return;
-    const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) return;
+    const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) { this.diagnostic("whatsapp_webhook_connection_unmatched", { phoneNumberId: message.phoneNumberId, messageId: message.wamid }); return; }
     const now = this.clock.now();
     this.events.captureUnsupportedExecution(
       reconstructChannelProviderEvent({ id: channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: connection.id, externalEventId: message.wamid, state: "completed", conversationId: null, conversationMessageId: null, createdAt: now, updatedAt: now }),
@@ -223,6 +225,7 @@ export class WhatsAppWebhookService {
     if (!api) throw new Error("WhatsApp credentials are unavailable.");
     return api.sendText(phoneNumberId, recipient, text);
   }
+  private diagnostic(event: string, value: Record<string, unknown>): void { console.info(JSON.stringify({ event, timestamp: new Date().toISOString(), ...value })); }
 }
 
 function key(kind: "inbound" | "reply", wamid: string): string { return `whatsapp-${kind}:${createHash("sha256").update(wamid).digest("hex")}`; }
