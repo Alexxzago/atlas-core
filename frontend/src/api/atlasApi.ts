@@ -15,6 +15,8 @@ type AuthenticationRecovery = (method: string) => Promise<boolean>;
 let authenticationRecovery: AuthenticationRecovery | null = null;
 const apiBaseUrl = (import.meta.env?.VITE_ATLAS_API_BASE_URL ?? "/api").replace(/\/$/, "");
 
+type JsonRecord = Record<string, unknown>;
+
 export function setAuthenticationRecovery(recovery: AuthenticationRecovery | null): void {
   authenticationRecovery = recovery;
 }
@@ -52,6 +54,52 @@ async function request<T>(path: string, options?: RequestInit, recoveryAttempted
 
 function segment(value: string | number): string { return encodeURIComponent(String(value)); }
 
+function malformedList(label: string): ApiError { return new ApiError(502, `${label} response is temporarily unavailable.`); }
+function record(value: unknown, label: string): JsonRecord { if (!value || typeof value !== "object" || Array.isArray(value)) throw malformedList(label); return value as JsonRecord; }
+function text(value: unknown, label: string): string { if (typeof value !== "string" || value.length === 0) throw malformedList(label); return value; }
+function string(value: unknown, label: string): string { if (typeof value !== "string") throw malformedList(label); return value; }
+function nullableText(value: unknown, label: string): string | null { if (value !== null && typeof value !== "string") throw malformedList(label); return value; }
+
+function workspaceListResponse(value: unknown): WorkspaceSummary[] {
+  if (!Array.isArray(value)) throw malformedList("Workspace list");
+  return value.map((item) => {
+    const workspace = record(item, "Workspace list");
+    if (!Array.isArray(workspace.capabilities) || !workspace.capabilities.every((capability) => typeof capability === "string")) throw malformedList("Workspace list");
+    return { id: text(workspace.id, "Workspace list"), name: text(workspace.name, "Workspace list"), role: text(workspace.role, "Workspace list"), capabilities: workspace.capabilities as WorkspaceSummary["capabilities"] };
+  });
+}
+
+function companyStatus(lifecycle: unknown): Company["status"] {
+  if (lifecycle === "attention_required" || lifecycle === "suspended" || lifecycle === "archived") return "failed";
+  if (lifecycle === "draft" || lifecycle === "configured" || lifecycle === "operational") return "ready";
+  throw malformedList("Company list");
+}
+
+function coreCompanyResponse(value: unknown): Company {
+  const company = record(value, "Company");
+  if (!Number.isSafeInteger(company.id) || (company.id as number) < 1) throw malformedList("Company");
+  return { id: company.id as number, name: text(company.name, "Company"), website: nullableText(company.website, "Company"), phone: "", email: "", status: companyStatus(company.lifecycle), createdAt: text(company.createdAt, "Company") };
+}
+
+function legacyCompanyResponse(value: unknown): Company {
+  const company = record(value, "Company");
+  if (!Number.isSafeInteger(company.id) || (company.id as number) < 1 || (company.status !== "processing" && company.status !== "ready" && company.status !== "failed")) throw malformedList("Company");
+  return { id: company.id as number, name: text(company.name, "Company"), website: nullableText(company.website, "Company"), phone: string(company.phone, "Company"), email: string(company.email, "Company"), status: company.status, createdAt: text(company.createdAt, "Company") };
+}
+
+function companyResponse(value: unknown): Company {
+  const response = record(value, "Company");
+  const company = "data" in response ? record(response.data, "Company") : response;
+  return "lifecycle" in company ? coreCompanyResponse(company) : legacyCompanyResponse(company);
+}
+
+function companyListResponse(value: unknown): Company[] {
+  if (Array.isArray(value)) return value.map(legacyCompanyResponse);
+  const envelope = record(value, "Company list");
+  if (!Array.isArray(envelope.data)) throw malformedList("Company list");
+  return envelope.data.map(coreCompanyResponse);
+}
+
 function operationalExecutionResponse(value: unknown): OperationalAssistantExecutionResponse {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new ApiError(502, "Assistant execution is temporarily unavailable.");
   const record = value as Record<string, unknown>;
@@ -83,7 +131,7 @@ export const atlasApi = {
   currentIdentity:():Promise<{userId:string;email:string;locale:string;status:string;workspaceAccess:"none";idleExpiresAt:string;absoluteExpiresAt:string}>=>request("/identity/me"),
   replacePassword:(csrf:string,currentPassword:string,newPassword:string,confirmation:string):Promise<void>=>request("/identity/password/replace",{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({currentPassword,newPassword,confirmation})}),
   logout:(csrf:string):Promise<void>=>request("/identity/logout",{method:"POST",headers:{"x-csrf-token":csrf},body:"{}"},true),
-  listWorkspaces:():Promise<WorkspaceSummary[]>=>request("/workspaces"),
+  listWorkspaces:async():Promise<WorkspaceSummary[]>=>workspaceListResponse(await request<unknown>("/workspaces")),
   selectedWorkspace:():Promise<WorkspaceSummary|null>=>request("/workspaces/selected"),
   createWorkspace:(csrf:string,name:string,timezone?:string,defaultLocale?:"en"|"es"):Promise<CreatedWorkspace>=>(request("/workspaces",{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({name,...(timezone?{timezone}:{}),...(defaultLocale?{defaultLocale}:{})})})),
   selectWorkspace:(csrf:string,id:string,signal?:AbortSignal):Promise<WorkspaceSummary>=>request(`/workspaces/${segment(id)}/select`,{method:"POST",headers:{"x-csrf-token":csrf},body:"{}",signal:signal??null}),
@@ -97,10 +145,10 @@ export const atlasApi = {
   changeMembershipRole:(csrf:string,workspaceId:string,membershipId:string,role:string):Promise<void>=>request(`/workspaces/${workspaceId}/memberships/${membershipId}/role`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({role})}),
   changeMembershipStatus:(csrf:string,workspaceId:string,membershipId:string,action:"suspend"|"reactivate"|"remove"):Promise<void>=>request(`/workspaces/${workspaceId}/memberships/${membershipId}/${action}`,{method:"POST",headers:{"x-csrf-token":csrf},body:"{}"}),
   transferOwnership:(csrf:string,workspaceId:string,targetMembershipId:string,actorRole:string):Promise<void>=>request(`/workspaces/${workspaceId}/transfer-ownership`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({targetMembershipId,actorRole})}),
-  listWorkspaceCompanies:(workspaceId:string,signal?:AbortSignal):Promise<Company[]>=>request(`/workspaces/${segment(workspaceId)}/companies`,{signal:signal??null}),
+  listWorkspaceCompanies:async(workspaceId:string,signal?:AbortSignal):Promise<Company[]>=>companyListResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies`,{signal:signal??null})),
   createWorkspaceCompany:(csrf:string,workspaceId:string,input:CompanyInput,signal?:AbortSignal):Promise<Company>=>request(`/workspaces/${segment(workspaceId)}/companies`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null}),
   createOnboardingCompany:(csrf:string,workspaceId:string,name:string):Promise<OnboardingCompanyResponse>=>request(`/workspaces/${segment(workspaceId)}/companies/onboarding`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({name})}),
-  getWorkspaceCompany:(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<Company>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}`,{signal:signal??null}),
+  getWorkspaceCompany:async(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<Company>=>companyResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}`,{signal:signal??null})),
   listAssistantProfiles:(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<AssistantProfile[]>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles`,{signal:signal??null}),
   getAssistantProfile:(workspaceId:string,companyId:number,profileId:string,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}`,{signal:signal??null}),
   createAssistantProfile:(csrf:string,workspaceId:string,companyId:number,input:CreateAssistantProfileInput,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null}),

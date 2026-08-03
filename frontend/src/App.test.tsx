@@ -116,6 +116,35 @@ test("redirects a direct onboarding refresh with an existing workspace and compa
   await screen.findByRole("heading", { name: "Company overview" });
 });
 
+test("routes the production Company Core list envelope to the dashboard", async () => {
+  const coreCompany = { id: 1, name: "Company", slug: "company", description: null, website: null, branding: { publicName: null, logoAssetReference: null, colorTokens: {} }, configuration: null, lifecycle: "operational", version: 1, createdAt: "2026-01-01", updatedAt: "2026-01-01", lifecycleChangedAt: "2026-01-01", suspendedAt: null, archivedAt: null };
+  window.history.replaceState({}, "", "/onboarding/workspace");
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/session/bootstrap")) return Promise.resolve(json({ status: "authenticated", identity, csrfToken: "csrf", csrfGeneration: 1 }));
+    if (url.endsWith("/workspaces") && !url.includes("selected")) return Promise.resolve(json([workspace]));
+    if (url.endsWith("/workspaces/selected") || url.endsWith("/workspaces/workspace/select")) return Promise.resolve(json(workspace));
+    if (url.endsWith("/workspaces/workspace/companies")) return Promise.resolve(json({ data: [coreCompany] }));
+    return Promise.resolve(json({}, 404));
+  }));
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
+});
+
+test("routes an empty production Company Core list envelope to company setup", async () => {
+  window.history.replaceState({}, "", "/onboarding/workspace");
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/session/bootstrap")) return Promise.resolve(json({ status: "authenticated", identity, csrfToken: "csrf", csrfGeneration: 1 }));
+    if (url.endsWith("/workspaces") && !url.includes("selected")) return Promise.resolve(json([workspace]));
+    if (url.endsWith("/workspaces/selected") || url.endsWith("/workspaces/workspace/select")) return Promise.resolve(json(workspace));
+    if (url.endsWith("/workspaces/workspace/companies")) return Promise.resolve(json({ data: [] }));
+    return Promise.resolve(json({}, 404));
+  }));
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/onboarding/company"));
+});
+
 test("treats an expired session as unauthenticated", async () => {
   window.history.replaceState({}, "", "/");
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({}, 401))));

@@ -94,6 +94,21 @@ test("shows a retryable error instead of workspace setup when workspace loading 
   expect(window.location.pathname).toBe("/onboarding/workspace");
 });
 
+test("shows a retryable error when the Company list response is malformed", async () => {
+  window.history.replaceState({}, "", "/onboarding/workspace");
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/session/bootstrap")) return Promise.resolve(json({ status: "authenticated", identity, csrfToken: "csrf", csrfGeneration: 1 }));
+    if (url.endsWith("/workspaces") && !url.includes("selected")) return Promise.resolve(json([workspace]));
+    if (url.endsWith("/workspaces/selected") || url.endsWith("/workspaces/workspace/select")) return Promise.resolve(json(workspace));
+    if (url.endsWith("/workspaces/workspace/companies")) return Promise.resolve(json({ data: {} }));
+    return Promise.resolve(json({}, 404));
+  }));
+  renderGuided();
+  expect((await screen.findByRole("alert")).textContent).toBe("We couldn't load the companies.");
+  expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+});
+
 test("redirects unauthenticated onboarding access through the shared guard", async () => {
   window.history.replaceState({}, "", "/onboarding/company");
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({}, 401))));
