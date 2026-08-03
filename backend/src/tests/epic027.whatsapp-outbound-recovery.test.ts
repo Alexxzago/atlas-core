@@ -53,6 +53,22 @@ test("EPIC-027 Phase 5 records terminal Meta 4xx and credential failures without
   }
 });
 
+test("EPIC-027 Phase 5 logs only sanitized Meta outbound failure diagnostics", async () => {
+  const original = console.info, logs: string[] = [];
+  console.info = (value: unknown): void => { logs.push(String(value)); };
+  try {
+    const value = setup(new WhatsAppCloudApiError(400, null, { graphApiVersion: "v26.0", httpStatus: 400, providerCode: 131030, providerSubcode: 123, errorType: "OAuthException", transient: false, sanitizedDetailsCategory: "outside_test_recipient_set" }));
+    await value.service.dispatchReady("worker");
+  } finally { console.info = original; }
+  assert.equal(logs.length, 1);
+  const diagnostic = JSON.parse(logs[0]!) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(diagnostic).sort(), ["connectionId", "errorType", "event", "graphApiVersion", "httpStatus", "operation", "outboundDeliveryId", "providerCode", "providerSubcode", "sanitizedDetailsCategory", "timestamp", "transient"]);
+  assert.equal(diagnostic.event, "whatsapp_provider_outbound_failed");
+  assert.equal(diagnostic.sanitizedDetailsCategory, "outside_test_recipient_set");
+  const text = logs[0]!;
+  assert.equal(text.includes("token") || text.includes("Reply") || text.includes('"wa"'), false);
+});
+
 test("EPIC-027 Phase 5 accepts eventually, terminates exhausted retries, and recovers expired leases", async () => {
   const eventual = setup(null);
   await eventual.service.dispatchReady("worker");

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
 import { WhatsAppWebhookService } from "../whatsapp/services/WhatsAppWebhookService.js";
-import { WhatsAppCloudApiProvider } from "../whatsapp/providers/WhatsAppCloudApiProvider.js";
+import { WhatsAppCloudApiError, WhatsAppCloudApiProvider } from "../whatsapp/providers/WhatsAppCloudApiProvider.js";
 
 test("EPIC-017 webhook verifies signatures and parses only inbound text", () => {
   const service = new WhatsAppWebhookService({ appSecret: "secret", verifyToken: "verify" }), raw = Buffer.from(JSON.stringify({ entry: [{ changes: [{ field: "messages", value: { metadata: { phone_number_id: "phone" }, messages: [{ type: "text", from: "wa", id: "wamid", text: { body: "Hello" } }, { type: "image", from: "wa", id: "ignored" }] } }] }] }));
@@ -17,6 +17,12 @@ test("EPIC-017 WhatsApp Cloud API provider returns Meta IDs and rejects failed d
   assert.equal(await accepted.sendText("phone", "wa", "Answer"), "wamid-out");
   const rejected = new WhatsAppCloudApiProvider("token", "v22.0", async () => new Response("", { status: 500 }));
   await assert.rejects(() => rejected.sendText("phone", "wa", "Answer"));
+  const requests: Array<{ url: string; method: string | undefined; authorization: string | null; contentType: string | null; body: string | null }> = [];
+  const contract = new WhatsAppCloudApiProvider("secret-token", "v26.0", async (url, init) => { requests.push({ url: String(url), method: init?.method, authorization: new Headers(init?.headers).get("authorization"), contentType: new Headers(init?.headers).get("content-type"), body: typeof init?.body === "string" ? init.body : null }); return new Response(JSON.stringify({ messages: [{ id: "wamid-contract" }] }), { status: 200 }); });
+  assert.equal(await contract.sendText("phone-id", "recipient-wa-id", "private reply"), "wamid-contract");
+  assert.deepEqual(requests, [{ url: "https://graph.facebook.com/v26.0/phone-id/messages", method: "POST", authorization: "Bearer secret-token", contentType: "application/json", body: JSON.stringify({ messaging_product: "whatsapp", to: "recipient-wa-id", type: "text", text: { body: "private reply" } }) }]);
+  const metaRejected = new WhatsAppCloudApiProvider("secret-token", "v26.0", async () => new Response(JSON.stringify({ error: { message: "Recipient recipient-wa-id is not in the test list", type: "OAuthException", code: 131030, error_subcode: 123, is_transient: false, error_data: { details: "Recipient recipient-wa-id is outside the test recipient set" }, fbtrace_id: "trace-id" } }), { status: 400 }));
+  await assert.rejects(() => metaRejected.sendText("phone-id", "recipient-wa-id", "private reply"), (error: unknown) => { assert.ok(error instanceof WhatsAppCloudApiError); assert.deepEqual(error.diagnostic, { graphApiVersion: "v26.0", httpStatus: 400, providerCode: 131030, providerSubcode: 123, errorType: "OAuthException", transient: false, sanitizedDetailsCategory: "outside_test_recipient_set" }); return true; });
 });
 
 test("WhatsApp validation classifies Graph outcomes and logs only sanitized diagnostics", async () => {

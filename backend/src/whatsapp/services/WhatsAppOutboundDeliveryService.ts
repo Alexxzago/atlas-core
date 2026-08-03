@@ -5,7 +5,7 @@ import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import type { OutboundDeliveryRepositoryPort, ProviderMessageRecordRepositoryPort } from "../../transport/application/ports.js";
 import { outboundDeliveryId, providerMessageRecordId, reconstructOutboundDelivery, reconstructProviderMessageRecord, type OutboundDelivery } from "../../transport/domain/providerDelivery.js";
 import type { WhatsAppConnectionId } from "../domain/whatsappConnection.js";
-import { WhatsAppCloudApiError, type WhatsAppCloudApiPort } from "../providers/WhatsAppCloudApiProvider.js";
+import { WhatsAppCloudApiError, type WhatsAppCloudApiPort, type WhatsAppOutboundFailureDiagnostic } from "../providers/WhatsAppCloudApiProvider.js";
 import type { WhatsAppConnectionRepositoryPort, WhatsAppConversationRepositoryPort, WhatsAppCredentialResolverPort } from "../application/ports.js";
 import type { WhatsAppConnectionService } from "./WhatsAppConnectionService.js";
 
@@ -15,6 +15,7 @@ export interface WhatsAppOutboundDeliveryResult {
   readonly id: string;
   readonly state: "pending" | "accepted" | "uncertain";
 }
+type OutboundFailureLog = { readonly event: "whatsapp_provider_outbound_failed"; readonly operation: "send_text"; readonly graphApiVersion: string | null; readonly httpStatus: number | null; readonly providerCode: number | null; readonly providerSubcode: number | null; readonly errorType: string | null; readonly transient: boolean | null; readonly sanitizedDetailsCategory: WhatsAppOutboundFailureDiagnostic["sanitizedDetailsCategory"]; readonly connectionId: string; readonly outboundDeliveryId: string; readonly timestamp: string; };
 
 export class WhatsAppOutboundDeliveryService {
   public constructor(
@@ -71,6 +72,7 @@ export class WhatsAppOutboundDeliveryService {
       this.deliveries.settleLease(delivery.id, owner, "accepted", null, null, this.clock.now());
       this.operationalState?.recordProviderActivity(context, connection.companyId, connection.id);
     } catch (error: unknown) {
+      this.logFailure(error, connection.id, delivery.id);
       this.settle(owner, delivery, classify(error));
       this.operationalState?.recordProviderFailure(context, connection.companyId, connection.id);
     }
@@ -81,6 +83,7 @@ export class WhatsAppOutboundDeliveryService {
     const nextAttemptAt = outcome === "retryable" ? retryAt(now, delivery.attemptCount, result.retryAfterMilliseconds) : null;
     this.deliveries.settleLease(delivery.id, owner, outcome, nextAttemptAt, result.safeErrorCategory, now);
   }
+  private logFailure(error: unknown, connectionId: string, outboundDeliveryId: string): void { const diagnostic = error instanceof WhatsAppCloudApiError ? error.diagnostic : null; console.info(JSON.stringify({ event: "whatsapp_provider_outbound_failed", operation: "send_text", graphApiVersion: diagnostic?.graphApiVersion ?? null, httpStatus: diagnostic?.httpStatus ?? null, providerCode: diagnostic?.providerCode ?? null, providerSubcode: diagnostic?.providerSubcode ?? null, errorType: diagnostic?.errorType ?? null, transient: diagnostic?.transient ?? null, sanitizedDetailsCategory: diagnostic?.sanitizedDetailsCategory ?? "provider_rejected", connectionId, outboundDeliveryId, timestamp: new Date().toISOString() } satisfies OutboundFailureLog)); }
 }
 
 function safe(value: OutboundDelivery): WhatsAppOutboundDeliveryResult {
