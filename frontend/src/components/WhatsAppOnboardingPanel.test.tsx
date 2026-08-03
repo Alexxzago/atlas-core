@@ -24,4 +24,22 @@ describe("WhatsAppOnboardingPanel", () => {
     await waitFor(() => expect(activate.disabled).toBe(false));
     expect(fetchMock.mock.calls[3]?.[0]).toBe(`/api/workspaces/wsp/companies/1/whatsapp-connections/${initial.connection.id}/validation`);
   });
+
+  it("enables activation immediately after validation even when the generic readiness response is blocked", async () => {
+    const initial = status("not_validated");
+    const fetchMock = vi.fn().mockResolvedValueOnce(json([initial.connection])).mockResolvedValueOnce(json(readiness("blocked"))).mockResolvedValueOnce(json(initial)).mockResolvedValueOnce(json(status("valid"))).mockResolvedValueOnce(json(readiness("blocked")));
+    vi.stubGlobal("fetch", fetchMock); renderPanel();
+    await screen.findByRole("option", { name: "123" }); fireEvent.change(screen.getByRole("combobox", { name: "WhatsApp connection" }), { target: { value: initial.connection.id } });
+    fireEvent.click(await screen.findByRole("button", { name: "Validate credentials" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Activate WhatsApp" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("shows a validation error and keeps activation disabled when the provider returns an invalid outcome", async () => {
+    const initial = status("not_validated"), invalid = { ...status("invalid"), validationFailureCode: "provider_unavailable", healthState: "degraded" as const };
+    const fetchMock = vi.fn().mockResolvedValueOnce(json([initial.connection])).mockResolvedValueOnce(json(readiness("blocked"))).mockResolvedValueOnce(json(initial)).mockResolvedValueOnce(json(invalid)).mockResolvedValueOnce(json(readiness("blocked")));
+    vi.stubGlobal("fetch", fetchMock); renderPanel();
+    await screen.findByRole("option", { name: "123" }); fireEvent.change(screen.getByRole("combobox", { name: "WhatsApp connection" }), { target: { value: initial.connection.id } });
+    fireEvent.click(await screen.findByRole("button", { name: "Validate credentials" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("temporarily unavailable"); expect((screen.getByRole("button", { name: "Activate WhatsApp" }) as HTMLButtonElement).disabled).toBe(true); expect(screen.queryByText("Credentials validated.")).toBeNull();
+  });
 });

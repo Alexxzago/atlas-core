@@ -6,6 +6,7 @@ import type { AssistantProfile, AssistantReadinessAssessment, CompanyStatus, Per
 interface Props { readonly csrf: string; readonly workspaceId: string | null; readonly companyId: number | null; readonly companyStatus?: CompanyStatus | null; readonly profiles: readonly AssistantProfile[]; readonly capabilities: readonly Permission[]; }
 
 function errorMessage(error: unknown): string { return error instanceof ApiError ? error.message : "WhatsApp setup is temporarily unavailable."; }
+function validationError(status: WhatsAppConnectionOperationalStatus): string { return status.validationFailureCode === "provider_unavailable" ? "WhatsApp provider validation is temporarily unavailable." : "WhatsApp credentials could not be validated."; }
 function blockerKey(value: string): "whatsapp.blocker.defaultAssistantMissing" | "whatsapp.blocker.publishedKnowledgeMissing" | "whatsapp.blocker.generic" { if (value === "default_assistant_missing") return "whatsapp.blocker.defaultAssistantMissing"; if (value === "published_knowledge_missing") return "whatsapp.blocker.publishedKnowledgeMissing"; return "whatsapp.blocker.generic"; }
 
 export function WhatsAppOnboardingPanel({ csrf, workspaceId, companyId, profiles, capabilities }: Props): React.JSX.Element | null {
@@ -66,7 +67,7 @@ export function WhatsAppOnboardingPanel({ csrf, workspaceId, companyId, profiles
     setPending(true); setError(null); setNotice(null);
     try {
       const updated = action === "validate" ? await atlasApi.validateWhatsAppConnection(csrf, workspaceId, companyId, connectionId) : action === "activate" ? await atlasApi.activateWhatsAppConnection(csrf, workspaceId, companyId, connectionId) : await atlasApi.deactivateWhatsAppConnection(csrf, workspaceId, companyId, connectionId);
-      setStatus(updated); setConnections((current) => current.map((connection) => connection.id === updated.connection.id ? updated.connection : connection)); await refreshReadiness(); setNotice(t(action === "validate" ? "whatsapp.validated" : action === "activate" ? "whatsapp.activated" : "whatsapp.deactivated"));
+      setStatus(updated); setConnections((current) => current.map((connection) => connection.id === updated.connection.id ? updated.connection : connection)); await refreshReadiness(); if (action === "validate" && updated.validationState !== "valid") { setError(validationError(updated)); return; } setNotice(t(action === "validate" ? "whatsapp.validated" : action === "activate" ? "whatsapp.activated" : "whatsapp.deactivated"));
     } catch (cause: unknown) { setError(errorMessage(cause)); } finally { setPending(false); }
   };
 
