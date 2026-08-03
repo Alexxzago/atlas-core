@@ -2,7 +2,7 @@ import type { WhatsAppConnectionId } from "./whatsappConnection.js";
 
 export type WhatsAppConnectionValidationState = "not_validated" | "valid" | "invalid";
 export type WhatsAppConnectionHealthState = "inactive" | "healthy" | "degraded";
-export type WhatsAppConnectionFailureCode = "credentials_invalid" | "provider_identity_mismatch" | "provider_unavailable";
+export type WhatsAppConnectionFailureCode = "credentials_invalid" | "provider_identity_mismatch" | "invalid_credentials" | "insufficient_permissions" | "phone_number_not_found" | "business_account_mismatch" | "rate_limited" | "provider_unavailable" | "provider_timeout" | "provider_rejected";
 
 export interface EncryptedWhatsAppConnectionCredentials {
   readonly whatsAppConnectionId: WhatsAppConnectionId;
@@ -58,7 +58,7 @@ function healthState(value: string): WhatsAppConnectionHealthState {
 }
 
 function failureCode(value: WhatsAppConnectionFailureCode | null): WhatsAppConnectionFailureCode | null {
-  if (value === null || value === "credentials_invalid" || value === "provider_identity_mismatch" || value === "provider_unavailable") {
+  if (value === null || value === "credentials_invalid" || value === "provider_identity_mismatch" || value === "invalid_credentials" || value === "insufficient_permissions" || value === "phone_number_not_found" || value === "business_account_mismatch" || value === "rate_limited" || value === "provider_unavailable" || value === "provider_timeout" || value === "provider_rejected") {
     return value;
   }
   throw new WhatsAppConnectionOnboardingDomainError("WhatsApp failure code is invalid.");
