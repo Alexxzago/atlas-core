@@ -26,6 +26,7 @@ import { AuthenticationService } from "./identity/services/authenticationService
 import { createIdentityRouter } from "./routes/identity.js";
 import { firecrawlProvider } from "./providers/firecrawl.js";
 import { GeminiKnowledgeFactExtractor, geminiProvider } from "./providers/gemini.js";
+import { ManualTextKnowledgeFactExtractor } from "./knowledge/services/manualTextKnowledgeFactExtractor.js";
 import { companyRepository } from "./repositories/companyRepository.js";
 import { knowledgeRepository } from "./repositories/knowledgeRepository.js";
 import { workspaceRepository } from "./repositories/workspaceRepository.js";
@@ -173,7 +174,7 @@ export const conversationService = new ConversationService(new ConversationRepos
 const publicWebChatSessionService = new PublicWebChatSessionService(webChatConnectionService, conversationService, new WebChatSessionRepository(database), identityClock);
 export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock), new InMemoryConversationTurnLock(), "gemini", 20);
 const publicWebChatConversationService = new PublicWebChatConversationService(publicWebChatSessionService, operationalConversationTurnService, conversationService);
-const companyKnowledgeService=new FrozenKnowledgeService(companyRepository,new CompanyKnowledgeRepository(database),new SecurePublicUrlProvider(),new WorkerPdfTextExtractor(),new GeminiKnowledgeFactExtractor(geminiProvider),identityClock);
+const companyKnowledgeService=new FrozenKnowledgeService(companyRepository,new CompanyKnowledgeRepository(database),new SecurePublicUrlProvider(),new WorkerPdfTextExtractor(),new ManualTextKnowledgeFactExtractor(new GeminiKnowledgeFactExtractor(geminiProvider)),identityClock);
 const companyKnowledgeControllers=createCompanyKnowledgeControllers(companyKnowledgeService);
 const onboardingService = new OnboardingService(companyRepository,knowledgeRepository,firecrawlProvider,geminiProvider,cleanMarkdown,new FileMarkdownDebugStore(resolve(repositoryRoot,"knowledge")),companyKnowledgeService);
 

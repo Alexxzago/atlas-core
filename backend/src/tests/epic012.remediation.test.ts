@@ -23,8 +23,8 @@ test("never-settling and late-settling extraction time out, persist failure, and
   for(const late of[false,true]){
     const db=createDatabase(":memory:"),context=createWorkspaceContext(new WorkspaceRepository(db).resolveDefault()),companies=new CompanyRepository(db),company=companies.create(context,{name:`Timeout ${late}`,website:`https://timeout-${late}.test`}),repository=new CompanyKnowledgeRepository(db);
     const extractor={extract:async()=>late?await new Promise(resolve=>setTimeout(()=>resolve(extracted),40)):await new Promise<never>(()=>{})};
-    const service=new KnowledgeService(companies,repository,{acquire:async()=>{throw 0;}},{extract:async()=>{throw 0;}},extractor,new SystemClock(),{extraction:10,ingestion:25});
-    await assert.rejects(service.create(context,actor,company.id,"manual_text",{name:"Facts",text:"facts"}),(error:unknown)=>error instanceof KnowledgeDomainError&&error.code==="knowledge_extraction_timeout");
+    const service=new KnowledgeService(companies,repository,{acquire:async()=>({text:"facts",mediaType:"text/plain",inputBytes:5})},{extract:async()=>{throw 0;}},extractor,new SystemClock(),{extraction:10,ingestion:25});
+    await assert.rejects(service.create(context,actor,company.id,"public_url",{name:"Facts",url:"https://timeout.test"}),(error:unknown)=>error instanceof KnowledgeDomainError&&error.code==="knowledge_extraction_timeout");
     await new Promise(resolve=>setTimeout(resolve,50));
     const row=db.prepare("SELECT status,failure_code FROM knowledge_source_revisions").get()as{status:string;failure_code:string};assert.equal(row.status,"failed");assert.equal(row.failure_code,"knowledge_extraction_timeout");
     assert.equal(repository.loadPublished(context,company.id),null);db.close();
