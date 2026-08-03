@@ -16,6 +16,7 @@ import { DashboardPage } from "../dashboard/DashboardPage";
 import { buildDashboardViewModel } from "../dashboard/dashboardPresentation";
 import { useRouter } from "../routing/RouterProvider";
 import { ConversationInbox } from "./ConversationInbox";
+import { CompanySetupChecklist } from "./CompanySetupChecklist";
 
 interface Props { csrf: string; email: string; onPassword: () => void; onLogout: () => void }
 
@@ -61,10 +62,10 @@ function AuthenticatedCompanyPortalContent({ csrf, email, onPassword, onLogout }
     if (route.name === "conversations") return <><PageHeader title={t("shell.conversationsTitle")} description={t("shell.conversationsDescription")} /><ConversationInbox csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} companyId={state.selectedCompanyId} capabilities={state.selectedWorkspace?.capabilities ?? []}/></>;
     if (route.name === "analytics") return <><PageHeader title={t("shell.analyticsTitle")} description={t("shell.analyticsDescription")} /><EmptyState title={t("shell.analyticsTitle")} description={t("shell.analyticsDescription")} /></>;
     if (route.name === "settings") return <><PageHeader title={t("shell.settingsTitle")} description={t("shell.settingsDescription")} /><WorkspaceMembershipPortal csrf={csrf} workspaces={state.workspaces} selectedWorkspace={state.selectedWorkspace} pendingWorkspaceId={state.pendingWorkspaceId} loading={state.workspacesLoading} error={state.workspaceError} onSelectWorkspace={(id) => { void selectWorkspace(id).then((selected) => { if (selected) navigate("/companies", { replace: true }); }); }} onWorkspacesChanged={() => void refresh()} onActiveWorkspaceLeft={clearWorkspace}/></>;
-    if (route.name === "company-overview") return <><PageHeader title={t("shell.companyOverviewTitle")} description={t("shell.companyOverviewDescription")} {...(selectedCompany ? { trail: selectedCompany.name } : {})} />{companySubnav}<EmptyState title={t("shell.companyOverviewTitle")} description={t("shell.companyOverviewDescription")} /></>;
+    if (route.name === "company-overview") return <><PageHeader title={t("shell.companyOverviewTitle")} description={t("shell.companyOverviewDescription")} {...(selectedCompany ? { trail: selectedCompany.name } : {})} />{companySubnav}{state.selectedWorkspace && selectedCompany ? <CompanySetupChecklist workspaceId={state.selectedWorkspace.id} companyId={selectedCompany.id} profiles={state.profiles} /> : <EmptyState title={t("shell.companyOverviewTitle")} description={t("shell.companyOverviewDescription")} />}</>;
     if (route.name === "company-assistant") return <><PageHeader title={t("shell.assistantTitle")} description={t("shell.assistantDescription")} trail={selectedCompany?.name ?? ""} />{companySubnav}{assistantPanel}</>;
     if (route.name === "company-knowledge") return <><PageHeader title={t("shell.knowledgeTitle")} description={t("shell.knowledgeDescription")} trail={selectedCompany?.name ?? ""} />{companySubnav}{knowledgePanel}</>;
-    if (route.name === "company-channels") return <><PageHeader title={t("shell.channelsTitle")} description={t("shell.channelsDescription")} trail={selectedCompany?.name ?? ""} />{companySubnav}{whatsappPanel}{webChatPanel}</>;
+    if (route.name === "company-channels") return <><PageHeader title={t("shell.channelsTitle")} description={t("shell.channelsDescription")} trail={selectedCompany?.name ?? ""} />{companySubnav}<section className="authenticated-section"><p>{t("channels.overview")}</p><button className="button button--secondary" type="button" onClick={() => navigate(`/companies/${requestedCompanyId}/channels/whatsapp`)}>{t("channels.whatsapp")}</button></section>{webChatPanel}</>;
     if (route.name === "company-whatsapp") return <><PageHeader title={t("shell.whatsappTitle")} description={t("shell.whatsappDescription")} trail={selectedCompany?.name ?? ""} />{companySubnav}{whatsappPanel}</>;
     return <></>;
   };

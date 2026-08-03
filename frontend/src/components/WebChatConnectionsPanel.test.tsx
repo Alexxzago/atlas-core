@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { AssistantProfile, WebChatConnection } from "../types/api";
+import { I18nProvider } from "../i18n/I18nContext";
 import { WebChatConnectionsPanel } from "./WebChatConnectionsPanel";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -9,7 +10,7 @@ const profile: AssistantProfile = { id: "asp_0123456789abcdef0123456789abcdef", 
 const connection: WebChatConnection = { id: "wcc_0123456789abcdef0123456789abcdef", publicId: "wcp_0123456789abcdef0123456789abcdef", assistantProfileId: profile.id, status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
 
 function renderPanel(overrides: Partial<React.ComponentProps<typeof WebChatConnectionsPanel>> = {}) {
-  return render(<WebChatConnectionsPanel csrf="csrf" workspaceId="wsp" companyId={1} companyStatus="ready" profiles={[profile]} capabilities={["company:read", "company:manage"]} {...overrides}/>);
+  return render(<I18nProvider><WebChatConnectionsPanel csrf="csrf" workspaceId="wsp" companyId={1} companyStatus="ready" profiles={[profile]} capabilities={["company:read", "company:manage"]} {...overrides}/></I18nProvider>);
 }
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -39,7 +40,7 @@ describe("WebChatConnectionsPanel", () => {
   it("creates a connection exactly once after an explicit click and refreshes the list", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(json([])).mockResolvedValueOnce(json(connection, 201)).mockResolvedValueOnce(json([connection])); vi.stubGlobal("fetch", fetchMock);
     renderPanel();
-    await screen.findByText("No Web Chat Connections yet"); fireEvent.change(screen.getByRole("combobox"), { target: { value: profile.id } }); fireEvent.click(screen.getByRole("button", { name: "Crear conexión" }));
+    await screen.findByText("No Web Chat Connections yet"); fireEvent.change(screen.getByRole("combobox"), { target: { value: profile.id } }); fireEvent.click(screen.getByRole("button", { name: "Create connection" }));
     await screen.findByText(connection.publicId);
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/workspaces/wsp/companies/1/web-chat-connections");
     expect(JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))).toEqual({ assistantProfileId: profile.id });
@@ -48,7 +49,7 @@ describe("WebChatConnectionsPanel", () => {
 
   it("prevents duplicate creation while a request is pending and disables an empty selection", async () => {
     let resolve!: (response: Response) => void; const pending = new Promise<Response>((done) => { resolve = done; }); const fetchMock = vi.fn().mockResolvedValueOnce(json([])).mockReturnValueOnce(pending).mockResolvedValueOnce(json([connection])); vi.stubGlobal("fetch", fetchMock);
-    renderPanel(); await screen.findByText("No Web Chat Connections yet"); const create = screen.getByRole("button", { name: "Crear conexión" }) as HTMLButtonElement; expect(create.disabled).toBe(true); fireEvent.change(screen.getByRole("combobox"), { target: { value: profile.id } }); fireEvent.click(create); fireEvent.click(create); expect(fetchMock).toHaveBeenCalledTimes(2); resolve(json(connection, 201)); await screen.findByText(connection.publicId);
+    renderPanel(); await screen.findByText("No Web Chat Connections yet"); const create = screen.getByRole("button", { name: "Create connection" }) as HTMLButtonElement; expect(create.disabled).toBe(true); fireEvent.change(screen.getByRole("combobox"), { target: { value: profile.id } }); fireEvent.click(create); fireEvent.click(create); expect(fetchMock).toHaveBeenCalledTimes(2); resolve(json(connection, 201)); await screen.findByText(connection.publicId);
   });
 
   it("wires copy, open, and lifecycle actions", async () => {
@@ -63,15 +64,15 @@ describe("WebChatConnectionsPanel", () => {
   it("renders backend errors", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ error: "Assistant Profile is not executable." }, 409)));
     const fetchMock = vi.fn().mockResolvedValueOnce(json([])).mockResolvedValueOnce(json({ error: "Assistant Profile is not executable." }, 409)); vi.stubGlobal("fetch", fetchMock);
-    renderPanel(); await screen.findByText("No Web Chat Connections yet"); fireEvent.change(screen.getByRole("combobox"), { target: { value: profile.id } }); fireEvent.click(screen.getByRole("button", { name: "Crear conexión" }));
+    renderPanel(); await screen.findByText("No Web Chat Connections yet"); fireEvent.change(screen.getByRole("combobox"), { target: { value: profile.id } }); fireEvent.click(screen.getByRole("button", { name: "Create connection" }));
     expect((await screen.findByRole("alert")).textContent).toContain("Assistant Profile is not executable.");
   });
 
   it("blocks creation for a Company that is not ready", async () => {
     const fetchMock = vi.fn().mockResolvedValue(json([])); vi.stubGlobal("fetch", fetchMock);
     renderPanel({ companyStatus: "processing" }); await screen.findByText("No Web Chat Connections yet"); fireEvent.change(screen.getByRole("combobox"), { target: { value: profile.id } });
-    expect((screen.getByRole("button", { name: "Crear conexión" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText("La empresa todavía no está lista. Incorporá y publicá conocimiento antes de crear una conexión de chat.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Create connection" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Publish Knowledge before creating a chat connection.")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

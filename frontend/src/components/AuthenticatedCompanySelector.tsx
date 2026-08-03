@@ -35,12 +35,13 @@ export function AuthenticatedCompanySelector(props: Props): React.JSX.Element {
     {props.workspaceSelected && props.loading && <p role="status">{t("portal.companiesLoading")}</p>}
     {props.workspaceSelected && props.error && <div className="inline-message inline-message--error" role="alert"><p>{t("portal.companiesError")}</p><button className="button button--secondary" type="button" onClick={props.onRetry}>{t("common.retry")}</button></div>}
     {props.workspaceSelected && !props.loading && !props.error && props.companies.length === 0 && <p className="state-copy">{t("portal.companiesEmpty")}</p>}
-    {props.companies.length > 0 && <label className="form-field" htmlFor="authenticated-company-selector">
+     {props.companies.length > 0 && <label className="form-field" htmlFor="authenticated-company-selector">
       <span>{t("portal.companySelect")}</span>
       <select id="authenticated-company-selector" value={props.selectedCompanyId ?? ""} onChange={(event) => { if (event.target.value) props.onCompanySelected(Number(event.target.value)); }}>
         <option value="">{t("portal.companyNone")}</option>
         {props.companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-      </select>
-    </label>}
-  </section>;
+       </select>
+     </label>}
+     {props.companies.length > 0 && <div className="action-row">{props.companies.map((company) => <button className="button button--secondary" key={company.id} type="button" onClick={() => props.onCompanySelected(company.id)}>{t("companies.manage")}: {company.name}</button>)}</div>}
+   </section>;
 }
