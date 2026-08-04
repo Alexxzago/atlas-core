@@ -76,7 +76,7 @@ function AuthenticatedCompanyPortalContent({ csrf, email, onPassword, onLogout }
     if (route.name === "company-knowledge") return knowledgePanel;
     if (route.name === "company-channels") return <>{requestedCompanyId && <ChannelHub companyId={requestedCompanyId} onNavigate={navigate}/>}</>;
     if (route.name === "company-web-chat") return <><ContextBackLink href={`/companies/${requestedCompanyId}/channels`} label={t("channels.back")} onNavigate={(event)=>{event.preventDefault();navigate(`/companies/${requestedCompanyId}/channels`);}}/>{webChatPanel}</>;
-    if (route.name === "company-whatsapp") return <><ContextBackLink href={`/companies/${requestedCompanyId}/channels`} label={t("channels.back")} onNavigate={(event)=>{event.preventDefault();navigate(`/companies/${requestedCompanyId}/channels`);}}/>{whatsappPanel}</>;
+    if (route.name === "company-whatsapp") return whatsappPanel;
     return <></>;
   };
 
