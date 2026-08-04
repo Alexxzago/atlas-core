@@ -4,6 +4,7 @@ import { parseAppRoute, parsePortalRoute, portalPath } from "./routes.ts";
 
 test("parses the frozen portal route hierarchy", () => {
   assert.deepEqual(parsePortalRoute("/companies/42/channels/whatsapp"), { name: "company-whatsapp", companyId: 42 });
+  assert.deepEqual(parsePortalRoute("/companies/42/channels/web-chat"), { name: "company-web-chat", companyId: 42 });
   assert.deepEqual(parsePortalRoute("/companies/42/knowledge"), { name: "company-knowledge", companyId: 42 });
   assert.deepEqual(parsePortalRoute("/dashboard"), { name: "dashboard" });
 });
@@ -17,6 +18,7 @@ test("rejects invalid company identifiers without a resource lookup", () => {
 test("builds canonical company paths", () => {
   assert.equal(portalPath({ name: "company-overview", companyId: 7 }), "/companies/7");
   assert.equal(portalPath({ name: "company-whatsapp", companyId: 7 }), "/companies/7/channels/whatsapp");
+  assert.equal(portalPath({ name: "company-web-chat", companyId: 7 }), "/companies/7/channels/web-chat");
 });
 
 test("classifies public and authenticated application routes", () => {

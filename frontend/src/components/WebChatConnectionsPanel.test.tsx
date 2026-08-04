@@ -25,9 +25,9 @@ describe("WebChatConnectionsPanel", () => {
   it("renders connections and their dynamic public URLs", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json([connection])));
     renderPanel();
-    expect(await screen.findByText(connection.publicId)).toBeTruthy();
-    expect(screen.getAllByText("Website Assistant")).toHaveLength(2);
-    expect(screen.getByText(`${window.location.origin}/chat/${connection.publicId}`)).toBeTruthy();
+    expect(await screen.findByRole("link", { name: `${window.location.origin}/chat/${connection.publicId}` })).toBeTruthy();
+    expect(screen.getAllByText("Website Assistant").length).toBeGreaterThan(0);
+    expect(screen.queryByText(connection.publicId)).toBeNull();
   });
 
   it("changes selection without creating a connection", async () => {
@@ -41,7 +41,7 @@ describe("WebChatConnectionsPanel", () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(json([])).mockResolvedValueOnce(json(connection, 201)).mockResolvedValueOnce(json([connection])); vi.stubGlobal("fetch", fetchMock);
     renderPanel();
     await screen.findByText("No Web Chat Connections yet"); fireEvent.change(screen.getByRole("combobox"), { target: { value: profile.id } }); fireEvent.click(screen.getByRole("button", { name: "Create connection" }));
-    await screen.findByText(connection.publicId);
+    await screen.findByRole("link", { name: `${window.location.origin}/chat/${connection.publicId}` });
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/workspaces/wsp/companies/1/web-chat-connections");
     expect(JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))).toEqual({ assistantProfileId: profile.id });
     expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/workspaces/wsp/companies/1/web-chat-connections");
@@ -49,13 +49,13 @@ describe("WebChatConnectionsPanel", () => {
 
   it("prevents duplicate creation while a request is pending and disables an empty selection", async () => {
     let resolve!: (response: Response) => void; const pending = new Promise<Response>((done) => { resolve = done; }); const fetchMock = vi.fn().mockResolvedValueOnce(json([])).mockReturnValueOnce(pending).mockResolvedValueOnce(json([connection])); vi.stubGlobal("fetch", fetchMock);
-    renderPanel(); await screen.findByText("No Web Chat Connections yet"); const create = screen.getByRole("button", { name: "Create connection" }) as HTMLButtonElement; expect(create.disabled).toBe(true); fireEvent.change(screen.getByRole("combobox"), { target: { value: profile.id } }); fireEvent.click(create); fireEvent.click(create); expect(fetchMock).toHaveBeenCalledTimes(2); resolve(json(connection, 201)); await screen.findByText(connection.publicId);
+    renderPanel(); await screen.findByText("No Web Chat Connections yet"); const create = screen.getByRole("button", { name: "Create connection" }) as HTMLButtonElement; expect(create.disabled).toBe(true); fireEvent.change(screen.getByRole("combobox"), { target: { value: profile.id } }); fireEvent.click(create); fireEvent.click(create); expect(fetchMock).toHaveBeenCalledTimes(2); resolve(json(connection, 201)); await screen.findByRole("link", { name: `${window.location.origin}/chat/${connection.publicId}` });
   });
 
   it("wires copy, open, and lifecycle actions", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined); Object.assign(navigator, { clipboard: { writeText } }); const open = vi.spyOn(window, "open").mockReturnValue(null); const fetchMock = vi.fn().mockResolvedValueOnce(json([connection])).mockResolvedValueOnce(json({ ...connection, status: "inactive" })); vi.stubGlobal("fetch", fetchMock);
     renderPanel();
-    await screen.findByText(connection.publicId); fireEvent.click(screen.getByRole("button", { name: "Copy URL" })); await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/chat/${connection.publicId}`)); fireEvent.click(screen.getByRole("button", { name: "Open Chat" })); expect(open).toHaveBeenCalledWith(`${window.location.origin}/chat/${connection.publicId}`, "_blank", "noopener,noreferrer"); fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
+    await screen.findByRole("link", { name: `${window.location.origin}/chat/${connection.publicId}` }); fireEvent.click(screen.getByRole("button", { name: "Copy URL" })); await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/chat/${connection.publicId}`)); fireEvent.click(screen.getByRole("button", { name: "Open Chat" })); expect(open).toHaveBeenCalledWith(`${window.location.origin}/chat/${connection.publicId}`, "_blank", "noopener,noreferrer"); fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
     await screen.findByRole("button", { name: "Activate" });
     expect(fetchMock.mock.calls[1]?.[0]).toBe(`/api/workspaces/wsp/companies/1/web-chat-connections/${connection.id}`);
     expect(JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))).toEqual({ status: "inactive" });

@@ -5,14 +5,15 @@ import { afterEach, expect, test, vi } from "vitest";
 import { I18nProvider } from "../i18n/I18nContext";
 import { RouterProvider } from "../routing/RouterProvider";
 import { AuthenticationProvider } from "../state/AuthenticationContext";
+import { ThemeProvider } from "../design-system/theme";
 import { GuidedSetupFoundation } from "./GuidedSetupFoundation";
 
 const identity = { userId: "user", email: "customer@example.test", locale: "en", status: "active", idleExpiresAt: "2026-01-01", absoluteExpiresAt: "2026-01-01" };
 const workspace = { id: "workspace", name: "Workspace", role: "owner", capabilities: ["company:read", "company:manage"] };
 function json(value: unknown, status = 200): Response { return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } }); }
-function renderGuided(): void { render(<I18nProvider><RouterProvider><AuthenticationProvider><GuidedSetupFoundation /></AuthenticationProvider></RouterProvider></I18nProvider>); }
+function renderGuided(): void { render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticationProvider><GuidedSetupFoundation /></AuthenticationProvider></RouterProvider></I18nProvider></ThemeProvider>); }
 function stubSignIn(loginStatus = 200): void { vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => { const url = String(input); if (url.endsWith("/session/bootstrap")) return Promise.resolve(json({}, 401)); if (url.endsWith("/identity/login")) return Promise.resolve(json(loginStatus === 200 ? { status: "authenticated", csrfToken: "csrf", csrfGeneration: 1 } : {}, loginStatus)); if (url.endsWith("/identity/me")) return Promise.resolve(json(identity)); if (url.endsWith("/workspaces") && !url.includes("selected")) return Promise.resolve(json([])); return Promise.resolve(json({}, 404)); })); }
-async function openSignIn(): Promise<void> { window.history.replaceState({}, "", "/sign-in"); renderGuided(); await screen.findByRole("heading", { name: "Continue with Atlas" }); }
+async function openSignIn(): Promise<void> { window.history.replaceState({}, "", "/sign-in"); renderGuided(); await screen.findByRole("heading", { name: "Welcome back" }); }
 function loginBody(): { email: string; password: string } { const call = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith("/identity/login")); if (!call) throw new Error("Expected a sign-in request."); return JSON.parse(String((call[1] as RequestInit).body)) as { email: string; password: string }; }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -114,5 +115,5 @@ test("redirects unauthenticated onboarding access through the shared guard", asy
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({}, 401))));
   renderGuided();
   await waitFor(() => expect(window.location.pathname).toBe("/sign-in"));
-  expect(screen.getByRole("heading", { name: "Continue with Atlas" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Welcome back" })).toBeTruthy();
 });

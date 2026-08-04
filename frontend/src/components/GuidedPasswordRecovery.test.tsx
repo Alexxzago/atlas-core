@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { I18nProvider } from "../i18n/I18nContext";
 import { RouterProvider } from "../routing/RouterProvider";
 import { AuthenticationProvider } from "../state/AuthenticationContext";
+import { ThemeProvider } from "../design-system/theme";
 import { GuidedForgotPassword } from "./GuidedForgotPassword";
 import { GuidedResetPassword } from "./GuidedResetPassword";
 import { GuidedSetupFoundation } from "./GuidedSetupFoundation";
@@ -12,7 +13,7 @@ import { GuidedSetupFoundation } from "./GuidedSetupFoundation";
 function json(value: unknown, status = 200): Response { return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } }); }
 function renderForgot(onSignIn = vi.fn()): ReturnType<typeof render> { return render(<I18nProvider><GuidedForgotPassword onSignIn={onSignIn}/></I18nProvider>); }
 function renderReset(proof = "reset-proof", onSignIn = vi.fn()): ReturnType<typeof render> { return render(<I18nProvider><GuidedResetPassword proof={proof} onSignIn={onSignIn}/></I18nProvider>); }
-function renderGuided(): void { render(<I18nProvider><RouterProvider><AuthenticationProvider><GuidedSetupFoundation /></AuthenticationProvider></RouterProvider></I18nProvider>); }
+function renderGuided(): void { render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticationProvider><GuidedSetupFoundation /></AuthenticationProvider></RouterProvider></I18nProvider></ThemeProvider>); }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.localStorage.clear(); window.history.replaceState({}, "", "/"); });
 
@@ -25,7 +26,7 @@ test("renders the forgot-password email form and sends the exact enumeration-saf
   await screen.findByRole("heading", { name: "Check your email" });
   expect(fetch).toHaveBeenCalledWith("/api/identity/password-reset/request", expect.objectContaining({ method: "POST", credentials: "same-origin", body: JSON.stringify({ email: "person@example.test", locale: "en" }) }));
   expect(screen.getByRole("status").textContent).toBe("If an account is associated, we will send you a password reset link.");
-  expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Check your email" }));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Check your email" })));
 });
 
 test("shows a loading state and a safe unavailable error for password-reset requests", async () => {

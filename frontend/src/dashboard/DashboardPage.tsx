@@ -1,101 +1,49 @@
-import { EmptyState, ErrorState, Skeleton, StatusIndicator } from "../design-system/feedback";
-import { PageHeader } from "../components/AppShell";
 import { useI18n } from "../i18n/I18nContext";
 import type { TranslationKey } from "../i18n/translations";
-import type { DashboardAction, DashboardConnectionKind, DashboardConnectionStatus, DashboardHealthState, DashboardViewModel } from "./dashboardPresentation";
+import type { CompanyWorkspaceViewModel, WorkspaceActionId, WorkspaceEvidenceState } from "./dashboardPresentation";
 
-export type DashboardPageState = "ready" | "loading" | "empty" | "unavailable" | "error";
-
-const healthLabels: Record<DashboardHealthState, TranslationKey> = {
-  ready: "dashboard.state.ready", pending: "dashboard.state.pending", attention_required: "dashboard.state.attentionRequired",
-  unavailable: "dashboard.state.unavailable", not_assessed: "dashboard.state.notAssessed",
+const messageTitle: Record<CompanyWorkspaceViewModel["message"], TranslationKey> = {
+  no_workspace: "today.noWorkspace.title", companies_loading: "today.companiesLoading.title", companies_unavailable: "today.companiesUnavailable.title", first_company: "today.firstCompany.title", choose_company: "today.chooseCompany.title", company_processing: "today.processing.title", company_failed: "today.failed.title", brief_missing: "today.briefMissing.title", knowledge_missing: "today.knowledgeMissing.title", place_missing: "today.placeMissing.title", working: "today.working.title", setup_blocked: "today.blocked.title", unavailable: "today.unavailable.title",
 };
-const connectionKindLabels: Record<DashboardConnectionKind, TranslationKey> = {
-  whatsapp: "dashboard.connection.whatsapp", knowledge: "dashboard.connection.knowledge", assistant: "dashboard.connection.assistant", channels: "dashboard.connection.channels",
+const messageDescription: Record<CompanyWorkspaceViewModel["message"], TranslationKey> = {
+  no_workspace: "today.noWorkspace.description", companies_loading: "today.companiesLoading.description", companies_unavailable: "today.companiesUnavailable.description", first_company: "today.firstCompany.description", choose_company: "today.chooseCompany.description", company_processing: "today.processing.description", company_failed: "today.failed.description", brief_missing: "today.briefMissing.description", knowledge_missing: "today.knowledgeMissing.description", place_missing: "today.placeMissing.description", working: "today.working.description", setup_blocked: "today.blocked.description", unavailable: "today.unavailable.description",
 };
-const actionTitles: Record<DashboardAction["id"], TranslationKey> = { create_company: "dashboard.action.createCompany.title", select_company: "dashboard.action.selectCompany.title", connect_whatsapp: "dashboard.action.connectWhatsApp.title" };
-const actionDescriptions: Record<DashboardAction["id"], TranslationKey> = { create_company: "dashboard.action.createCompany.description", select_company: "dashboard.action.selectCompany.description", connect_whatsapp: "dashboard.action.connectWhatsApp.description" };
-const actionReasons: Record<DashboardAction["reason"], TranslationKey> = { setup_required: "dashboard.action.reason.setupRequired", connection_not_assessed: "dashboard.action.reason.connectionNotAssessed" };
-const insightCopy: Record<DashboardViewModel["insight"], TranslationKey> = { company_setup: "dashboard.insight.companySetup", company_selection: "dashboard.insight.companySelection", connection_status_not_assessed: "dashboard.insight.connectionStatusNotAssessed" };
-
-function tone(state: DashboardHealthState): "neutral" | "success" | "warning" | "danger" | "info" {
-  if (state === "ready") return "success";
-  if (state === "attention_required") return "danger";
-  if (state === "pending") return "warning";
-  return "neutral";
-}
-
-const connectionLabels: Record<DashboardConnectionStatus, TranslationKey> = {
-  connected: "dashboard.connectionState.connected", pending: "dashboard.connectionState.pending", attention_required: "dashboard.connectionState.attentionRequired", disconnected: "dashboard.connectionState.disconnected", not_assessed: "dashboard.connectionState.notAssessed",
+const actionLabel: Record<WorkspaceActionId, TranslationKey> = {
+  create_company: "today.action.createCompany", choose_company: "today.action.chooseCompany", wait_for_company: "today.action.wait", repair_company: "today.action.reviewCompany", prepare_atlas: "today.action.prepare", teach_atlas: "today.action.teach", connect_place: "today.action.connect", supervise: "today.action.supervise", review_setup: "today.action.reviewSetup", retry: "common.retry",
 };
+const evidenceLabel = { brief: "today.evidence.brief", knowledge: "today.evidence.knowledge", places: "today.evidence.places" } as const satisfies Record<string, TranslationKey>;
+const evidenceState: Record<WorkspaceEvidenceState, TranslationKey> = { ready: "today.evidence.ready", needs_attention: "today.evidence.needsAttention", not_connected: "today.evidence.notConnected", checking: "today.evidence.checking", unavailable: "today.evidence.unavailable" };
 
-function connectionTone(state: DashboardConnectionStatus): "neutral" | "success" | "warning" | "danger" | "info" {
-  if (state === "connected") return "success";
-  if (state === "attention_required" || state === "disconnected") return "danger";
-  if (state === "pending") return "warning";
-  return "neutral";
+interface Props {
+  readonly model: CompanyWorkspaceViewModel;
+  readonly onNavigate: (destination: string) => void;
+  readonly onRetry?: () => void;
+  readonly onChooseCompany?: () => void;
 }
 
-export function DashboardGrid({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-  return <div className="dashboard-grid">{children}</div>;
-}
-
-export function DashboardSection({ children, className = "" }: { readonly children: React.ReactNode; readonly className?: string }): React.JSX.Element {
-  return <section className={`dashboard-section ${className}`.trim()}>{children}</section>;
-}
-
-export function DashboardWidget({ title, children, className = "" }: { readonly title: string; readonly children: React.ReactNode; readonly className?: string }): React.JSX.Element {
-  const id = `dashboard-widget-${title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`;
-  return <DashboardSection className={`dashboard-widget ${className}`.trim()}><h2 id={id}>{title}</h2><div aria-labelledby={id}>{children}</div></DashboardSection>;
-}
-
-export function DashboardSkeleton(): React.JSX.Element {
+export function DashboardPage({ model, onNavigate, onRetry, onChooseCompany }: Props): React.JSX.Element {
   const { t } = useI18n();
-  return <div className="dashboard-skeleton"><Skeleton label={t("dashboard.loading")} lines={3} /><Skeleton label={t("dashboard.loading")} lines={4} /><Skeleton label={t("dashboard.loading")} lines={3} /></div>;
-}
-
-export function DashboardEmptyState(): React.JSX.Element {
-  const { t } = useI18n();
-  return <EmptyState title={t("dashboard.empty.title")} description={t("dashboard.empty.description")} />;
-}
-
-export function DashboardUnavailableState({ error = false }: { readonly error?: boolean }): React.JSX.Element {
-  const { t } = useI18n();
-  return <ErrorState title={t(error ? "dashboard.error.title" : "dashboard.unavailable.title")} description={t(error ? "dashboard.error.description" : "dashboard.unavailable.description")} />;
-}
-
-export function CompanyOverviewWidget({ model }: { readonly model: DashboardViewModel }): React.JSX.Element {
-  const { t } = useI18n();
-  const description = model.context === "company_selected" ? "dashboard.overview.companyDescription" : model.context === "workspace_without_companies" ? "dashboard.overview.newCustomerDescription" : "dashboard.overview.selectCompanyDescription";
-  return <DashboardWidget title={t("dashboard.overview.title")} className="dashboard-grid__summary"><dl className="dashboard-overview"><div><dt>{t("dashboard.overview.workspace")}</dt><dd>{model.workspaceName ?? t("dashboard.overview.notAvailable")}</dd></div><div><dt>{t("dashboard.overview.company")}</dt><dd>{model.company?.name ?? t("dashboard.overview.noCompany")}</dd></div><div><dt>{t("dashboard.overview.status")}</dt><dd>{model.company ? t(`status.${model.company.status}`) : t("dashboard.state.notAssessed")}</dd></div></dl><p>{t(description)}</p></DashboardWidget>;
-}
-
-export function CompanyHealthWidget({ state }: { readonly state: DashboardHealthState }): React.JSX.Element {
-  const { t } = useI18n();
-  return <DashboardWidget title={t("dashboard.health.title")} className="dashboard-grid__health"><StatusIndicator tone={tone(state)}>{t(healthLabels[state])}</StatusIndicator>{state === "not_assessed" && <p>{t("dashboard.health.notAssessedDescription")}</p>}</DashboardWidget>;
-}
-
-export function ConnectionStatusWidget({ model }: { readonly model: DashboardViewModel }): React.JSX.Element {
-  const { t } = useI18n();
-  return <DashboardWidget title={t("dashboard.connections.title")} className="dashboard-grid__connections"><ul className="dashboard-status-list">{model.connections.map((connection) => <li key={connection.kind}><span>{t(connectionKindLabels[connection.kind])}</span><StatusIndicator tone={connectionTone(connection.state)}>{t(connectionLabels[connection.state])}</StatusIndicator></li>)}</ul></DashboardWidget>;
-}
-
-export function RecommendedActionsWidget({ actions, onNavigate }: { readonly actions: readonly DashboardAction[]; readonly onNavigate: (destination: string) => void }): React.JSX.Element {
-  const { t } = useI18n();
-  return <DashboardWidget title={t("dashboard.actions.title")} className="dashboard-grid__actions"><div className="dashboard-actions">{actions.map((action) => <article className="dashboard-action" key={action.id}><div><h3>{t(actionTitles[action.id])}</h3><p>{t(actionDescriptions[action.id])}</p><small>{t(actionReasons[action.reason])}</small></div><button className={`button ${action.priority === "primary" ? "button--primary" : "button--secondary"}`} type="button" onClick={() => onNavigate(action.destination)}>{t("dashboard.actions.open")}</button></article>)}</div></DashboardWidget>;
-}
-
-export function AtlasInsightWidget({ insight }: { readonly insight: DashboardViewModel["insight"] }): React.JSX.Element {
-  const { t } = useI18n();
-  return <DashboardWidget title={t("dashboard.insight.title")} className="dashboard-grid__insight"><p>{t(insightCopy[insight])}</p></DashboardWidget>;
-}
-
-export function RecentActivityWidget({ model }: { readonly model: DashboardViewModel }): React.JSX.Element {
-  const { t, formatDate } = useI18n();
-  return <DashboardWidget title={t("dashboard.activity.title")} className="dashboard-grid__activity">{model.activity.length === 0 ? <p>{t("dashboard.activity.empty")}</p> : <ol className="dashboard-activity">{model.activity.map((event) => <li key={`${event.timestamp}-${event.title}`}><strong>{event.title}</strong><p>{event.detail}</p><time dateTime={event.timestamp}>{formatDate(event.timestamp)}</time></li>)}</ol>}</DashboardWidget>;
-}
-
-export function DashboardPage({ model, state = "ready", onNavigate }: { readonly model: DashboardViewModel; readonly state?: DashboardPageState; readonly onNavigate: (destination: string) => void }): React.JSX.Element {
-  const { t } = useI18n();
-  return <><PageHeader title={t("dashboard.title")} description={t("dashboard.description")} />{state === "loading" ? <DashboardSkeleton /> : state === "empty" ? <DashboardEmptyState /> : state === "unavailable" ? <DashboardUnavailableState /> : state === "error" ? <DashboardUnavailableState error /> : <DashboardGrid><CompanyOverviewWidget model={model} /><CompanyHealthWidget state={model.health} /><RecommendedActionsWidget actions={model.actions} onNavigate={onNavigate} /><ConnectionStatusWidget model={model} /><RecentActivityWidget model={model} /><AtlasInsightWidget insight={model.insight} /></DashboardGrid>}</>;
+  const activate = (): void => {
+    if (model.action.id === "retry" && onRetry) { onRetry(); return; }
+    if ((model.action.id === "create_company" || model.action.id === "choose_company") && onChooseCompany) { onChooseCompany(); return; }
+    if (model.action.destination) onNavigate(model.action.destination);
+  };
+  const actionAvailable = model.action.id !== "wait_for_company" && (model.action.destination !== null || Boolean(onRetry) || Boolean(onChooseCompany));
+  return <div className={`today-workspace today-workspace--${model.state}`} aria-busy={model.state === "loading"}>
+    <header className="work-anchor">
+      <p className="work-anchor__context">{model.company ? t("today.companyContext", { companyName: model.company.name }) : model.workspaceName ?? t("today.workspaceContext")}</p>
+      <h1 tabIndex={-1}>{model.company ? t("today.title") : t(messageTitle[model.message])}</h1>
+      {model.company && <div className="readiness-statement" {...(model.state === "unavailable" ? { role: "alert" } : { role: "status" })}>
+        <strong>{t(messageTitle[model.message])}</strong>
+        <p>{t(messageDescription[model.message])}</p>
+      </div>}
+      {!model.company && <p className="work-anchor__lead">{t(messageDescription[model.message])}</p>}
+      {actionAvailable && <button className="button button--primary next-action" type="button" onClick={activate}>{t(actionLabel[model.action.id])}</button>}
+      {model.action.id === "wait_for_company" && <p className="work-anchor__quiet" role="status">{t(actionLabel.wait_for_company)}</p>}
+    </header>
+    {model.evidence.length > 0 && <section className="readiness-evidence" aria-labelledby="readiness-evidence-title">
+      <h2 id="readiness-evidence-title">{t("today.evidence.title")}</h2>
+      <dl>{model.evidence.map((item) => <div className="evidence-row" key={item.id}><dt>{t(evidenceLabel[item.id])}</dt><dd data-state={item.state}>{t(evidenceState[item.state])}</dd></div>)}</dl>
+    </section>}
+  </div>;
 }
