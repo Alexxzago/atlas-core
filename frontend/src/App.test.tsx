@@ -136,7 +136,7 @@ test("redirects a direct onboarding refresh with an existing workspace and compa
   authenticatedFetch([workspace], [readyCompany]);
   renderApp();
   await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
-  await screen.findByRole("heading", { name: "Company overview" });
+  await screen.findByRole("heading", { name: "Choose the company Atlas works for" });
 });
 
 test("routes the production Company Core list envelope to the dashboard", async () => {

@@ -1,82 +1,81 @@
-export type DashboardHealthState = "ready" | "pending" | "attention_required" | "unavailable" | "not_assessed";
-export type DashboardConnectionStatus = "connected" | "pending" | "attention_required" | "disconnected" | "not_assessed";
-export type DashboardConnectionKind = "whatsapp" | "knowledge" | "assistant" | "channels";
-export type DashboardActionId = "create_company" | "select_company" | "connect_whatsapp";
-export type DashboardInsightId = "company_setup" | "company_selection" | "connection_status_not_assessed";
-export type DashboardCompanyStatus = "processing" | "ready" | "failed";
-export type DashboardContext = "workspace_without_companies" | "workspace_with_companies" | "company_selected";
+import type { AssistantReadinessAssessment, Company, WorkspaceSummary } from "../types/api";
 
-export interface DashboardWorkspaceSource {
-  readonly id: string;
-  readonly name: string;
+export type WorkspaceEvidenceState = "ready" | "needs_attention" | "not_connected" | "checking" | "unavailable";
+export type WorkspaceActionId = "create_company" | "choose_company" | "wait_for_company" | "repair_company" | "prepare_atlas" | "teach_atlas" | "connect_place" | "supervise" | "review_setup" | "retry";
+
+export interface CompanyWorkspaceSnapshot {
+  readonly readiness: AssistantReadinessAssessment;
+  readonly webChatConnections: number;
+  readonly whatsAppConnections: number;
 }
 
-export interface DashboardCompany {
-  readonly id: number;
-  readonly name: string;
-  readonly status: DashboardCompanyStatus;
+export interface WorkspaceEvidence {
+  readonly id: "brief" | "knowledge" | "places";
+  readonly state: WorkspaceEvidenceState;
 }
 
-export interface DashboardConnectionState {
-  readonly kind: DashboardConnectionKind;
-  readonly state: DashboardConnectionStatus;
+export interface WorkspaceNextAction {
+  readonly id: WorkspaceActionId;
+  readonly destination: string | null;
 }
 
-export interface DashboardAction {
-  readonly id: DashboardActionId;
-  readonly destination: string;
-  readonly priority: "primary" | "secondary";
-  readonly reason: "setup_required" | "connection_not_assessed";
-}
-
-export interface DashboardActivityEvent {
-  readonly type: "system" | "connection" | "knowledge" | "assistant";
-  readonly title: string;
-  readonly detail: string;
-  readonly timestamp: string;
-  readonly severity: "neutral" | "attention";
-}
-
-export interface DashboardViewModel {
-  readonly context: DashboardContext;
+export interface CompanyWorkspaceViewModel {
+  readonly context: "no_workspace" | "first_company" | "choose_company" | "company";
   readonly workspaceName: string | null;
-  readonly company: DashboardCompany | null;
-  readonly health: DashboardHealthState;
-  readonly connections: readonly DashboardConnectionState[];
-  readonly actions: readonly DashboardAction[];
-  readonly activity: readonly DashboardActivityEvent[];
-  readonly insight: DashboardInsightId;
+  readonly company: Company | null;
+  readonly state: "ready" | "loading" | "unavailable";
+  readonly message: "no_workspace" | "companies_loading" | "companies_unavailable" | "first_company" | "choose_company" | "company_processing" | "company_failed" | "brief_missing" | "knowledge_missing" | "place_missing" | "working" | "setup_blocked" | "unavailable";
+  readonly action: WorkspaceNextAction;
+  readonly evidence: readonly WorkspaceEvidence[];
 }
 
-const notAssessedConnections: readonly DashboardConnectionState[] = [
-  { kind: "whatsapp", state: "not_assessed" },
-  { kind: "knowledge", state: "not_assessed" },
-  { kind: "assistant", state: "not_assessed" },
-  { kind: "channels", state: "not_assessed" },
-];
+interface BuildCompanyWorkspaceInput {
+  readonly workspace: WorkspaceSummary | null;
+  readonly companies: readonly Company[];
+  readonly company: Company | null;
+  readonly snapshot?: CompanyWorkspaceSnapshot | null;
+  readonly loading?: boolean;
+  readonly unavailable?: boolean;
+  readonly companiesLoading?: boolean;
+  readonly companiesUnavailable?: boolean;
+}
 
-export function buildDashboardViewModel(workspace: DashboardWorkspaceSource | null, companies: readonly DashboardCompany[], company: DashboardCompany | null): DashboardViewModel {
-  if (!company) {
-    const hasCompanies = companies.length > 0;
-    return {
-      context: hasCompanies ? "workspace_with_companies" : "workspace_without_companies",
-      workspaceName: workspace?.name ?? null,
-      company: null,
-      health: "not_assessed",
-      connections: notAssessedConnections,
-      actions: [{ id: hasCompanies ? "select_company" : "create_company", destination: "/companies", priority: "primary", reason: "setup_required" }],
-      activity: [],
-      insight: hasCompanies ? "company_selection" : "company_setup",
-    };
+function evidence(snapshot: CompanyWorkspaceSnapshot | null | undefined, state: "loading" | "unavailable" | "ready"): readonly WorkspaceEvidence[] {
+  if (state !== "ready" || !snapshot) {
+    const evidenceState: WorkspaceEvidenceState = state === "loading" ? "checking" : "unavailable";
+    return ["brief", "knowledge", "places"].map((id) => ({ id, state: evidenceState })) as readonly WorkspaceEvidence[];
   }
-  return {
-    context: "company_selected",
-    workspaceName: workspace?.name ?? null,
-    company: { id: company.id, name: company.name, status: company.status },
-    health: "not_assessed",
-    connections: notAssessedConnections,
-    actions: [{ id: "connect_whatsapp", destination: `/companies/${company.id}/channels/whatsapp`, priority: "primary", reason: "connection_not_assessed" }],
-    activity: [],
-    insight: "connection_status_not_assessed",
-  };
+  return [
+    { id: "brief", state: snapshot.readiness.assistantProfileId ? "ready" : "needs_attention" },
+    { id: "knowledge", state: snapshot.readiness.knowledgeVersionId ? "ready" : "needs_attention" },
+    { id: "places", state: snapshot.webChatConnections + snapshot.whatsAppConnections > 0 ? "ready" : "not_connected" },
+  ];
+}
+
+export function buildAtlasNextAction(company: Company, snapshot: CompanyWorkspaceSnapshot): WorkspaceNextAction {
+  const base = `/companies/${company.id}`;
+  if (company.status === "processing") return { id: "wait_for_company", destination: null };
+  if (company.status === "failed") return { id: "repair_company", destination: base };
+  if (!snapshot.readiness.assistantProfileId || snapshot.readiness.blockers.includes("default_assistant_missing")) return { id: "prepare_atlas", destination: `${base}/assistant` };
+  if (!snapshot.readiness.knowledgeVersionId || snapshot.readiness.blockers.includes("published_knowledge_missing")) return { id: "teach_atlas", destination: `${base}/knowledge` };
+  if (snapshot.readiness.status !== "ready") return { id: "review_setup", destination: `${base}/channels` };
+  if (snapshot.webChatConnections + snapshot.whatsAppConnections === 0) return { id: "connect_place", destination: `${base}/channels` };
+  return { id: "supervise", destination: "/conversations" };
+}
+
+export function buildCompanyWorkspaceViewModel(input: BuildCompanyWorkspaceInput): CompanyWorkspaceViewModel {
+  if (!input.workspace) return { context: "no_workspace", workspaceName: null, company: null, state: "ready", message: "no_workspace", action: { id: "retry", destination: "/settings" }, evidence: [] };
+  if (!input.company && input.companiesLoading) return { context: "choose_company", workspaceName: input.workspace.name, company: null, state: "loading", message: "companies_loading", action: { id: "wait_for_company", destination: null }, evidence: [] };
+  if (!input.company && input.companiesUnavailable) return { context: "choose_company", workspaceName: input.workspace.name, company: null, state: "unavailable", message: "companies_unavailable", action: { id: "retry", destination: null }, evidence: [] };
+  if (!input.company) {
+    const first = input.companies.length === 0;
+    return { context: first ? "first_company" : "choose_company", workspaceName: input.workspace.name, company: null, state: "ready", message: first ? "first_company" : "choose_company", action: { id: first ? "create_company" : "choose_company", destination: "/companies" }, evidence: [] };
+  }
+  const state = input.unavailable ? "unavailable" : input.loading || !input.snapshot ? "loading" : "ready";
+  if (state === "unavailable") return { context: "company", workspaceName: input.workspace.name, company: input.company, state, message: "unavailable", action: { id: "retry", destination: null }, evidence: evidence(null, state) };
+  if (state === "loading") return { context: "company", workspaceName: input.workspace.name, company: input.company, state, message: input.company.status === "processing" ? "company_processing" : "unavailable", action: { id: "wait_for_company", destination: null }, evidence: evidence(null, state) };
+  const snapshot = input.snapshot!;
+  const action = buildAtlasNextAction(input.company, snapshot);
+  const message = input.company.status === "processing" ? "company_processing" : input.company.status === "failed" ? "company_failed" : action.id === "prepare_atlas" ? "brief_missing" : action.id === "teach_atlas" ? "knowledge_missing" : action.id === "connect_place" ? "place_missing" : action.id === "supervise" ? "working" : "setup_blocked";
+  return { context: "company", workspaceName: input.workspace.name, company: input.company, state, message, action, evidence: evidence(snapshot, state) };
 }

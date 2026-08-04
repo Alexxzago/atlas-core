@@ -1,84 +1,54 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { atlasApi } from "../api/atlasApi";
+import { Callout, EmptyExperience } from "../design-system/product";
 import { useI18n } from "../i18n/I18nContext";
 import { markReadyDisabled, missingReadyFields, visibleTransitions, type FormMode, type ReadyAdvisoryField } from "../state/authenticatedPortalState";
+import { previewAllowed } from "../state/assistantPreviewState";
 import type { AssistantProfile, AssistantProfileStatus, CreateAssistantProfileInput, DefaultAssistantAssignment, Permission, UpdateAssistantProfileInput } from "../types/api";
+import { AssistantPreviewPanel } from "./AssistantPreviewPanel";
 import { AssistantProfileForm } from "./AssistantProfileForm";
 import { AssistantStatusBadge } from "./AssistantStatusBadge";
-import { AssistantPreviewPanel } from "./AssistantPreviewPanel";
-import { previewAllowed } from "../state/assistantPreviewState";
+import { ContextBackLink } from "./ContextBackLink";
 import { OperationalAssistantExecutionPanel } from "./OperationalAssistantExecutionPanel";
 
-interface Props {
-  csrf: string;
-  workspaceId: string | null;
-  workspaceRole: string | null;
-  capabilities: Permission[];
-  companyId: number | null;
-  companyName: string | null;
-  companySelected: boolean;
-  profiles: AssistantProfile[];
-  selectedProfile: AssistantProfile | null;
-  transientArchivedProfile: AssistantProfile | null;
-  loading: boolean;
-  error: boolean;
-  formMode: FormMode;
-  submitting: boolean;
-  transitionTarget: AssistantProfileStatus | null;
-  onSelectProfile: (profileId: string) => void;
-  onOpenCreate: () => void;
-  onOpenEdit: () => void;
-  onCloseForm: () => void;
-  onSubmitForm: (input: CreateAssistantProfileInput | UpdateAssistantProfileInput) => void;
-  onTransition: (profile: AssistantProfile, target: AssistantProfileStatus) => void;
-  onRetry: () => void;
-}
+interface Props { csrf:string; workspaceId:string|null; workspaceRole:string|null; capabilities:Permission[]; companyId:number|null; companyName:string|null; companySelected:boolean; profiles:AssistantProfile[]; selectedProfile:AssistantProfile|null; transientArchivedProfile:AssistantProfile|null; loading:boolean; error:boolean; formMode:FormMode; submitting:boolean; transitionTarget:AssistantProfileStatus|null; onSelectProfile:(profileId:string)=>void; onOpenCreate:()=>void; onOpenEdit:()=>void; onCloseForm:()=>void; onSubmitForm:(input:CreateAssistantProfileInput|UpdateAssistantProfileInput)=>void; onTransition:(profile:AssistantProfile,target:AssistantProfileStatus)=>void; onRetry:()=>void; }
 
-const fieldKeys: Record<ReadyAdvisoryField, Parameters<ReturnType<typeof useI18n>["t"]>[0]> = {
-  name: "profiles.field.name", businessRole: "profiles.field.businessRole", objective: "profiles.field.objective",
-  tone: "profiles.field.tone", assistantLanguage: "profiles.field.language",
-  welcomeMessage: "profiles.field.welcomeMessage", fallbackMessage: "profiles.field.fallbackMessage",
-};
+const fieldKeys:Record<ReadyAdvisoryField,Parameters<ReturnType<typeof useI18n>["t"]>[0]>={name:"profiles.field.name",businessRole:"profiles.field.businessRole",objective:"profiles.field.objective",tone:"profiles.field.tone",assistantLanguage:"profiles.field.language",welcomeMessage:"profiles.field.welcomeMessage",fallbackMessage:"profiles.field.fallbackMessage"};
 
-export function AssistantProfilesPanel(props: Props): React.JSX.Element {
-  const { t, formatDate } = useI18n(); const [confirmArchive, setConfirmArchive] = useState<AssistantProfile | null>(null);
-  const [defaultAssistant,setDefaultAssistant]=useState<DefaultAssistantAssignment|null>(null);
+export function AssistantProfilesPanel(props:Props):React.JSX.Element {
+  const {t,formatDate}=useI18n(); const [confirmArchive,setConfirmArchive]=useState<AssistantProfile|null>(null); const [defaultAssistant,setDefaultAssistant]=useState<DefaultAssistantAssignment|null>(null);
+  const [detailVisible,setDetailVisible]=useState(false);
+  const createTriggerRef=useRef<HTMLButtonElement>(null); const restoreCreateFocus=useRef(false);
   useEffect(()=>{if(!props.workspaceId||!props.companyId)return;void atlasApi.getDefaultAssistant(props.workspaceId,props.companyId).then(setDefaultAssistant).catch(()=>setDefaultAssistant(null));},[props.workspaceId,props.companyId,props.profiles]);
-  const selected = props.selectedProfile;
-  const missing = selected ? missingReadyFields(selected) : [];
-  const transition = (profile: AssistantProfile, target: AssistantProfileStatus): void => {
-    if (target === "archived") { setConfirmArchive(profile); return; }
-    props.onTransition(profile, target);
-  };
-  const transitionLabel = (target: AssistantProfileStatus): string => {
-    if (target === "ready") return t("profiles.action.ready");
-    if (target === "disabled") return t("profiles.action.disable");
-    if (target === "archived") return t("profiles.action.archive");
-    return selected?.status === "archived" ? t("profiles.action.restore") : t("profiles.action.draft");
-  };
+  useEffect(()=>{if(props.formMode==="closed"&&restoreCreateFocus.current){restoreCreateFocus.current=false;createTriggerRef.current?.focus();}},[props.formMode]);
+  const selected=props.selectedProfile; const missing=selected?missingReadyFields(selected):[];
+  const transition=(profile:AssistantProfile,target:AssistantProfileStatus):void=>{if(target==="archived"){setConfirmArchive(profile);return;}props.onTransition(profile,target);};
+  const transitionLabel=(target:AssistantProfileStatus):string=>target==="ready"?t("profiles.action.ready"):target==="disabled"?t("profiles.action.disable"):target==="archived"?t("profiles.action.archive"):selected?.status==="archived"?t("profiles.action.restore"):t("profiles.action.draft");
+  const closeWorkspace=():void=>{restoreCreateFocus.current=props.formMode==="create";setDetailVisible(false);props.onCloseForm();};
+  const profileStatus=(status:AssistantProfileStatus):string=>status==="ready"?t("profiles.readiness.ready"):status==="draft"?t("profiles.readiness.draft"):t("profiles.readiness.attention");
+  const focused=props.formMode!=="closed"||detailVisible;
+  const back=<ContextBackLink href={`/companies/${props.companyId}/assistant`} label={t("profiles.back")} onNavigate={(event)=>{event.preventDefault();closeWorkspace();}}/>;
 
-  if (!props.companySelected) return <section className="authenticated-section assistant-profiles"><h2>{t("profiles.title")}</h2><p className="state-copy">{t("profiles.companyRequired")}</p></section>;
-
-  return <section className="authenticated-section assistant-profiles" aria-busy={props.loading}>
-    <div className="section-heading"><div><h2>{t("profiles.title")}</h2><p>{t("profiles.description")}</p></div><button className="button button--primary" type="button" onClick={props.onOpenCreate}>+ {t("profiles.create")}</button></div>
-    {props.loading && <p role="status">{t("profiles.loading")}</p>}
-    {props.error && <div className="inline-message inline-message--error" role="alert"><p>{t("profiles.loadError")}</p><button className="button button--secondary" type="button" onClick={props.onRetry}>{t("common.retry")}</button></div>}
-    {props.formMode === "create" && <AssistantProfileForm mode="create" submitting={props.submitting} onSubmit={props.onSubmitForm} onCancel={props.onCloseForm} />}
-    {props.transientArchivedProfile && <div className="archived-recovery" role="status"><div><strong>{t("profiles.archivedTitle")}</strong><p>{t("profiles.archivedDescription", { profileName: props.transientArchivedProfile.name })}</p></div><button className="button button--secondary" disabled={props.transitionTarget !== null} onClick={() => props.onTransition(props.transientArchivedProfile!, "draft")}>{t("profiles.action.restore")}</button></div>}
-    {!props.loading && !props.error && props.profiles.length === 0 && props.formMode !== "create" && !props.transientArchivedProfile && <div className="state-block"><strong>{t("profiles.emptyTitle")}</strong><p>{t("profiles.emptyDescription")}</p></div>}
+  if(!props.companySelected)return <section className="authenticated-section assistant-profiles"><h2>{t("profiles.title")}</h2><p className="state-copy">{t("profiles.companyRequired")}</p></section>;
+  return <section className={`authenticated-section assistant-profiles${focused?" assistant-profiles--focused":""}`} aria-busy={props.loading}>
+    {!focused&&<div className="section-heading"><div><h2>{t("profiles.title")}</h2><p>{t("profiles.description")}</p></div>{props.profiles.length>0&&<button ref={createTriggerRef} className="button button--primary" type="button" onClick={props.onOpenCreate}>{t("profiles.create")}</button>}</div>}
+    {props.loading&&<p role="status">{t("profiles.loading")}</p>}
+    {props.error&&<div className="inline-message inline-message--error" role="alert"><p>{t("profiles.loadError")}</p><button className="button button--secondary" type="button" onClick={props.onRetry}>{t("common.retry")}</button></div>}
+    {props.formMode==="create"&&<div className="assistant-profile-workspace">{back}<header className="assistant-profile-workspace__heading"><p className="atlas-eyebrow">{t("profiles.form.eyebrow")}</p><h2>{t("profiles.createTitle")}</h2><p>{t("profiles.form.createDescription")}</p></header><AssistantProfileForm mode="create" submitting={props.submitting} onSubmit={props.onSubmitForm} onCancel={closeWorkspace}/></div>}
+    {props.transientArchivedProfile&&<div className="archived-recovery" role="status"><div><strong>{t("profiles.archivedTitle")}</strong><p>{t("profiles.archivedDescription",{profileName:props.transientArchivedProfile.name})}</p></div><button className="button button--secondary" disabled={props.transitionTarget!==null} onClick={()=>props.onTransition(props.transientArchivedProfile!,"draft")}>{t("profiles.action.restore")}</button></div>}
+    {!props.loading&&!props.error&&props.profiles.length===0&&props.formMode!=="create"&&!props.transientArchivedProfile&&<EmptyExperience title={t("profiles.emptyTitle")} description={t("profiles.emptyDescription")} action={<button ref={createTriggerRef} className="button button--primary" type="button" onClick={props.onOpenCreate}>{t("profiles.createFirst")}</button>}/>}
     <div className="assistant-profile-layout">
-      {props.profiles.length > 0 && <div className="assistant-profile-list" aria-label={t("profiles.listLabel")}>{props.profiles.map((profile) => <button type="button" key={profile.id} className={`assistant-profile-item${selected?.id === profile.id ? " is-selected" : ""}`} aria-current={selected?.id === profile.id ? "true" : undefined} onClick={() => props.onSelectProfile(profile.id)}><span><strong>{profile.name}</strong><small>{t(`profiles.tone.${profile.tone}`)} · {profile.assistantLanguage.toUpperCase()}</small></span><AssistantStatusBadge status={profile.status}/></button>)}</div>}
-      {selected && <div className="assistant-profile-detail">
-        <div className="workspace-title-row"><div><h3>{selected.name}</h3><p>{t("profiles.updatedAt", { date: formatDate(selected.updatedAt) })}</p>{defaultAssistant?.assistantProfileId===selected.id&&<p role="status">Default Assistant</p>}</div><AssistantStatusBadge status={selected.status}/></div>
-        {props.formMode === "edit" ? <AssistantProfileForm mode="edit" profile={selected} submitting={props.submitting} onSubmit={props.onSubmitForm} onCancel={props.onCloseForm}/> : <>
-          <dl className="assistant-profile-summary"><div><dt>{t("profiles.field.businessRole")}</dt><dd>{selected.businessRole ?? t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.objective")}</dt><dd>{selected.objective ?? t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.audience")}</dt><dd>{selected.audience ?? t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.language")}</dt><dd>{selected.assistantLanguage.toUpperCase()}</dd></div><div><dt>{t("profiles.field.tone")}</dt><dd>{t(`profiles.tone.${selected.tone}`)}</dd></div><div><dt>{t("profiles.field.welcomeMessage")}</dt><dd>{selected.welcomeMessage ?? t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.fallbackMessage")}</dt><dd>{selected.fallbackMessage}</dd></div></dl>
-          {missing.length > 0 && <div className="inline-message inline-message--warning" role="status"><strong>{t("profiles.readyWarning")}</strong><ul>{missing.map((field) => <li key={field}>{t(fieldKeys[field])}</li>)}</ul></div>}
-           <div className="action-row"><button className="button button--secondary" type="button" disabled={selected.status === "archived" || props.submitting} onClick={props.onOpenEdit}>{t("common.edit")}</button>{props.workspaceId&&props.companyId&&selected.status!=="archived"&&<button className="button button--secondary" type="button" onClick={()=>void atlasApi.setDefaultAssistant(props.csrf,props.workspaceId!,props.companyId!,selected.id,defaultAssistant?.version).then(setDefaultAssistant)}>Set default</button>}{visibleTransitions(selected.status).map((target) => <button key={target} className={`button ${target === "archived" ? "button--danger-quiet" : target === "ready" && missing.length === 0 ? "button--primary" : "button--secondary"}`} type="button" disabled={target === "ready" ? markReadyDisabled(selected, props.transitionTarget !== null) : props.transitionTarget !== null} onClick={() => transition(selected, target)}>{props.transitionTarget === target ? t("profiles.transitioning") : transitionLabel(target)}</button>)}</div>
-           {props.workspaceId && props.companyId && props.companyName && <AssistantPreviewPanel csrf={props.csrf} workspaceId={props.workspaceId} companyId={props.companyId} companyName={props.companyName} profile={selected} allowed={previewAllowed(props.workspaceRole)}/>}
-           {props.workspaceId && props.companyId && props.companyName && <OperationalAssistantExecutionPanel csrf={props.csrf} workspaceId={props.workspaceId} companyId={props.companyId} companyName={props.companyName} profile={selected} capabilities={props.capabilities}/>}
-        </>}
-      </div>}
+      {!focused&&props.profiles.length>0&&<div className="assistant-profile-list" aria-label={t("profiles.listLabel")}>{props.profiles.map(profile=><article key={profile.id} className="assistant-profile-item"><div className="assistant-profile-item__identity"><h3>{profile.name}</h3>{profile.businessRole&&<p>{profile.businessRole}</p>}</div><dl className="assistant-profile-facts"><div><dt>{t("profiles.fact.language")}</dt><dd>{profile.assistantLanguage.toUpperCase()}</dd></div><div><dt>{t("profiles.fact.tone")}</dt><dd>{t(`profiles.tone.${profile.tone}`)}</dd></div><div><dt>{t("profiles.fact.readiness")}</dt><dd>{profileStatus(profile.status)}</dd></div></dl><button type="button" className="button button--secondary" onClick={()=>{setDetailVisible(true);props.onSelectProfile(profile.id);}}>{t("profiles.review")}</button></article>)}</div>}
+      {selected&&detailVisible&&props.formMode!=="create"&&<div className="assistant-profile-workspace">{back}<div className="assistant-profile-detail">
+        <div className="workspace-title-row"><div><h3>{selected.name}</h3><p>{t("profiles.updatedAt",{date:formatDate(selected.updatedAt)})}</p>{defaultAssistant?.assistantProfileId===selected.id&&<p role="status">Default Assistant</p>}</div><AssistantStatusBadge status={selected.status}/></div>
+        {props.formMode==="edit"?<AssistantProfileForm mode="edit" profile={selected} submitting={props.submitting} onSubmit={props.onSubmitForm} onCancel={closeWorkspace}/>:<>
+          <dl className="assistant-profile-summary"><div><dt>{t("profiles.field.businessRole")}</dt><dd>{selected.businessRole??t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.objective")}</dt><dd>{selected.objective??t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.audience")}</dt><dd>{selected.audience??t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.language")}</dt><dd>{selected.assistantLanguage.toUpperCase()}</dd></div><div><dt>{t("profiles.field.tone")}</dt><dd>{t(`profiles.tone.${selected.tone}`)}</dd></div><div><dt>{t("profiles.field.welcomeMessage")}</dt><dd>{selected.welcomeMessage??t("profiles.notConfigured")}</dd></div><div><dt>{t("profiles.field.fallbackMessage")}</dt><dd>{selected.fallbackMessage}</dd></div></dl>
+          {missing.length>0&&<Callout tone="warning" title={t("profiles.readyWarning")}><ul>{missing.map(field=><li key={field}>{t(fieldKeys[field])}</li>)}</ul></Callout>}
+          <div className="action-row"><button className="button button--secondary" type="button" disabled={selected.status==="archived"||props.submitting} onClick={props.onOpenEdit}>{t("common.edit")}</button>{props.workspaceId&&props.companyId&&selected.status!=="archived"&&<button className="button button--secondary" type="button" onClick={()=>void atlasApi.setDefaultAssistant(props.csrf,props.workspaceId!,props.companyId!,selected.id,defaultAssistant?.version).then(setDefaultAssistant)}>Set default</button>}{visibleTransitions(selected.status).map(target=><button key={target} className={`button ${target==="archived"?"button--danger-quiet":target==="ready"&&missing.length===0?"button--primary":"button--secondary"}`} type="button" disabled={target==="ready"?markReadyDisabled(selected,props.transitionTarget!==null):props.transitionTarget!==null} onClick={()=>transition(selected,target)}>{props.transitionTarget===target?t("profiles.transitioning"):transitionLabel(target)}</button>)}</div>
+          {props.workspaceId&&props.companyId&&props.companyName&&<AssistantPreviewPanel csrf={props.csrf} workspaceId={props.workspaceId} companyId={props.companyId} companyName={props.companyName} profile={selected} allowed={previewAllowed(props.workspaceRole)}/>}
+          {props.workspaceId&&props.companyId&&props.companyName&&<OperationalAssistantExecutionPanel csrf={props.csrf} workspaceId={props.workspaceId} companyId={props.companyId} companyName={props.companyName} profile={selected} capabilities={props.capabilities}/>}</>}
+      </div></div>}
     </div>
-    {confirmArchive && <div className="confirm-panel" role="group" aria-labelledby="archive-profile-title"><h3 id="archive-profile-title">{t("profiles.archiveConfirmTitle")}</h3><p>{t("profiles.archiveConfirm", { profileName: confirmArchive.name })}</p><div className="action-row"><button className="button button--danger" disabled={props.transitionTarget !== null} onClick={() => { props.onTransition(confirmArchive, "archived"); setConfirmArchive(null); }}>{t("common.confirm")}</button><button className="button button--secondary" disabled={props.transitionTarget !== null} onClick={() => setConfirmArchive(null)}>{t("common.cancel")}</button></div></div>}
+    {confirmArchive&&<div className="confirm-panel" role="group" aria-labelledby="archive-profile-title"><h3 id="archive-profile-title">{t("profiles.archiveConfirmTitle")}</h3><p>{t("profiles.archiveConfirm",{profileName:confirmArchive.name})}</p><div className="action-row"><button className="button button--danger" disabled={props.transitionTarget!==null} onClick={()=>{props.onTransition(confirmArchive,"archived");setConfirmArchive(null);}}>{t("common.confirm")}</button><button className="button button--secondary" disabled={props.transitionTarget!==null} onClick={()=>setConfirmArchive(null)}>{t("common.cancel")}</button></div></div>}
   </section>;
 }

@@ -26,7 +26,7 @@ test("renders the forgot-password email form and sends the exact enumeration-saf
   await screen.findByRole("heading", { name: "Check your email" });
   expect(fetch).toHaveBeenCalledWith("/api/identity/password-reset/request", expect.objectContaining({ method: "POST", credentials: "same-origin", body: JSON.stringify({ email: "person@example.test", locale: "en" }) }));
   expect(screen.getByRole("status").textContent).toBe("If an account is associated, we will send you a password reset link.");
-  expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Check your email" }));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Check your email" })));
 });
 
 test("shows a loading state and a safe unavailable error for password-reset requests", async () => {

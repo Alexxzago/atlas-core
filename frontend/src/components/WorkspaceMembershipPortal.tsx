@@ -6,101 +6,35 @@ import type { WorkspaceSummary } from "../types/api";
 
 interface Member { id: string; userId: string; role: string; status: string }
 interface Invitation { id: string; recipient: string; role: string; status: string; expiresAt: string }
+interface Props { csrf:string; workspaces:WorkspaceSummary[]; selectedWorkspace:WorkspaceSummary|null; pendingWorkspaceId:string|null; loading:boolean; error:boolean; onSelectWorkspace:(workspaceId:string)=>void; onWorkspacesChanged:()=>void; onActiveWorkspaceLeft:()=>void; }
+type ConfirmAction = { readonly kind: "leave" } | { readonly kind: "remove" | "transfer"; readonly member: Member };
 
-interface Props {
-  csrf: string;
-  workspaces: WorkspaceSummary[];
-  selectedWorkspace: WorkspaceSummary | null;
-  pendingWorkspaceId: string | null;
-  loading: boolean;
-  error: boolean;
-  onSelectWorkspace: (workspaceId: string) => void;
-  onWorkspacesChanged: () => void;
-  onActiveWorkspaceLeft: () => void;
-}
+const copy = {
+  en: { purpose:"Manage the people who can prepare and supervise Atlas.", role:"Your role", identity:"Workspace identity", identityHelp:"This is the shared space for companies, teammates, and access.", create:"Create another workspace", name:"Workspace name", members:"Members", membersHelp:"People with access to this workspace.", member:"Team member", technicalId:"Account reference", invitations:"Invitations", invitationsHelp:"Invite someone to help prepare or supervise Atlas.", invite:"Invite teammate", noInvitations:"No invitations are waiting.", ownership:"Ownership and exit", ownershipHelp:"These actions change who controls the workspace or remove access.", leave:"Leave workspace", remove:"Remove", transfer:"Transfer ownership", suspend:"Suspend", reactivate:"Reactivate", revoke:"Revoke", confirm:"Confirm this action", confirmLeave:"You will lose access to this workspace.", confirmRemove:"This member will lose workspace access.", confirmTransfer:"This member will become the workspace owner.", cancel:"Cancel", retry:"Try again", unavailable:"We could not load workspace access.", current:"Current workspace", changeRole:"Change role" },
+  es: { purpose:"Administrá a las personas que pueden preparar y supervisar a Atlas.", role:"Tu rol", identity:"Identidad del espacio", identityHelp:"Este es el espacio compartido para empresas, equipo y accesos.", create:"Crear otro espacio", name:"Nombre del espacio", members:"Miembros", membersHelp:"Personas con acceso a este espacio.", member:"Miembro del equipo", technicalId:"Referencia de cuenta", invitations:"Invitaciones", invitationsHelp:"Invitá a alguien para preparar o supervisar a Atlas.", invite:"Invitar al equipo", noInvitations:"No hay invitaciones pendientes.", ownership:"Propiedad y salida", ownershipHelp:"Estas acciones cambian quién controla el espacio o eliminan accesos.", leave:"Salir del espacio", remove:"Quitar acceso", transfer:"Transferir propiedad", suspend:"Suspender", reactivate:"Reactivar", revoke:"Revocar", confirm:"Confirmar esta acción", confirmLeave:"Vas a perder el acceso a este espacio.", confirmRemove:"Esta persona perderá el acceso al espacio.", confirmTransfer:"Esta persona pasará a ser propietaria del espacio.", cancel:"Cancelar", retry:"Intentar de nuevo", unavailable:"No pudimos cargar los accesos del espacio.", current:"Espacio actual", changeRole:"Cambiar rol" }
+} as const;
 
 export function WorkspaceMembershipPortal(props: Props): React.JSX.Element {
-  const { locale, t } = useI18n();
-  const es = locale === "es";
-  const [members, setMembers] = useState<Member[]>([]);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [error, setError] = useState("");
-  const selected = props.selectedWorkspace;
-  const mounted = useRef(true);
-  const activeWorkspaceId = useRef<string | null>(selected?.id ?? null);
-  activeWorkspaceId.current = selected?.id ?? null;
-  const activeRefreshId = useRef(0);
-  const refreshAbort = useRef<AbortController | null>(null);
+  const { locale } = useI18n(), text = copy[locale];
+  const [members,setMembers]=useState<Member[]>([]),[invitations,setInvitations]=useState<Invitation[]>([]),[error,setError]=useState(""),[confirm,setConfirm]=useState<ConfirmAction|null>(null);
+  const selected=props.selectedWorkspace,mounted=useRef(true),activeWorkspaceId=useRef<string|null>(selected?.id??null),activeRefreshId=useRef(0),refreshAbort=useRef<AbortController|null>(null);
+  activeWorkspaceId.current=selected?.id??null;
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;refreshAbort.current?.abort();activeRefreshId.current+=1;};},[]);
+  useEffect(()=>{activeWorkspaceId.current=selected?.id??null;refreshAbort.current?.abort();activeRefreshId.current+=1;setConfirm(null);if(!selected){setMembers([]);setInvitations([]);return;}void refresh(selected.id);},[selected?.id]);
+  const refresh=async(workspaceId:string):Promise<void>=>{if(activeWorkspaceId.current!==workspaceId||!mounted.current)return;refreshAbort.current?.abort();const controller=new AbortController();refreshAbort.current=controller;const requestId=++activeRefreshId.current;setError("");try{const[nextMembers,nextInvitations]=await Promise.all([atlasApi.listMemberships(workspaceId,controller.signal),atlasApi.listInvitations(workspaceId,controller.signal)]);if(!shouldApplyWorkspaceRefresh(activeWorkspaceId.current,workspaceId,activeRefreshId.current,requestId,mounted.current))return;setMembers(nextMembers);setInvitations(nextInvitations);}catch(caught){if(caught instanceof DOMException&&caught.name==="AbortError")return;if(!shouldApplyWorkspaceRefresh(activeWorkspaceId.current,workspaceId,activeRefreshId.current,requestId,mounted.current))return;setError(text.unavailable);}};
+  const create=async(event:React.FormEvent<HTMLFormElement>):Promise<void>=>{event.preventDefault();setError("");const form=event.currentTarget;try{await atlasApi.createWorkspace(props.csrf,String(new FormData(form).get("name")??""));props.onWorkspacesChanged();form.reset();}catch{setError(text.unavailable);}};
+  const invite=async(event:React.FormEvent<HTMLFormElement>):Promise<void>=>{event.preventDefault();if(!selected)return;const form=event.currentTarget,data=new FormData(form);try{await atlasApi.inviteMember(props.csrf,selected.id,String(data.get("email")??""),String(data.get("role")??"viewer"));form.reset();await refresh(selected.id);}catch{setError(text.unavailable);}};
+  const executeConfirm=async():Promise<void>=>{if(!selected||!confirm)return;const action=confirm;setConfirm(null);if(action.kind==="leave"){await atlasApi.leaveWorkspace(props.csrf,selected.id);props.onActiveWorkspaceLeft();props.onWorkspacesChanged();return;}if(action.kind==="remove")await atlasApi.changeMembershipStatus(props.csrf,selected.id,action.member.id,"remove");else await atlasApi.transferOwnership(props.csrf,selected.id,action.member.id,"administrator");await refresh(selected.id);};
 
-  useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; refreshAbort.current?.abort(); activeRefreshId.current += 1; };
-  }, []);
-
-  useEffect(() => {
-    activeWorkspaceId.current = selected?.id ?? null;
-    refreshAbort.current?.abort(); activeRefreshId.current += 1;
-    if (!selected) { setMembers([]); setInvitations([]); return; }
-    void refresh(selected.id);
-  }, [selected?.id]);
-
-  const refresh = async (workspaceId: string): Promise<void> => {
-    if (activeWorkspaceId.current !== workspaceId || !mounted.current) return;
-    refreshAbort.current?.abort(); const controller = new AbortController(); refreshAbort.current = controller;
-    const requestId = ++activeRefreshId.current;
-    try {
-      const [nextMembers, nextInvitations] = await Promise.all([
-        atlasApi.listMemberships(workspaceId, controller.signal), atlasApi.listInvitations(workspaceId, controller.signal),
-      ]);
-      if (!shouldApplyWorkspaceRefresh(activeWorkspaceId.current, workspaceId, activeRefreshId.current, requestId, mounted.current)) return;
-      setMembers(nextMembers); setInvitations(nextInvitations);
-    } catch (caught: unknown) {
-      if (caught instanceof DOMException && caught.name === "AbortError") return;
-      if (!shouldApplyWorkspaceRefresh(activeWorkspaceId.current, workspaceId, activeRefreshId.current, requestId, mounted.current)) return;
-      setMembers([]); setInvitations([]);
-    }
-  };
-
-  const create = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault(); setError("");
-    const form = event.currentTarget;
-    try {
-      const name = String(new FormData(form).get("name") ?? "");
-      await atlasApi.createWorkspace(props.csrf, name); props.onWorkspacesChanged(); form.reset();
-    } catch { setError(t("portal.workspaceCreateError")); }
-  };
-
-  const invite = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault(); if (!selected) return;
-    const data = new FormData(event.currentTarget);
-    await atlasApi.inviteMember(props.csrf, selected.id, String(data.get("email") ?? ""), String(data.get("role") ?? "viewer"));
-    await refresh(selected.id);
-  };
-
-  return <section className="workspace-admin authenticated-section">
-    <h2>{es ? "Espacios de trabajo" : "Workspaces"}</h2>
-    {(props.error || error) && <p className="inline-message inline-message--error" role="alert">{error || (es ? "No pudimos cargar los espacios." : "Unable to load Workspaces.")}</p>}
-    <form className="workspace-create-row" onSubmit={(event) => void create(event)}>
-      <label className="form-field"><span>{es ? "Nombre" : "Name"}</span><input name="name" required /></label>
-      <button className="button button--secondary">{es ? "Crear espacio" : "Create Workspace"}</button>
-    </form>
-    <label className="form-field">
-      <span>{t("portal.workspaceSelect")}</span>
-      <select disabled={props.loading || props.pendingWorkspaceId !== null} value={selected?.id ?? ""}
-        onChange={(event) => { if (event.target.value) props.onSelectWorkspace(event.target.value); }}>
-        <option value="">{props.loading ? t("portal.workspacesLoading") : t("portal.workspaceNone")}</option>
-        {props.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
-      </select>
-    </label>
-    {props.pendingWorkspaceId && <p role="status">{t("portal.workspaceValidating")}</p>}
-    {selected && <div className="workspace-administration">
-      <h3>{selected.name}</h3><p>{es ? "Rol actual" : "Current role"}: {selected.role}</p>
-      <button className="button button--danger-quiet" onClick={() => void atlasApi.leaveWorkspace(props.csrf, selected.id).then(() => { props.onActiveWorkspaceLeft(); props.onWorkspacesChanged(); })}>{es ? "Salir del espacio" : "Leave Workspace"}</button>
-      <h3>{es ? "Miembros" : "Members"}</h3>
-      <ul>{members.map((member) => <li key={member.id}>{member.userId} — {member.role} — {member.status} <select aria-label={es ? "Cambiar rol" : "Change role"} value={member.role} onChange={(event) => void atlasApi.changeMembershipRole(props.csrf, selected.id, member.id, event.target.value).then(() => refresh(selected.id))}><option value="owner">Owner</option><option value="administrator">Administrator</option><option value="operator">Operator</option><option value="viewer">Viewer</option></select>{member.status === "active" ? <button onClick={() => void atlasApi.changeMembershipStatus(props.csrf, selected.id, member.id, "suspend").then(() => refresh(selected.id))}>{es ? "Suspender" : "Suspend"}</button> : member.status === "suspended" ? <button onClick={() => void atlasApi.changeMembershipStatus(props.csrf, selected.id, member.id, "reactivate").then(() => refresh(selected.id))}>{es ? "Reactivar" : "Reactivate"}</button> : null}<button onClick={() => void atlasApi.changeMembershipStatus(props.csrf, selected.id, member.id, "remove").then(() => refresh(selected.id))}>{es ? "Eliminar" : "Remove"}</button><button onClick={() => void atlasApi.transferOwnership(props.csrf, selected.id, member.id, "administrator").then(() => refresh(selected.id))}>{es ? "Transferir propiedad" : "Transfer ownership"}</button></li>)}</ul>
-      <h3>{es ? "Invitaciones" : "Invitations"}</h3>
-      <form onSubmit={(event) => void invite(event)}><input name="email" type="email" required placeholder={es ? "correo@ejemplo.com" : "email@example.com"}/><select name="role"><option value="administrator">Administrator</option><option value="operator">Operator</option><option value="viewer">Viewer</option></select><button>{es ? "Invitar" : "Invite"}</button></form>
-      <ul>{invitations.map((invitation) => <li key={invitation.id}>{invitation.recipient} — {invitation.role} — {invitation.status}{invitation.status === "pending" && <button onClick={() => void atlasApi.revokeInvitation(props.csrf, selected.id, invitation.id).then(() => refresh(selected.id))}>{es ? "Revocar" : "Revoke"}</button>}</li>)}</ul>
-    </div>}
-  </section>;
+  return <div className="workspace-settings">
+    <header className="work-anchor workspace-settings__anchor"><p className="work-anchor__context">{text.current}</p><h1>{selected?.name??text.identity}</h1><p className="work-anchor__lead">{text.purpose}</p>{selected&&<p className="workspace-settings__role">{text.role}: <strong>{selected.role}</strong></p>}</header>
+    {(props.error||error)&&<div className="inline-message inline-message--error" role="alert"><p>{error||text.unavailable}</p>{selected&&<button className="button button--secondary" type="button" onClick={()=>void refresh(selected.id)}>{text.retry}</button>}</div>}
+    <section className="settings-section"><header><h2>{text.identity}</h2><p>{text.identityHelp}</p></header><form className="workspace-identity-form" onSubmit={(event)=>void create(event)}><label className="form-field"><span>{text.name}</span><input name="name" required/></label><button className="button button--secondary">{text.create}</button></form></section>
+    {selected&&<>
+      <section className="settings-section"><header><h2>{text.members}</h2><p>{text.membersHelp}</p></header><ul className="settings-rows">{members.map((member)=><li key={member.id}><div className="settings-row__identity"><strong>{text.member}</strong><span>{member.role} · {member.status}</span><small>{text.technicalId}: {member.userId}</small></div><div className="settings-row__actions"><label><span className="sr-only">{text.changeRole}</span><select aria-label={text.changeRole} value={member.role} onChange={(event)=>void atlasApi.changeMembershipRole(props.csrf,selected.id,member.id,event.target.value).then(()=>refresh(selected.id))}><option value="owner">Owner</option><option value="administrator">Administrator</option><option value="operator">Operator</option><option value="viewer">Viewer</option></select></label>{member.status==="active"?<button type="button" onClick={()=>void atlasApi.changeMembershipStatus(props.csrf,selected.id,member.id,"suspend").then(()=>refresh(selected.id))}>{text.suspend}</button>:member.status==="suspended"?<button type="button" onClick={()=>void atlasApi.changeMembershipStatus(props.csrf,selected.id,member.id,"reactivate").then(()=>refresh(selected.id))}>{text.reactivate}</button>:null}<button type="button" onClick={()=>setConfirm({kind:"remove",member})}>{text.remove}</button><button type="button" onClick={()=>setConfirm({kind:"transfer",member})}>{text.transfer}</button></div></li>)}</ul></section>
+      <section className="settings-section"><header><h2>{text.invitations}</h2><p>{text.invitationsHelp}</p></header><form className="invitation-form" onSubmit={(event)=>void invite(event)}><input aria-label="Email" name="email" type="email" required placeholder="email@example.com"/><select aria-label="Role" name="role"><option value="administrator">Administrator</option><option value="operator">Operator</option><option value="viewer">Viewer</option></select><button className="button button--primary">{text.invite}</button></form>{invitations.length===0?<p className="settings-empty">{text.noInvitations}</p>:<ul className="settings-rows">{invitations.map((invitation)=><li key={invitation.id}><div className="settings-row__identity"><strong>{invitation.recipient}</strong><span>{invitation.role} · {invitation.status}</span></div>{invitation.status==="pending"&&<button type="button" onClick={()=>void atlasApi.revokeInvitation(props.csrf,selected.id,invitation.id).then(()=>refresh(selected.id))}>{text.revoke}</button>}</li>)}</ul>}</section>
+      <section className="settings-section settings-section--danger"><header><h2>{text.ownership}</h2><p>{text.ownershipHelp}</p></header><button className="button button--danger-quiet" type="button" onClick={()=>setConfirm({kind:"leave"})}>{text.leave}</button></section>
+    </>}
+    {confirm&&<div className="confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="settings-confirm-title"><h2 id="settings-confirm-title">{text.confirm}</h2><p>{confirm.kind==="leave"?text.confirmLeave:confirm.kind==="remove"?text.confirmRemove:text.confirmTransfer}</p><div className="action-row"><button className="button button--danger" type="button" onClick={()=>void executeConfirm()}>{text.confirm}</button><button className="button button--secondary" type="button" onClick={()=>setConfirm(null)}>{text.cancel}</button></div></div>}
+  </div>;
 }

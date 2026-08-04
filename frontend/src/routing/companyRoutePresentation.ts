@@ -13,7 +13,7 @@ export function companyRoutePresentation(
   workspaceId: string | null,
   companyId: number | null,
   selectedCompanyId: number | null,
-  profilesLoading: boolean,
+  _profilesLoading: boolean,
   validation: CompanyRouteValidation,
 ): "none" | "loading" | "ready" | "error" {
   if (!companyId) return "none";
@@ -21,5 +21,5 @@ export function companyRoutePresentation(
   const key = companyRouteKey(workspaceId, companyId);
   if (validation.key !== key || validation.status === "idle" || validation.status === "loading") return "loading";
   if (validation.status === "error") return "error";
-  return selectedCompanyId === companyId && !profilesLoading ? "ready" : "loading";
+  return selectedCompanyId === companyId ? "ready" : "loading";
 }

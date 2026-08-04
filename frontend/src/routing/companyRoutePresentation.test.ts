@@ -9,7 +9,7 @@ test("company A state is never ready for a company B route", () => {
 
 test("company panels require validated matching state", () => {
   const key = companyRouteKey("workspace", 2);
-  assert.equal(companyRoutePresentation("workspace", 2, 2, true, { key, status: "ready" }), "loading");
+  assert.equal(companyRoutePresentation("workspace", 2, 2, true, { key, status: "ready" }), "ready");
   assert.equal(companyRoutePresentation("workspace", 2, 2, false, { key, status: "ready" }), "ready");
 });
 
