@@ -1,76 +1,41 @@
-import { useEffect, useRef, useState } from "react";
-import { ApiError, atlasApi } from "../api/atlasApi";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { atlasApi } from "../api/atlasApi";
 import { useI18n } from "../i18n/I18nContext";
-import type { ConversationDetail, ConversationInboxItem, Permission } from "../types/api";
+import type { ConversationDetail, Permission } from "../types/api";
 import { EmptyExperience } from "../design-system/product";
+import { PageHeader } from "./AppShell";
+import { buildConversationInboxViewModel, type ConversationState } from "./conversationInboxPresentation";
 
-interface Props { readonly csrf: string; readonly workspaceId: string | null; readonly companyId: number | null; readonly capabilities: readonly Permission[]; }
-
-export function ConversationInbox({ csrf, workspaceId, companyId, capabilities }: Props): React.JSX.Element {
-  const { locale, formatDate } = useI18n();
-  const text = locale === "es" ? spanish : english;
-  const [items, setItems] = useState<readonly ConversationInboxItem[]>([]);
-  const [selected, setSelected] = useState<ConversationDetail | null>(null);
-  const [loading, setLoading] = useState(false), [working, setWorking] = useState(false), [error, setError] = useState<string | null>(null), [content, setContent] = useState("");
-  const detailHeading = useRef<HTMLHeadingElement>(null);
-  const readable = capabilities.includes("company:read"), manageable = capabilities.includes("conversation:manage"), canSend = capabilities.includes("conversation:message:send");
-
-  const load = async (conversationId?: string): Promise<void> => {
-    if (!workspaceId || !companyId || !readable) return;
-    setLoading(true); setError(null);
-    try {
-      const inbox = await atlasApi.listConversations(workspaceId, companyId);
-      setItems(inbox);
-      const id = conversationId ?? selected?.conversationId ?? inbox[0]?.conversationId;
-      setSelected(id ? await atlasApi.getConversation(workspaceId, companyId, id) : null);
-    } catch (cause: unknown) { setError(cause instanceof ApiError ? cause.message : text.unavailable); }
-    finally { setLoading(false); }
-  };
-
-  useEffect(() => { setItems([]); setSelected(null); setContent(""); void load(); }, [workspaceId, companyId, readable]);
-  useEffect(() => { if (selected) detailHeading.current?.focus(); }, [selected?.conversationId]);
-
-  const select = async (id: string): Promise<void> => { if (!workspaceId || !companyId || working) return; setWorking(true); setError(null); try { setSelected(await atlasApi.getConversation(workspaceId, companyId, id)); } catch (cause: unknown) { setError(cause instanceof ApiError ? cause.message : text.unavailable); } finally { setWorking(false); } };
-  const control = async (action: "take" | "release" | "resolve"): Promise<void> => {
-    if (!workspaceId || !companyId || !selected || working) return;
-    setWorking(true); setError(null);
-    try {
-      if (action === "take") await atlasApi.takeOverConversation(csrf, workspaceId, companyId, selected.conversationId, selected.controlVersion);
-      else if (action === "release") await atlasApi.releaseConversation(csrf, workspaceId, companyId, selected.conversationId, selected.controlVersion);
-      else await atlasApi.resolveConversation(csrf, workspaceId, companyId, selected.conversationId, selected.controlVersion);
-      await load(selected.conversationId);
-    } catch (cause: unknown) { setError(cause instanceof ApiError ? cause.message : text.unavailable); }
-    finally { setWorking(false); }
-  };
-  const send = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
-    if (!workspaceId || !companyId || !selected || !content.trim() || working) return;
-    setWorking(true); setError(null);
-    try { await atlasApi.sendConversationMessage(csrf, workspaceId, companyId, selected.conversationId, content.trim(), crypto.randomUUID()); setContent(""); await load(selected.conversationId); }
-    catch (cause: unknown) { setError(cause instanceof ApiError ? cause.message : text.unavailable); }
-    finally { setWorking(false); }
-  };
-
-  if (!workspaceId || !companyId) return <section className="authenticated-section"><h2>{text.title}</h2><p className="state-copy">{text.companyRequired}</p></section>;
-  if (!readable) return <section className="authenticated-section"><h2>{text.title}</h2><p className="state-copy">{text.unavailable}</p></section>;
-  return <section className="authenticated-section conversation-inbox" aria-busy={loading || working}>
-    <div className="section-heading conversation-inbox__header"><div><p className="eyebrow">{text.listLabel}</p><h2>{text.title}</h2><p>{text.description}</p></div><button className="button button--secondary" type="button" onClick={() => void load()} disabled={loading || working}>{text.refresh}</button></div>
-    {error && <div className="inline-message inline-message--error" role="alert">{error}</div>}
-    {loading && <p role="status">{text.loading}</p>}
-    {!loading && items.length === 0 && <EmptyExperience title={text.empty} description={text.emptyDescription}/>}
-    {items.length > 0 && <div className="assistant-profile-layout conversation-inbox__workspace">
-      <div className="assistant-profile-list conversation-inbox__list" aria-label={text.listLabel}>{items.map((item) => <button type="button" key={item.conversationId} className={`assistant-profile-item conversation-inbox__item${selected?.conversationId === item.conversationId ? " is-selected" : ""}`} aria-current={selected?.conversationId === item.conversationId ? "true" : undefined} onClick={() => void select(item.conversationId)} disabled={working}><span><strong>{channelLabel(item.channel, text)}</strong><small>{item.preview ?? text.noMessages}</small></span><small>{controlLabel(item.controlState, text)}</small></button>)}</div>
-      {selected && <article className="assistant-profile-detail conversation-inbox__detail"><div className="workspace-title-row"><div><h3 ref={detailHeading} tabIndex={-1}>{channelLabel(selected.channel, text)}</h3><p>{controlLabel(selected.controlState, text)} · {formatDate(selected.lastActivityAt)}</p></div></div>
-        <div className="conversation-inbox__messages" aria-label={text.messages}>{selected.messages.map((message) => <div key={message.messageId} className={`conversation-message conversation-message--${message.deliveryCategory}`}><strong>{message.deliveryCategory === "received" ? text.customer : text.sent}</strong><p>{message.content}</p><small>{formatDate(message.createdAt)}{message.delivery ? ` · ${message.delivery.state}` : ""}</small></div>)}</div>
-        <div className="action-row conversation-inbox__controls">{manageable && selected.controlState !== "human_controlled" && <button className="button button--primary" type="button" disabled={working} onClick={() => void control("take")}>{text.take}</button>}{manageable && selected.controlState === "human_controlled" && <><button className="button button--secondary" type="button" disabled={working} onClick={() => void control("release")}>{text.release}</button><button className="button button--primary" type="button" disabled={working} onClick={() => void control("resolve")}>{text.resolve}</button></>}</div>
-        {canSend && selected.controlState === "human_controlled" && <form className="edit-form conversation-inbox__composer" onSubmit={(event) => void send(event)}><label className="form-field"><span>{text.reply}</span><textarea required maxLength={10000} value={content} onChange={(event) => setContent(event.target.value)} disabled={working} /></label><button className="button button--primary" disabled={working || !content.trim()}>{working ? text.sending : text.send}</button></form>}
-      </article>}
-    </div>}
+interface Props { readonly csrf:string; readonly workspaceId:string|null; readonly companyId:number|null; readonly capabilities:readonly Permission[]; }
+export function ConversationInbox({csrf,workspaceId,companyId,capabilities}:Props):React.JSX.Element {
+  const {t,formatDate}=useI18n();
+  const [items,setItems]=useState<Awaited<ReturnType<typeof atlasApi.listConversations>>>([]),[selected,setSelected]=useState<ConversationDetail|null>(null);
+  const [listLoading,setListLoading]=useState(false),[detailLoading,setDetailLoading]=useState(false),[working,setWorking]=useState(false),[listError,setListError]=useState(false),[detailError,setDetailError]=useState(false),[mobileDetail,setMobileDetail]=useState(false),[content,setContent]=useState("");
+  const listAbort=useRef<AbortController|null>(null),detailAbort=useRef<AbortController|null>(null),detailHeading=useRef<HTMLHeadingElement>(null),selectedId=useRef<string|null>(null),listRequestId=useRef(0),detailRequestId=useRef(0);
+  const readable=capabilities.includes("company:read"),manageable=capabilities.includes("conversation:manage"),canSend=capabilities.includes("conversation:message:send");
+  const viewItems=useMemo(()=>buildConversationInboxViewModel(items),[items]); selectedId.current=selected?.conversationId??null;
+  const loadDetail=useCallback(async(id:string,focus=false):Promise<void>=>{if(!workspaceId||!companyId)return;detailAbort.current?.abort();const controller=new AbortController(),requestId=++detailRequestId.current;detailAbort.current=controller;setDetailLoading(true);setDetailError(false);try{const detail=await atlasApi.getConversation(workspaceId,companyId,id,controller.signal);if(requestId===detailRequestId.current&&!controller.signal.aborted){setSelected(detail);if(focus)setMobileDetail(true);}}catch(cause){if(requestId===detailRequestId.current&&!(cause instanceof DOMException&&cause.name==="AbortError"))setDetailError(true);}finally{if(requestId===detailRequestId.current)setDetailLoading(false);}},[workspaceId,companyId]);
+  const load=useCallback(async():Promise<void>=>{if(!workspaceId||!companyId||!readable)return;listAbort.current?.abort();const controller=new AbortController(),requestId=++listRequestId.current;listAbort.current=controller;setListLoading(true);setListError(false);try{const inbox=await atlasApi.listConversations(workspaceId,companyId,controller.signal);if(requestId!==listRequestId.current||controller.signal.aborted)return;const mapped=buildConversationInboxViewModel(inbox);setItems(inbox);const retained=selectedId.current&&mapped.some(item=>item.id===selectedId.current)?selectedId.current:null;if(retained)await loadDetail(retained);else setSelected(null);}catch(cause){if(requestId===listRequestId.current&&!(cause instanceof DOMException&&cause.name==="AbortError"))setListError(true);}finally{if(requestId===listRequestId.current)setListLoading(false);}},[workspaceId,companyId,readable,loadDetail]);
+  useEffect(()=>{let active=true;setItems([]);setSelected(null);setMobileDetail(false);setContent("");queueMicrotask(()=>{if(active)void load()});return()=>{active=false;listAbort.current?.abort();detailAbort.current?.abort();};},[load]);
+  useEffect(()=>{if(mobileDetail&&selected)detailHeading.current?.focus();},[mobileDetail,selected?.conversationId]);
+  const control=async(action:"take"|"release"|"resolve"):Promise<void>=>{if(!workspaceId||!companyId||!selected||working)return;setWorking(true);setDetailError(false);try{if(action==="take")await atlasApi.takeOverConversation(csrf,workspaceId,companyId,selected.conversationId,selected.controlVersion);else if(action==="release")await atlasApi.releaseConversation(csrf,workspaceId,companyId,selected.conversationId,selected.controlVersion);else await atlasApi.resolveConversation(csrf,workspaceId,companyId,selected.conversationId,selected.controlVersion);await loadDetail(selected.conversationId);}catch{setDetailError(true);}finally{setWorking(false);}};
+  const send=async(event:React.FormEvent<HTMLFormElement>):Promise<void>=>{event.preventDefault();if(!workspaceId||!companyId||!selected||!content.trim()||working)return;setWorking(true);setDetailError(false);try{await atlasApi.sendConversationMessage(csrf,workspaceId,companyId,selected.conversationId,content.trim(),crypto.randomUUID());setContent("");await loadDetail(selected.conversationId);}catch{setDetailError(true);}finally{setWorking(false);}};
+  if(!workspaceId||!companyId)return <section><PageHeader title={t("conversation.title")} description={t("conversation.description")}/><EmptyExperience title={t("conversation.companyRequired")} description={t("conversation.companyRequiredDescription")}/></section>;
+  if(!readable)return <section><PageHeader title={t("conversation.title")} description={t("conversation.description")}/><EmptyExperience title={t("conversation.unavailable")} description={t("conversation.unavailableDescription")}/></section>;
+  return <section className={`conversation-workspace${mobileDetail?" is-showing-detail":""}`} aria-busy={listLoading||working}>
+    <div className="conversation-workspace__anchor"><PageHeader title={t("conversation.title")} description={t("conversation.description")}/><button className="button button--quiet" type="button" onClick={()=>void load()} disabled={listLoading||working}>{t("conversation.refresh")}</button></div>
+    {listError&&<div className="inline-message inline-message--error" role="alert"><p>{t("conversation.unavailableDescription")}</p><button className="button button--secondary" onClick={()=>void load()}>{t("common.retry")}</button></div>}
+    {listLoading&&items.length===0&&<p role="status">{t("conversation.loading")}</p>}
+    {!listLoading&&!listError&&items.length===0&&<EmptyExperience title={t("conversation.empty")} description={t("conversation.emptyDescription")}/>}
+    {items.length>0&&<div className="conversation-split"><aside className="conversation-list" aria-label={t("conversation.listLabel")}><ol>{viewItems.map(item=><li key={item.id}><button type="button" className={selected?.conversationId===item.id?"is-selected":""} aria-current={selected?.conversationId===item.id?"true":undefined} onClick={()=>void loadDetail(item.id,true)}><span className="conversation-list__top"><strong>{item.identity??t("conversation.unnamed")}</strong>{item.lastActivityAt&&<time dateTime={item.lastActivityAt}>{formatDate(item.lastActivityAt)}</time>}</span><span className="conversation-list__preview">{item.preview??t("conversation.noMessages")}</span><span className={`conversation-state conversation-state--${item.state}`}>{stateLabel(item.state,t)}</span></button></li>)}</ol></aside>
+      <main className="conversation-detail" aria-label={t("conversation.detailLabel")}>{mobileDetail&&<button className="conversation-detail__back" type="button" onClick={()=>setMobileDetail(false)}>← {t("conversation.backToList")}</button>}
+        {!selected&&!detailLoading&&!detailError&&<div className="conversation-detail__prompt"><h2>{t("conversation.selectTitle")}</h2><p>{t("conversation.selectDescription")}</p></div>}{detailLoading&&<p role="status">{t("conversation.loadingDetail")}</p>}{detailError&&<div className="inline-message inline-message--error" role="alert"><p>{t("conversation.detailUnavailable")}</p>{selectedId.current&&<button className="button button--secondary" onClick={()=>void loadDetail(selectedId.current!)}>{t("common.retry")}</button>}</div>}
+        {selected&&!detailLoading&&!detailError&&<article><header className="conversation-detail__header"><h2 ref={detailHeading} tabIndex={-1}>{selected.participant?.trim()||t("conversation.unnamed")}</h2><p>{t(`conversation.channel.${selected.channel}`)} · {stateLabel(selected.preview?(selected.controlState==="human_required"?"attention":selected.controlState==="human_controlled"?"human":"automated"):"empty",t)}</p></header>
+          {selected.messages.length===0?<div className="conversation-no-messages"><h3>{t("conversation.noMessagesTitle")}</h3><p>{t("conversation.noMessagesDescription")}</p></div>:<ol className="conversation-timeline" aria-label={t("conversation.messages")}>{[...selected.messages].sort((a,b)=>a.createdAt.localeCompare(b.createdAt)).map(message=><li key={message.messageId} className={`conversation-message conversation-message--${message.deliveryCategory}`}><strong>{message.deliveryCategory==="received"?t("conversation.customer"):t("conversation.atlasOrTeam")}</strong><p>{message.content}</p><time dateTime={message.createdAt}>{formatDate(message.createdAt)}</time></li>)}</ol>}
+          <section className="conversation-control"><div><h3>{t("conversation.controlTitle")}</h3><p>{selected.controlState==="human_controlled"?t("conversation.releaseHelp"):t("conversation.takeHelp")}</p></div>{manageable&&selected.controlState!=="human_controlled"&&<button className="button button--primary" disabled={working} onClick={()=>void control("take")}>{t("conversation.take")}</button>}{manageable&&selected.controlState==="human_controlled"&&<div className="action-row"><button className="button button--primary" disabled={working} onClick={()=>void control("release")}>{t("conversation.release")}</button><button className="button button--quiet" disabled={working} onClick={()=>void control("resolve")}>{t("conversation.resolve")}</button></div>}</section>
+          {canSend&&selected.controlState==="human_controlled"&&<form className="conversation-composer" onSubmit={event=>void send(event)}><label className="form-field"><span>{t("conversation.reply")}</span><textarea required maxLength={10000} value={content} onChange={event=>setContent(event.target.value)} disabled={working}/></label><button className="button button--primary" disabled={working||!content.trim()}>{working?t("conversation.sending"):t("conversation.send")}</button></form>}
+        </article>}
+      </main></div>}
   </section>;
 }
-
-type Text = typeof english;
-const english = { title: "Conversation inbox", description: "Review and handle customer conversations for the selected company.", refresh: "Refresh", loading: "Loading conversations...", empty: "No conversations yet", emptyDescription: "Incoming customer conversations will appear here.", companyRequired: "Select a company to view its conversations.", unavailable: "Conversations are unavailable.", listLabel: "Conversations", noMessages: "No messages", messages: "Messages", customer: "Customer", sent: "Sent", take: "Take over", release: "Release", resolve: "Resolve", reply: "Manual reply", send: "Send reply", sending: "Sending...", automated: "Automated", human_required: "Needs human", human_controlled: "Human controlled", whatsapp: "WhatsApp", web_chat: "Web chat", internal: "Internal" };
-const spanish: Text = { title: "Bandeja de conversaciones", description: "Revisá y atendé las conversaciones de clientes de la empresa seleccionada.", refresh: "Actualizar", loading: "Cargando conversaciones...", empty: "Todavía no hay conversaciones", emptyDescription: "Las conversaciones entrantes de clientes aparecerán acá.", companyRequired: "Seleccioná una empresa para ver sus conversaciones.", unavailable: "Las conversaciones no están disponibles.", listLabel: "Conversaciones", noMessages: "Sin mensajes", messages: "Mensajes", customer: "Cliente", sent: "Enviado", take: "Tomar control", release: "Liberar", resolve: "Resolver", reply: "Respuesta manual", send: "Enviar respuesta", sending: "Enviando...", automated: "Automatizada", human_required: "Requiere atención", human_controlled: "Control humano", whatsapp: "WhatsApp", web_chat: "Chat web", internal: "Interna" };
-function controlLabel(value: ConversationInboxItem["controlState"], text: Text): string { return text[value]; }
-function channelLabel(value: ConversationInboxItem["channel"], text: Text): string { return text[value]; }
+function stateLabel(state:ConversationState,t:ReturnType<typeof useI18n>["t"]):string{return t(`conversation.state.${state}`);}

@@ -1,5 +1,7 @@
 .language-selector select { min-block-size: 40px; padding-inline: var(--space-4) var(--space-8); color: var(--color-text-primary); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
-.button { display: inline-flex; min-block-size: 40px; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); border: 1px solid transparent; border-radius: var(--radius-md); font-weight: 600; line-height: 20px; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease; }
+.button { display: inline-flex; min-block-size: 44px; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); border: 1px solid transparent; border-radius: var(--radius-md); font-weight: 650; line-height: 20px; cursor: pointer; transition: transform var(--motion-duration-fast) var(--motion-ease-standard), background-color var(--motion-duration-fast) var(--motion-ease-standard), border-color var(--motion-duration-fast) var(--motion-ease-standard), box-shadow var(--motion-duration-fast) var(--motion-ease-standard); }
+.button:hover:not(:disabled) { transform: translateY(calc(-1 * var(--interactive-pressed-translate))); box-shadow: var(--atlas-shadow-control); }
+.button:active:not(:disabled) { transform: translateY(var(--interactive-pressed-translate)); box-shadow: none; transition-duration: var(--motion-duration-instant); }
 .button:disabled { color: var(--atlas-color-text-disabled); background: var(--atlas-color-disabled-surface); border-color: var(--atlas-color-border-subtle); box-shadow: none; cursor: not-allowed; opacity: 1; transform: none; }
 .button--primary { color: var(--atlas-color-action-text); background: var(--atlas-color-action); }
 .button--primary:hover:not(:disabled) { color: var(--atlas-color-action-text); background: var(--atlas-color-action-hover); }
@@ -12,7 +14,7 @@
 .button--danger-quiet:hover:not(:disabled) { color: var(--atlas-color-danger); background: var(--atlas-color-danger-surface); }
 .button--danger { color: var(--atlas-color-danger-text); background: var(--atlas-color-danger); }
 .button--danger:hover:not(:disabled) { color: var(--atlas-color-danger-text); background: color-mix(in srgb, var(--atlas-color-danger) 88%, var(--atlas-color-text)); }
-.button:focus-visible, .ds-button:focus-visible, .context-back-link:focus-visible { outline: 3px solid var(--atlas-color-focus); outline-offset: 3px; box-shadow: 0 0 0 5px var(--atlas-color-focus-halo); }
+.button:focus-visible, .ds-button:focus-visible, .context-back-link:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring-color); outline-offset: var(--focus-ring-offset); box-shadow: 0 0 0 5px var(--atlas-color-focus-halo); }
 .button--compact { min-block-size: 32px; padding: var(--space-2) var(--space-3); font-size: 13px; }
 .button--full { inline-size: 100%; }
 .sidebar-heading, .section-heading, .workspace-title-row, .action-row, .onboarding-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }

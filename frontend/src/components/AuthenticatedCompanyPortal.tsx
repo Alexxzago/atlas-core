@@ -19,13 +19,13 @@ import { ConversationInbox } from "./ConversationInbox";
 import { CompanySetupChecklist } from "./CompanySetupChecklist";
 import { ChannelHub } from "./ChannelHub";
 
-interface Props { csrf: string; email: string; onPassword: () => void; onLogout: () => void }
+interface Props { csrf: string; userId?: string | undefined; email: string; onPassword: () => void; onLogout: () => void }
 
-export function AuthenticatedCompanyPortal({ csrf, email, onPassword, onLogout }: Props): React.JSX.Element {
-  return <AuthenticatedPortalProvider csrf={csrf}><AuthenticatedCompanyPortalContent csrf={csrf} email={email} onPassword={onPassword} onLogout={onLogout} /></AuthenticatedPortalProvider>;
+export function AuthenticatedCompanyPortal({ csrf, userId, email, onPassword, onLogout }: Props): React.JSX.Element {
+  return <AuthenticatedPortalProvider csrf={csrf}><AuthenticatedCompanyPortalContent csrf={csrf} userId={userId} email={email} onPassword={onPassword} onLogout={onLogout} /></AuthenticatedPortalProvider>;
 }
 
-function AuthenticatedCompanyPortalContent({ csrf, email, onPassword, onLogout }: Props): React.JSX.Element {
+function AuthenticatedCompanyPortalContent({ csrf, userId, email, onPassword, onLogout }: Props): React.JSX.Element {
   const { t } = useI18n();
   const { route, navigate } = useRouter();
   const [routeCompanyValidation, setRouteCompanyValidation] = useState<CompanyRouteValidation>({ key: null, status: "idle" });
@@ -71,7 +71,7 @@ function AuthenticatedCompanyPortalContent({ csrf, email, onPassword, onLogout }
     if (route.name === "companies") return <DashboardPage model={buildCompanyWorkspaceViewModel({ workspace: state.selectedWorkspace, companies: state.companies, company: null, companiesLoading: state.companiesLoading, companiesUnavailable: state.companyError })} onNavigate={navigate} onRetry={refreshCompanies} onChooseCompany={() => {}}/>;
     if (route.name === "conversations") return <ConversationInbox csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} companyId={state.selectedCompanyId} capabilities={state.selectedWorkspace?.capabilities ?? []}/>;
     if (route.name === "analytics") return <><PageHeader title={t("shell.analyticsTitle")} description={t("shell.analyticsDescription")} /><EmptyState title={t("shell.analyticsTitle")} description={t("shell.analyticsDescription")} /></>;
-    if (route.name === "settings") return <WorkspaceMembershipPortal csrf={csrf} workspaces={state.workspaces} selectedWorkspace={state.selectedWorkspace} pendingWorkspaceId={state.pendingWorkspaceId} loading={state.workspacesLoading} error={state.workspaceError} onSelectWorkspace={(id) => { void selectWorkspace(id).then((selected) => { if (selected) navigate("/companies", { replace: true }); }); }} onWorkspacesChanged={() => void refresh()} onActiveWorkspaceLeft={clearWorkspace}/>;
+    if (route.name === "settings") return <WorkspaceMembershipPortal csrf={csrf} currentUserId={userId} currentUserEmail={email} workspaces={state.workspaces} selectedWorkspace={state.selectedWorkspace} pendingWorkspaceId={state.pendingWorkspaceId} loading={state.workspacesLoading} error={state.workspaceError} onSelectWorkspace={(id) => { void selectWorkspace(id).then((selected) => { if (selected) navigate("/companies", { replace: true }); }); }} onWorkspacesChanged={() => void refresh()} onActiveWorkspaceLeft={clearWorkspace}/>;
     if (route.name === "company-assistant") return assistantPanel;
     if (route.name === "company-knowledge") return knowledgePanel;
     if (route.name === "company-channels") return <>{requestedCompanyId && <ChannelHub companyId={requestedCompanyId} onNavigate={navigate}/>}</>;

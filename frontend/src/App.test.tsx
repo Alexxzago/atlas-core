@@ -86,7 +86,7 @@ test("renders workspace setup instead of a blank self-redirect when no workspace
   window.history.replaceState({}, "", "/onboarding/workspace");
   authenticatedFetch([], []);
   renderApp();
-  await screen.findByRole("heading", { name: "Great! Your account is ready." });
+  await screen.findByRole("heading", { name: "Create your workspace" });
   expect(window.location.pathname).toBe("/onboarding/workspace");
 });
 

@@ -4,7 +4,7 @@ h2 { font-size: 16px; line-height: 24px; font-weight: 600; }
 p { color: var(--color-text-secondary); }
 a { color: var(--color-action); text-underline-offset: 3px; overflow-wrap: anywhere; }
 a:hover { color: var(--color-action-hover); }
-:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; box-shadow: 0 0 0 4px var(--color-focus-halo); }
+:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring-color); outline-offset: var(--focus-ring-offset); box-shadow: 0 0 0 5px var(--color-focus-halo); }
 ::selection { background: var(--color-surface-selected); }
 .sr-only { position: absolute; inline-size: 1px; block-size: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .supporting-copy, small { color: var(--color-text-secondary); font-size: 12px; line-height: 18px; }

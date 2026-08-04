@@ -49,6 +49,14 @@ test("groups account actions, uses clear workspace copy, and restores focus on E
   expect(screen.getByText("Apariencia")).toBeTruthy();
   expect(screen.getByText("Cuenta")).toBeTruthy();
   fireEvent.keyDown(window, { key: "Escape" });
-  expect(screen.queryByRole("group", { name: "Espacio y cuenta" })).toBeNull();
+  expect(screen.queryByRole("dialog", { name: "Espacio y cuenta" })).toBeNull();
   expect(document.activeElement).toBe(trigger);
+});
+
+test("exposes a persisted keyboard language menu in the account surface", async()=>{
+  window.localStorage.setItem("atlas.locale", "en");render(view());fireEvent.click(screen.getAllByRole("button",{name:"Workspace and account"})[0]!);const language=screen.getByRole("button",{name:/English/});expect(language.getAttribute("aria-expanded")).toBe("false");fireEvent.click(language);const spanish=screen.getByRole("option",{name:"Español"});fireEvent.click(spanish);expect(window.localStorage.getItem("atlas.locale")).toBe("es");expect(screen.getByText("Apariencia")).toBeTruthy();await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole("button",{name:/Español/})));fireEvent.click(screen.getByRole("button",{name:/Español/}));fireEvent.keyDown(screen.getByRole("listbox",{name:/Idioma/}),{key:"Escape"});await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole("button",{name:/Español/})));expect(screen.queryByRole("listbox")).toBeNull();
+});
+
+test("keeps language control available from the mobile account trigger",()=>{
+  window.localStorage.setItem("atlas.locale", "en");render(view());fireEvent.click(screen.getAllByRole("button",{name:"Workspace and account"})[1]!);expect(screen.getByRole("button",{name:/English/})).toBeTruthy();
 });

@@ -87,6 +87,13 @@ test("company chooser prioritizes selection and keeps creation secondary", async
   await waitFor(() => expect(create).toHaveBeenCalledWith({ name: "Company C", website: null }));
 });
 
+test("company chooser keeps title, subtitle, and close control in distinct accessible regions", async()=>{
+  const close=vi.fn(),longCompany={...companyA,name:"A very long company name that remains usable when the dialog becomes narrow"};
+  render(<I18nProvider><AuthenticatedCompanySelector open companies={[longCompany]} selectedCompanyId={longCompany.id} workspaceSelected loading={false} error={false} creating={false} onCreate={async()=>false} onCompanySelected={()=>{}} onRetry={()=>{}} onClose={close}/></I18nProvider>);
+  const title=screen.getByRole("heading",{name:"Which company does Atlas work for?"}),subtitle=screen.getByText("Choose the context you want to prepare and supervise.");expect(title.tagName).toBe("H2");expect(subtitle.tagName).toBe("P");expect(title.parentElement).toBe(subtitle.parentElement);expect(title.parentElement?.classList.contains("company-chooser__heading")).toBe(true);const closeButton=screen.getByRole("button",{name:"Close"});await waitFor(()=>expect(document.activeElement).toBe(closeButton));fireEvent.keyDown(window,{key:"Escape"});expect(close).toHaveBeenCalledTimes(1);
+  cleanup();window.localStorage.setItem("atlas.locale","es");render(<I18nProvider><AuthenticatedCompanySelector open companies={[longCompany]} selectedCompanyId={longCompany.id} workspaceSelected loading={false} error={false} creating={false} onCreate={async()=>false} onCompanySelected={()=>{}} onRetry={()=>{}} onClose={()=>{}}/></I18nProvider>);expect(screen.getByRole("heading",{name:"¿Para qué empresa trabaja Atlas?"})).toBeTruthy();expect(screen.getByText("Elegí el contexto que querés preparar y supervisar.")).toBeTruthy();expect(screen.getByRole("button",{name:"Cerrar"})).toBeTruthy();
+});
+
 test("Today translates authoritative blockers into one next action", async () => {
   window.localStorage.setItem("atlas.locale", "es");
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
@@ -111,9 +118,24 @@ test("workspace settings presents member IDs as muted metadata, not primary iden
   }));
   render(<I18nProvider><WorkspaceMembershipPortal csrf="csrf" workspaces={[workspace]} selectedWorkspace={workspace} pendingWorkspaceId={null} loading={false} error={false} onSelectWorkspace={() => {}} onWorkspacesChanged={() => {}} onActiveWorkspaceLeft={() => {}}/></I18nProvider>);
   expect(await screen.findByText("Team member")).toBeTruthy();
-  const technical = screen.getByText(/Account reference: technical-user-id/);
+  const technical = screen.getByText(/Secondary account reference: technical-user-id/);
   expect(technical.tagName).toBe("SMALL");
-  expect(screen.getByRole("heading", { name: "Members" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Team" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Invitations" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Ownership and exit" })).toBeTruthy();
+});
+
+test("workspace owner cannot edit or remove self and transfer requires an explicit recipient", async () => {
+  const ownerWorkspace={...workspace,capabilities:["workspace:manage","membership:list","membership:invite","membership:manage","owner:transfer"] as unknown as typeof workspace.capabilities};
+  const fetch=vi.fn((input:string|URL|Request)=>{const url=String(input);if(url.endsWith("/memberships"))return Promise.resolve(json([{id:"owner-membership",userId:"owner-user",role:"owner",status:"active"},{id:"member-2",userId:"other-user",role:"operator",status:"active"}]));if(url.endsWith("/invitations"))return Promise.resolve(json([]));if(url.endsWith("/transfer-ownership"))return Promise.resolve(new Response("",{status:204}));return Promise.resolve(new Response("",{status:404}))});
+  vi.stubGlobal("fetch",fetch);
+  render(<I18nProvider><WorkspaceMembershipPortal csrf="csrf" currentUserId="owner-user" currentUserEmail="owner@example.test" workspaces={[ownerWorkspace]} selectedWorkspace={ownerWorkspace} pendingWorkspaceId={null} loading={false} error={false} onSelectWorkspace={()=>{}} onWorkspacesChanged={()=>{}} onActiveWorkspaceLeft={()=>{}}/></I18nProvider>);
+  const owner=await screen.findByText("owner@example.test");const ownerRow=owner.closest("li")!;expect(ownerRow.querySelector("select")).toBeNull();expect(ownerRow.textContent).not.toContain("Remove access");
+  fireEvent.click(screen.getByRole("button",{name:"Transfer ownership"}));expect(screen.getByRole("button",{name:"Continue transfer"}).hasAttribute("disabled")).toBe(true);fireEvent.click(screen.getByRole("radio",{name:/Team member/}));fireEvent.click(screen.getByRole("button",{name:"Continue transfer"}));expect(screen.getByText(/Team member will become owner/)).toBeTruthy();fireEvent.click(screen.getByRole("button",{name:"Confirm"}));
+  await waitFor(()=>expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/transfer-ownership"),expect.objectContaining({body:JSON.stringify({targetMembershipId:"member-2",actorRole:"administrator"})})));
+});
+
+test("ownership transfer is unavailable until another active member exists", async()=>{
+  const ownerWorkspace={...workspace,capabilities:["membership:list","membership:manage","owner:transfer"] as unknown as typeof workspace.capabilities};vi.stubGlobal("fetch",vi.fn((input:string|URL|Request)=>String(input).endsWith("/memberships")?Promise.resolve(json([{id:"owner",userId:"owner-user",role:"owner",status:"active"}])):Promise.resolve(json([]))));
+  render(<I18nProvider><WorkspaceMembershipPortal csrf="csrf" currentUserId="owner-user" currentUserEmail="owner@example.test" workspaces={[ownerWorkspace]} selectedWorkspace={ownerWorkspace} pendingWorkspaceId={null} loading={false} error={false} onSelectWorkspace={()=>{}} onWorkspacesChanged={()=>{}} onActiveWorkspaceLeft={()=>{}}/></I18nProvider>);await screen.findByText("owner@example.test");fireEvent.click(screen.getByRole("button",{name:"Transfer ownership"}));expect(screen.getByText("Invite and add another person to the workspace before transferring ownership.")).toBeTruthy();expect(screen.queryByRole("button",{name:"Continue transfer"})).toBeNull();
 });
