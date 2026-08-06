@@ -41,13 +41,13 @@ The import includes `schema_migrations`, tenant records, Knowledge versions/publ
 
 1. Create a Render Web Service from this GitHub repository and select the current branch.
 2. Render discovers `render.yaml`; confirm root directory `backend`, build command `npm ci && npm run build`, start command `npm start`, and health check `/health`.
-3. Add secret environment variables: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `ATLAS_VERIFICATION_ORIGIN`, `ATLAS_BOOTSTRAP_SECRET`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_REPLY_TO`, `GEMINI_API_KEY`, and `FIRECRAWL_API_KEY` when their features are enabled.
+3. Add secret environment variables: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `ATLAS_VERIFICATION_ORIGIN`, `ATLAS_BOOTSTRAP_SECRET`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_REPLY_TO`, `GEMINI_API_KEY`, `FIRECRAWL_API_KEY`, `EMAIL_PROVIDER`, `GOOGLE_APPS_SCRIPT_URL`, `GOOGLE_APPS_SCRIPT_TOKEN`, and `EMAIL_TIMEOUT` when their features are enabled.
 4. Set non-secret variables: `NODE_ENV=production` and `DATABASE_PROVIDER=libsql`.
 5. Set `ATLAS_VERIFICATION_ORIGIN` to the final HTTPS Vercel origin, for example `https://atlas-portal.vercel.app`.
 6. Set `ATLAS_ALLOWED_ORIGINS` to that same exact origin. Multiple explicit origins are comma-separated only when required.
 7. Deploy, then check `https://YOUR-RENDER-HOST/health` and `https://YOUR-RENDER-HOST/ready`.
 
-`ATLAS_BOOTSTRAP_SECRET` must be a unique secret of at least 32 characters. It authorizes the one-time initial platform claim and must never be sent to browsers, logs, or email. SMTP values configure Nodemailer: `SMTP_SECURE=true` normally uses port 465; `SMTP_SECURE=false` normally uses port 587. `SMTP_FROM` and `SMTP_REPLY_TO` are the sender and support reply address. Production startup fails if the bootstrap secret or any SMTP variable is missing or invalid.
+`ATLAS_BOOTSTRAP_SECRET` must be a unique secret of at least 32 characters. It authorizes the one-time initial platform claim and must never be sent to browsers, logs, or email. SMTP values configure Nodemailer: `SMTP_SECURE=true` normally uses port 465; `SMTP_SECURE=false` normally uses port 587. `SMTP_FROM` and `SMTP_REPLY_TO` are the sender and support reply address. For Google Apps Script, set `EMAIL_PROVIDER=google_apps_script`, `GOOGLE_APPS_SCRIPT_URL` to the HTTPS endpoint, optionally `GOOGLE_APPS_SCRIPT_TOKEN` for Bearer auth, and `EMAIL_TIMEOUT` for the request timeout in milliseconds. The backend sends a JSON payload with `to`, `subject`, `html`, and `text`; the Google Apps Script endpoint must be deployed externally and should return an HTTP 2xx status. Production startup fails if the bootstrap secret or any provider-specific variables are missing or invalid.
 
 Render free services can sleep after inactivity and their local filesystem is ephemeral. Atlas production data is therefore only in Turso. The first request after sleep can be slow.
 
