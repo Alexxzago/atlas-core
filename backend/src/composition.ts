@@ -71,6 +71,7 @@ import type { AppRouters } from "./app.js";
 import { smtpConfiguration, SmtpEmailDelivery } from "./providers/smtpEmailDelivery.js";
 import { emailDeliveryMode } from "./providers/emailDeliveryMode.js";
 import { ResendEmailDelivery, resendConfiguration } from "./providers/resendEmailDelivery.js";
+import { GoogleAppsScriptEmailDelivery, googleAppsScriptConfiguration } from "./providers/googleAppsScriptEmailDelivery.js";
 import { SqlitePlatformBootstrapTransaction } from "./repositories/platformBootstrapTransaction.js";
 import { PlatformBootstrapService } from "./identity/services/platformBootstrapService.js";
 import { ConversationRepository } from "./repositories/conversationRepository.js";
@@ -133,8 +134,14 @@ const identityClock = new SystemClock();
 const production=process.env.NODE_ENV==="production";
 if (production && (process.env.ATLAS_BOOTSTRAP_SECRET?.length ?? 0) < 32) throw new Error("Production requires ATLAS_BOOTSTRAP_SECRET with at least 32 characters.");
 if (production && (!(process.env.WHATSAPP_APP_SECRET?.trim()) || !(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim()))) throw new Error("Production requires WhatsApp webhook credentials.");
-const deliveryMode = emailDeliveryMode(process.env.ATLAS_VERIFICATION_DELIVERY, production);
-const providerDelivery = deliveryMode === "smtp" ? new SmtpEmailDelivery(smtpConfiguration()) : deliveryMode === "resend" ? new ResendEmailDelivery(resendConfiguration()) : null;
+const deliveryMode = emailDeliveryMode(process.env.EMAIL_PROVIDER ?? process.env.ATLAS_VERIFICATION_DELIVERY, production);
+const providerDelivery = deliveryMode === "smtp"
+  ? new SmtpEmailDelivery(smtpConfiguration())
+  : deliveryMode === "resend"
+    ? new ResendEmailDelivery(resendConfiguration())
+    : deliveryMode === "google_apps_script"
+      ? new GoogleAppsScriptEmailDelivery(googleAppsScriptConfiguration())
+      : null;
 const verificationDelivery = deliveryMode === "development"
   ? new DevelopmentVerificationDelivery(process.env.NODE_ENV ?? "development", (message) => console.info(message))
   : providerDelivery ?? new UnavailableVerificationDelivery();
