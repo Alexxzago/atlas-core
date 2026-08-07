@@ -5,7 +5,7 @@ import { ResendEmailDelivery, resendConfiguration } from "../providers/resendEma
 
 const configuration = { apiKey: "resend-secret-key", from: "Atlas <no-reply@example.com>", replyTo: "support@example.com" };
 const reset = { recipient: "person@example.com" as never, locale: "en" as const, resetUrl: "https://atlas.test/reset-password?proof=proof-value", expiresAt: "2026-07-30T12:00:00.000Z", workflowId: "evf_1" };
-const verification = { recipient: "person@example.com" as never, locale: "es" as const, verificationUrl: "https://atlas.test/identity/verify-email?proof=proof-value", expiresAt: "2026-07-30T12:00:00.000Z", workflowId: "evf_1" };
+const verification = { recipient: "person@example.com" as never, locale: "es" as const, verificationUrl: "https://atlas.test/verify-email?proof=proof-value", expiresAt: "2026-07-30T12:00:00.000Z", workflowId: "evf_1" };
 
 function delivery(fetcher: typeof fetch, entries: unknown[] = []): ResendEmailDelivery { return new ResendEmailDelivery(configuration, fetcher, (entry) => entries.push(entry)); }
 

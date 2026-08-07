@@ -42,7 +42,7 @@ test("keeps registration public for an unauthenticated visitor", async () => {
   window.history.replaceState({}, "", "/register");
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({}, 401))));
   renderApp();
-  await screen.findByRole("heading", { name: "Meet Atlas" });
+  await screen.findByRole("heading", { name: "Create account" });
   expect(window.location.pathname).toBe("/register");
 });
 

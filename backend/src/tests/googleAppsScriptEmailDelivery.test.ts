@@ -5,7 +5,7 @@ import { GoogleAppsScriptEmailDelivery, googleAppsScriptConfiguration } from "..
 
 const configuration = { endpoint: "https://script.example.com/exec", token: "secret-token", timeoutMs: 4_000 };
 const reset = { recipient: "person@example.com" as never, locale: "en" as const, resetUrl: "https://atlas.test/reset-password?proof=proof-value", expiresAt: "2026-07-30T12:00:00.000Z", workflowId: "evf_1" };
-const verification = { recipient: "person@example.com" as never, locale: "es" as const, verificationUrl: "https://atlas.test/identity/verify-email?proof=proof-value", expiresAt: "2026-07-30T12:00:00.000Z", workflowId: "evf_1" };
+const verification = { recipient: "person@example.com" as never, locale: "es" as const, verificationUrl: "https://atlas.test/verify-email?proof=proof-value", expiresAt: "2026-07-30T12:00:00.000Z", workflowId: "evf_1" };
 
 function delivery(fetcher: typeof fetch, entries: unknown[] = []): GoogleAppsScriptEmailDelivery {
   return new GoogleAppsScriptEmailDelivery({ endpoint: configuration.endpoint, token: configuration.token, timeoutMs: configuration.timeoutMs }, fetcher, (entry) => entries.push(entry));

@@ -47,10 +47,15 @@ function OnboardingLoadFailure({ message, onRetry }: { readonly message: string;
 }
 
 function GuidedSetupContent({ guardState }: { readonly guardState: GuidedSetupGuardState }): React.JSX.Element {
-  const { t } = useI18n(); const { appRoute, search, navigate } = useRouter();
+  const { t } = useI18n(); const { appRoute, search, navigate, pathname } = useRouter();
   const route = appRoute.kind === "public" && appRoute.name === "guided" ? appRoute.route : { name: "not-found" } as const;
   const resolved = resolveGuidedSetupRoute(route, guardState);
   const redirect = "redirect" in resolved ? resolved.redirect : null;
+  useEffect(() => {
+    if (pathname === "/identity/verify-email") {
+      navigate(`/verify-email${search}`, { replace: true });
+    }
+  }, [pathname, search, navigate]);
   useEffect(() => { if (redirect) navigate(redirect, { replace: true }); }, [navigate, redirect]);
   if (redirect) return <StartupState />;
   const pageRoute = resolved as Exclude<typeof resolved, { readonly redirect: string }>;

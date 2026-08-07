@@ -4,6 +4,8 @@ import { parseGuidedSetupRoute, resolveGuidedSetupRoute } from "./guidedSetupRou
 test("parses root, public, and setup paths", () => {
   expect(parseGuidedSetupRoute("/")).toEqual({ name: "landing" });
   expect(parseGuidedSetupRoute("/register/")).toEqual({ name: "register" });
+  expect(parseGuidedSetupRoute("/verify-email")).toEqual({ name: "verify-email" });
+  expect(parseGuidedSetupRoute("/identity/verify-email")).toEqual({ name: "verify-email" });
   expect(parseGuidedSetupRoute("/onboarding/workspace")).toEqual({ name: "workspace-setup" });
   expect(parseGuidedSetupRoute("/onboarding/company")).toEqual({ name: "company-setup" });
   expect(parseGuidedSetupRoute("/activation-pending")).toEqual({ name: "activation-pending" });

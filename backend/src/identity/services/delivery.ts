@@ -14,7 +14,7 @@ export async function deliverVerification(
   transaction: IdentityTransactionPort,
   clock: Clock,
 ): Promise<VerificationDeliveryOutcome> {
-  const url = new URL("/identity/verify-email", origin);
+  const url = new URL("/verify-email", origin);
   url.searchParams.set("proof", proof);
   const outcome = await delivery.deliver({ recipient: email, locale, verificationUrl: url.toString(), expiresAt: workflow.expiresAt, workflowId: workflow.id });
   const now = clock.now();
