@@ -16,7 +16,7 @@ export function parseGuidedSetupRoute(pathname: string): GuidedSetupRoute | null
   const path = pathname.replace(/\/+$/, "") || "/";
   if (path === "/") return { name: "landing" };
   const names: Readonly<Record<string, Exclude<GuidedSetupRoute["name"], "landing" | "not-found">>> = {
-    "/register": "register", "/verify-email": "verify-email", "/sign-in": "sign-in", "/forgot-password": "forgot-password", "/reset-password": "reset-password", "/onboarding/workspace": "workspace-setup", "/onboarding/company": "company-setup", "/activation-pending": "activation-pending",
+    "/register": "register", "/verify-email": "verify-email", "/identity/verify-email": "verify-email", "/sign-in": "sign-in", "/forgot-password": "forgot-password", "/reset-password": "reset-password", "/onboarding/workspace": "workspace-setup", "/onboarding/company": "company-setup", "/activation-pending": "activation-pending",
   };
   return names[path] ? { name: names[path] } : null;
 }

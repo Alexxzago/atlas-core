@@ -19,7 +19,7 @@ test("SMTP delivery renders responsive HTML and text for verification, enrollmen
   const transport = new Transport();
   const delivery = new SmtpEmailDelivery(configuration, transport);
   const expiresAt = "2026-07-30T12:00:00.000Z";
-  assert.equal(await delivery.deliver({ recipient: "person@example.com" as never, locale: "es", verificationUrl: "https://atlas.test/identity/verify-email?proof=proof", expiresAt, workflowId: "evf_1" }), "accepted");
+  assert.equal(await delivery.deliver({ recipient: "person@example.com" as never, locale: "es", verificationUrl: "https://atlas.test/verify-email?proof=proof", expiresAt, workflowId: "evf_1" }), "accepted");
   assert.equal(await delivery.deliver({ recipient: "person@example.com" as never, locale: "en", enrollmentUrl: "https://atlas.test/enroll-credential?proof=proof", expiresAt, workflowId: "cen_1" }), "accepted");
   assert.equal(await delivery.deliver({ recipient: "person@example.com", workspaceName: "Example Workspace", role: "viewer", acceptanceUrl: "https://atlas.test/accept-invitation?proof=proof", expiresAt, invitationId: "inv_1" }), "accepted");
   assert.equal(transport.messages.length, 3);
@@ -29,7 +29,7 @@ test("SMTP delivery renders responsive HTML and text for verification, enrollmen
 test("SMTP delivery classifies rejection and transport failures without throwing to services", async () => {
   const transport = new Transport();
   const delivery = new SmtpEmailDelivery(configuration, transport);
-  const request = { recipient: "person@example.com" as never, locale: "en" as const, verificationUrl: "https://atlas.test/identity/verify-email?proof=proof", expiresAt: "2026-07-30T12:00:00.000Z", workflowId: "evf_1" };
+  const request = { recipient: "person@example.com" as never, locale: "en" as const, verificationUrl: "https://atlas.test/verify-email?proof=proof", expiresAt: "2026-07-30T12:00:00.000Z", workflowId: "evf_1" };
   transport.result = { accepted: [], rejected: ["person@example.com"] };
   assert.equal(await delivery.deliver(request), "permanent_failure");
   transport.failure = Object.assign(new Error("timeout"), { code: "ETIMEDOUT" });
