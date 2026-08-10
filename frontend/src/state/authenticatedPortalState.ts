@@ -46,6 +46,7 @@ export interface AuthenticatedPortalState {
   workspaces: WorkspaceSummary[];
   workspacesLoading: boolean;
   workspaceError: boolean;
+  initialWorkspaceResolved: boolean;
   selectedWorkspace: WorkspaceSummary | null;
   pendingWorkspaceId: string | null;
   workspaceGeneration: number;
@@ -75,7 +76,7 @@ export interface AuthenticatedPortalState {
 }
 
 export const initialAuthenticatedPortalState: AuthenticatedPortalState = {
-  workspaces: [], workspacesLoading: true, workspaceError: false,
+  workspaces: [], workspacesLoading: true, workspaceError: false, initialWorkspaceResolved: false,
   selectedWorkspace: null, pendingWorkspaceId: null, workspaceGeneration: 0, activeWorkspaceRequest: null,
   companies: [], companiesLoading: false, companyError: false, companyCreating: false, selectedCompanyId: null, companyGeneration: 0,
   profiles: [], profilesLoading: false, profileError: false, selectedProfileId: null,
@@ -87,6 +88,7 @@ export const initialAuthenticatedPortalState: AuthenticatedPortalState = {
 type Action =
   | { type: "workspacesLoaded"; workspaces: WorkspaceSummary[] }
   | { type: "workspacesFailed" }
+  | { type: "initialWorkspaceResolved" }
   | { type: "workspaceSelectionRequested"; workspaceId: string; request: RequestContext }
   | { type: "workspaceSelectionSucceeded"; request: RequestContext; workspace: WorkspaceSummary }
   | { type: "workspaceSelectionNotFound"; request: RequestContext }
@@ -177,6 +179,7 @@ export function authenticatedPortalReducer(state: AuthenticatedPortalState, acti
   switch (action.type) {
     case "workspacesLoaded": return { ...state, workspaces: action.workspaces, workspacesLoading: false, workspaceError: false };
     case "workspacesFailed": return { ...state, workspacesLoading: false, workspaceError: true };
+    case "initialWorkspaceResolved": return { ...state, initialWorkspaceResolved: true };
     case "workspaceSelectionRequested": return clearCompanies({ ...state, selectedWorkspace: null,
       pendingWorkspaceId: action.workspaceId, workspaceGeneration: action.request.generation,
       activeWorkspaceRequest: action.request, notice: null });
@@ -224,7 +227,7 @@ export function authenticatedPortalReducer(state: AuthenticatedPortalState, acti
     case "profilesNotFound": return matches(state, state.activeProfilesRequest, action.request)
       ? clearProfiles({ ...state, selectedCompanyId: null, notice: { type: "error", key: "portal.resourceUnavailable" } }) : state;
     case "profileSelected": return { ...state, selectedProfileId: action.profileId, transientArchivedProfile: null,
-      formMode: "closed", profileError: false };
+      formMode: "closed", profileError: false, notice: null };
     case "profileLoadStarted": return { ...state, activeProfileRequest: action.request };
     case "profileLoaded": return matches(state, state.activeProfileRequest, action.request)
       ? { ...state, profiles: replaceProfile(state.profiles, action.profile), selectedProfileId: action.profile.id,
@@ -234,8 +237,8 @@ export function authenticatedPortalReducer(state: AuthenticatedPortalState, acti
     case "profileNotFound": return matches(state, state.activeProfileRequest, action.request)
       ? { ...state, selectedProfileId: null, transientArchivedProfile: null, activeProfileRequest: null,
         profileReloadRequested: true, notice: { type: "error", key: "portal.resourceUnavailable" } } : state;
-    case "formOpened": return { ...state, formMode: action.mode };
-    case "formClosed": return { ...state, formMode: "closed" };
+    case "formOpened": return { ...state, formMode: action.mode, notice: null };
+    case "formClosed": return { ...state, formMode: "closed", notice: null };
     case "submissionStarted": return { ...state, submitting: true, activeMutationRequest: action.request, notice: null };
     case "submissionFailed": return matchesProfileMutation(state, action.request)
       ? { ...state, submitting: false, activeMutationRequest: null, notice: { type: "error", key: action.noticeKey } } : state;

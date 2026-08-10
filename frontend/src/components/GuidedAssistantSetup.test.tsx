@@ -117,3 +117,18 @@ test("redirects unauthenticated onboarding access through the shared guard", asy
   await waitFor(() => expect(window.location.pathname).toBe("/sign-in"));
   expect(screen.getByRole("heading", { name: "Welcome back" })).toBeTruthy();
 });
+
+test("shows an explicit workspace selector when multiple workspaces have no persisted selection", async () => {
+  window.history.replaceState({}, "", "/onboarding/workspace");
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/session/bootstrap")) return Promise.resolve(json({ status: "authenticated", identity, csrfToken: "csrf", csrfGeneration: 1 }));
+    if (url.endsWith("/workspaces") && !url.includes("selected")) return Promise.resolve(json([workspace, { ...workspace, id: "other", name: "Other workspace" }]));
+    if (url.endsWith("/workspaces/selected")) return Promise.resolve(json({}, 404));
+    return Promise.resolve(json({}, 404));
+  }));
+  renderGuided();
+  await screen.findByRole("heading", { name: "Choose a workspace" });
+  expect(screen.getByRole("button", { name: "Workspace" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Other workspace" })).toBeTruthy();
+});

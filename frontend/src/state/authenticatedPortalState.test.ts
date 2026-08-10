@@ -36,6 +36,15 @@ function mutation(state: AuthenticatedPortalState, operation: ProfileMutationOpe
   return { ...request(state, requestId), ...(profileId === undefined ? {} : { profileId }), operation };
 }
 
+test("saving a draft reports saved configuration and clears the notice when opening review or edit", () => {
+  const before = { ...populated(), formMode: "create" as const, activeMutationRequest: mutation(populated(), "create") };
+  const saved = authenticatedPortalReducer(before, { type: "profileCreated", request: before.activeMutationRequest!, profile: profileA });
+  assert.equal(saved.profiles[0]?.status, "draft");
+  assert.deepEqual(saved.notice, { type: "success", key: "profiles.createSuccess" });
+  assert.equal(authenticatedPortalReducer(saved, { type: "profileSelected", profileId: profileA.id }).notice, null);
+  assert.equal(authenticatedPortalReducer(saved, { type: "formOpened", mode: "edit" }).notice, null);
+});
+
 test("selecting another Workspace clears the previous Company and Profile subtree", () => {
   const request = { requestId: 1, generation: 1, workspaceId: workspaceB.id };
   const state = authenticatedPortalReducer(populated(), { type: "workspaceSelectionRequested", workspaceId: workspaceB.id, request });
@@ -377,7 +386,7 @@ test("Workspace and Company list adapters normalize their production response co
   globalThis.fetch = async (input): Promise<Response> => new Response(JSON.stringify(String(input).endsWith("/companies") ? { data: [coreCompany] } : String(input).endsWith("/companies/7") ? { data: coreCompany } : [{ id: workspaceA.id, name: workspaceA.name, role: workspaceA.role, capabilities: [] }]), { status: 200, headers: { "content-type": "application/json" } });
   try {
     assert.deepEqual(await atlasApi.listWorkspaces(), [{ id: workspaceA.id, name: workspaceA.name, role: workspaceA.role, capabilities: [] }]);
-    assert.deepEqual(await atlasApi.listWorkspaceCompanies(workspaceA.id), [{ id: 7, name: "Core Company", website: null, phone: "", email: "", status: "ready", createdAt: "2026-08-01T00:00:00.000Z" }]);
+    assert.deepEqual(await atlasApi.listWorkspaceCompanies(workspaceA.id), [{ id: 7, name: "Core Company", website: null, phone: "", email: "", status: "ready", lifecycle: "operational", createdAt: "2026-08-01T00:00:00.000Z" }]);
     assert.equal((await atlasApi.getWorkspaceCompany(workspaceA.id, 7)).id, 7);
   } finally { globalThis.fetch = originalFetch; }
 });

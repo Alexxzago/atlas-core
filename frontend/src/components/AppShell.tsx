@@ -17,6 +17,7 @@ interface AppShellProps {
   readonly companyError: boolean;
   readonly companyCreating: boolean;
   readonly companyTransitioning: boolean;
+  readonly companyAutoSelecting?: boolean;
   readonly email: string;
   readonly onNavigate: Navigate;
   readonly onSelectWorkspace: (workspaceId: string) => void;
@@ -45,13 +46,13 @@ export function PageHeader({ title, description, trail }: { readonly title: stri
 
 export function AppShell(props: AppShellProps): React.JSX.Element {
   const { t } = useI18n();
-  const [mobileOpen, setMobileOpen] = useState(false), [chooserOpen, setChooserOpen] = useState(props.route.name === "companies"), [accountOpen, setAccountOpen] = useState(false), [accountPosition, setAccountPosition] = useState<React.CSSProperties>({});
+  const [mobileOpen, setMobileOpen] = useState(false), [chooserOpen, setChooserOpen] = useState(props.route.name === "companies" && !props.companyAutoSelecting), [accountOpen, setAccountOpen] = useState(false), [accountPosition, setAccountPosition] = useState<React.CSSProperties>({});
   const mobileTrigger = useRef<HTMLButtonElement>(null), drawer = useRef<HTMLElement>(null), companyTrigger = useRef<HTMLButtonElement>(null), accountMenu = useRef<HTMLDivElement>(null), accountTrigger = useRef<HTMLButtonElement | null>(null);
   const closeMobile = useCallback(() => { setMobileOpen(false); window.setTimeout(() => mobileTrigger.current?.focus(), 0); }, []);
   const closeChooser = useCallback(() => { setChooserOpen(false); window.setTimeout(() => companyTrigger.current?.focus(), 0); }, []);
   const navigate = useCallback((path: string) => { props.onNavigate(path); setMobileOpen(false); setAccountOpen(false); }, [props.onNavigate]);
 
-  useEffect(() => { setMobileOpen(false); setAccountOpen(false); if (props.route.name === "companies") setChooserOpen(true); document.getElementById("main-content")?.focus(); }, [props.route]);
+  useEffect(() => { setMobileOpen(false); setAccountOpen(false); if (props.companyAutoSelecting || props.route.name !== "companies") setChooserOpen(false); else setChooserOpen(true); document.getElementById("main-content")?.focus(); }, [props.companyAutoSelecting, props.route]);
   useEffect(() => {
     if (!mobileOpen) return;
     const previous = document.body.style.overflow; document.body.style.overflow = "hidden";

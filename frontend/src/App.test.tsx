@@ -82,6 +82,26 @@ test("routes an authenticated user without a workspace to workspace setup", asyn
   await waitFor(() => expect(window.location.pathname).toBe("/onboarding/workspace"));
 });
 
+test("redirects a direct dashboard refresh without a workspace to workspace setup", async () => {
+  window.history.replaceState({}, "", "/dashboard");
+  authenticatedFetch([], []);
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/onboarding/workspace"));
+  await screen.findByRole("heading", { name: "Create your workspace" });
+});
+
+test("redirects direct companies and settings refreshes without a company to company setup", async () => {
+  window.history.replaceState({}, "", "/companies");
+  authenticatedFetch([workspace], []);
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/onboarding/company"));
+  cleanup();
+  window.history.replaceState({}, "", "/settings");
+  authenticatedFetch([workspace], []);
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/onboarding/company"));
+});
+
 test("renders workspace setup instead of a blank self-redirect when no workspace exists", async () => {
   window.history.replaceState({}, "", "/onboarding/workspace");
   authenticatedFetch([], []);
@@ -136,7 +156,6 @@ test("redirects a direct onboarding refresh with an existing workspace and compa
   authenticatedFetch([workspace], [readyCompany]);
   renderApp();
   await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
-  await screen.findByRole("heading", { name: "Choose the company Atlas works for" });
 });
 
 test("routes the production Company Core list envelope to the dashboard", async () => {
@@ -152,6 +171,22 @@ test("routes the production Company Core list envelope to the dashboard", async 
   }));
   renderApp();
   await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
+});
+
+test("routes Company Core draft to its checklist rather than legacy activation pending", async () => {
+  const coreCompany = { id: 1, name: "Company", slug: "company", description: null, website: null, branding: { publicName: null, logoAssetReference: null, colorTokens: {} }, configuration: null, lifecycle: "draft", version: 1, createdAt: "2026-01-01", updatedAt: "2026-01-01", lifecycleChangedAt: "2026-01-01", suspendedAt: null, archivedAt: null };
+  window.history.replaceState({}, "", "/onboarding/company");
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/session/bootstrap")) return Promise.resolve(json({ status: "authenticated", identity, csrfToken: "csrf", csrfGeneration: 1 }));
+    if (url.endsWith("/workspaces") && !url.includes("selected")) return Promise.resolve(json([workspace]));
+    if (url.endsWith("/workspaces/selected") || url.endsWith("/workspaces/workspace/select")) return Promise.resolve(json(workspace));
+    if (url.endsWith("/workspaces/workspace/companies")) return Promise.resolve(json({ data: [coreCompany] }));
+    return Promise.resolve(json({}, 404));
+  }));
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
+  expect(window.location.pathname).not.toBe("/activation-pending");
 });
 
 test("routes an empty production Company Core list envelope to company setup", async () => {

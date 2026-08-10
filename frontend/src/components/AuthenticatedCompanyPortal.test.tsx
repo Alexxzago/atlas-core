@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { I18nProvider } from "../i18n/I18nContext";
 import { ThemeProvider } from "../design-system/theme";
@@ -7,6 +7,7 @@ import { RouterProvider } from "../routing/RouterProvider";
 import { AuthenticatedCompanyPortal } from "./AuthenticatedCompanyPortal";
 import { AuthenticatedCompanySelector } from "./AuthenticatedCompanySelector";
 import { CompanySetupChecklist } from "./CompanySetupChecklist";
+import { companyRoutePresentation } from "../routing/companyRoutePresentation";
 import { WorkspaceMembershipPortal } from "./WorkspaceMembershipPortal";
 
 const workspace = { id: "workspace", name: "Workspace", role: "owner", capabilities: ["company:read", "company:manage"] as ("company:read" | "company:manage")[] };
@@ -36,7 +37,7 @@ test("automatically enters the only accessible company after workspace restorati
   expect(screen.queryByText("Create my first company")).toBeNull();
 });
 
-test("multiple accessible companies select a deterministic valid company and never show first-company creation", async () => {
+test("multiple accessible companies require an explicit selection", async () => {
   window.history.replaceState({}, "", "/dashboard");
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
     const url = String(input);
@@ -50,30 +51,37 @@ test("multiple accessible companies select a deterministic valid company and nev
     return Promise.resolve(new Response("", { status: 404 }));
   }));
   render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticatedCompanyPortal csrf="csrf" email="operator@example.test" onPassword={() => {}} onLogout={() => {}}/></RouterProvider></I18nProvider></ThemeProvider>);
-  await screen.findByText("Atlas for Company A");
+  await screen.findAllByRole("button", { name: "Current company: Choose company" });
+  expect(window.location.pathname).toBe("/dashboard");
+  expect(screen.queryByText("Atlas for Company A")).toBeNull();
   expect(screen.queryByText("Create my first company")).toBeNull();
 });
 
-test("does not show stale company content during direct-route validation", async () => {
-  window.history.replaceState({}, "", "/companies/1/assistant");
-  const companyBRead = deferred<Response>();
+test("keeps a valid direct company route pending until that company is selected", () => {
+  expect(companyRoutePresentation("workspace", 1, null, false, { key: "workspace:1", status: "ready" })).toBe("loading");
+  expect(companyRoutePresentation("workspace", 1, 1, false, { key: "workspace:1", status: "ready" })).toBe("ready");
+});
+
+test("keeps the company chooser closed while selecting the sole company", async () => {
+  window.history.replaceState({}, "", "/companies");
+  const companyRead = deferred<Response>();
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
     const url = String(input);
     if (url.endsWith("/workspaces") && !url.includes("/selected")) return Promise.resolve(json([workspace]));
     if (url.endsWith("/workspaces/selected") || url.endsWith("/workspaces/workspace/select")) return Promise.resolve(json(workspace));
-    if (url.endsWith("/workspaces/workspace/companies")) return Promise.resolve(json([companyA, companyB]));
-    if (url.endsWith("/companies/1")) return Promise.resolve(json(companyA));
-    if (url.endsWith("/companies/2")) return companyBRead.promise;
+    if (url.endsWith("/workspaces/workspace/companies")) return Promise.resolve(json([companyA]));
+    if (url.endsWith("/workspaces/workspace/companies/1")) return companyRead.promise;
     if (url.endsWith("/companies/1/assistant-profiles")) return Promise.resolve(json([profile("a", "Assistant A")]));
-    if (url.endsWith("/companies/2/assistant-profiles")) return Promise.resolve(json([profile("b", "Assistant B")]));
+    if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ assistantIdentifier:"default",workspaceId:1,companyId:1,status:"blocked",blockers:["default_assistant_missing"],knowledgeVersionId:null,assistantProfileId:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"1",configurationDigest:"digest" }));
+    if (url.endsWith("/web-chat-connections") || url.endsWith("/whatsapp-connections")) return Promise.resolve(json([]));
     return Promise.resolve(new Response("", { status: 404 }));
   }));
   render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticatedCompanyPortal csrf="csrf" email="operator@example.test" onPassword={() => {}} onLogout={() => {}}/></RouterProvider></I18nProvider></ThemeProvider>);
-  await screen.findByText("Assistant A");
-  act(() => { window.history.pushState({}, "", "/companies/2/assistant"); window.dispatchEvent(new PopStateEvent("popstate")); });
-  expect(screen.queryByText("Assistant A")).toBeNull();
-  companyBRead.resolve(json(companyB));
-  await screen.findByText("Assistant B");
+  await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/workspaces/workspace/companies/1"))).toBe(true));
+  expect(screen.queryByRole("heading", { name: "Which company does Atlas work for?" })).toBeNull();
+  companyRead.resolve(json(companyA));
+  await screen.findByText("Atlas for Company A");
+  expect(window.location.pathname).toBe("/companies/1");
 });
 
 test("company chooser prioritizes selection and keeps creation secondary", async () => {
@@ -103,9 +111,9 @@ test("Today translates authoritative blockers into one next action", async () =>
     return Promise.resolve(new Response("", { status: 404 }));
   }));
   render(<I18nProvider><CompanySetupChecklist workspace={workspace} companies={[companyA]} company={companyA} onNavigate={() => {}} onChooseCompany={() => {}}/></I18nProvider>);
-  await screen.findByText("Atlas todavía necesita un rol claro.");
+  await screen.findByText("Empecemos a configurar tu asistente.");
   expect(screen.getAllByRole("button")).toHaveLength(1);
-  expect(screen.getByRole("button", { name: "Preparar a Atlas" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Configurar asistente" })).toBeTruthy();
   expect(screen.queryByText("default_assistant_missing")).toBeNull();
 });
 

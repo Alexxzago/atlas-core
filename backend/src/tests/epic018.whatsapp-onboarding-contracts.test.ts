@@ -151,3 +151,138 @@ test("EPIC-018 authenticated lifecycle configures, validates, and activates only
     const activated = await fetch(`${path}/activation`, { method: "POST", headers }); assert.equal(activated.status, 200); assert.equal((await activated.json()).connection.status, "active");
   } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); database.close(); }
 });
+
+test("EPIC-018 replacing credentials deactivates an active connection, requires revalidation, and returns no token", async () => {
+  const database = createDatabase(":memory:"), workspaces = new WorkspaceRepository(database), context = createWorkspaceContext(workspaces.resolveDefault()), companies = new CompanyRepository(database), profiles = new AssistantProfileRepository(database), connections = new WhatsAppConnectionRepository(database), cipher = new AesGcmWhatsAppCredentialCipher(Buffer.alloc(32, 13));
+  const company = companies.create(context, { name: "Company", website: "https://company.test", status: "ready" });
+  const profile = reconstructAssistantProfile({ id: assistantProfileId("asp_8123456789abcdef0123456789abcdef"), companyId: company.id, name: "WhatsApp", normalizedName: "whatsapp", description: null, businessRole: "Advisor", objective: "Help", audience: null, tone: "friendly", assistantLanguage: "en", welcomeMessage: "Welcome", fallbackMessage: "Fallback", status: "ready", createdAt: now, updatedAt: now, archivedAt: null });
+  profiles.create(context, company.id, profile);
+  const resolver = new WhatsAppCredentialResolver(connections, cipher, "");
+  const service = new WhatsAppConnectionService(companies, profiles, connections, { now: () => now }, { credentials: connections, states: connections, cipher, resolver, validator: { validateConnection: async () => ({ status: "valid" }) }, knowledge: { loadPublished: () => ({}) } as never });
+  const connection = service.create(context, company.id, { assistantProfileId: profile.id, phoneNumberId: "phone", whatsappBusinessAccountId: "waba" });
+  const app = express(); app.use(express.json());
+  app.use("/workspaces", createAuthorizedCompaniesRouter({ authentication: { cookieName: () => "atlas", current: (raw: string) => raw === "manage" ? { userId: "manage" } : null, validateCsrf: (_raw: string, csrf: string) => csrf === "valid" } as never, users: { findById: (id: string) => id === "manage" ? { id } : null } as never, authorization: { authorize: () => ({ userId: "manage", membershipId: "membership", role: "operator", capabilities: [] }) } as never, resolver: { resolve: () => context } as never, controllers: {} as never, assistantControllers: {} as never, whatsAppConnectionControllers: { list: () => (() => undefined) as never, create: () => (() => undefined) as never, get: () => (() => undefined) as never, update: () => (() => undefined) as never, configureCredentials: (value) => createConfigureWhatsAppCredentialsController(service, value), validate: (value) => createValidateWhatsAppConnectionController(service, value), activate: (value) => createActivateWhatsAppConnectionController(service, value) } }));
+  const server = app.listen(0, "127.0.0.1"); await new Promise<void>((resolve) => server.once("listening", resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`, path = `${origin}/workspaces/wsp_default/companies/${company.id}/whatsapp-connections/${connection.id}`, headers = { "content-type": "application/json", cookie: "atlas=manage", origin, "sec-fetch-site": "same-origin", "x-csrf-token": "valid" };
+  try {
+    await fetch(`${path}/credentials`, { method: "PUT", headers, body: JSON.stringify({ accessToken: "old-company-token" }) });
+    await fetch(`${path}/validation`, { method: "POST", headers });
+    assert.equal((await fetch(`${path}/activation`, { method: "POST", headers })).status, 200);
+    const replacement = await fetch(`${path}/credentials`, { method: "PUT", headers, body: JSON.stringify({ accessToken: "new-company-token" }) });
+    const body = await replacement.json() as Record<string, unknown>;
+    assert.equal(replacement.status, 200);
+    assert.equal((body.connection as { status: string }).status, "inactive");
+    assert.equal(body.credentialsConfigured, true);
+    assert.equal(body.validationState, "not_validated");
+    assert.equal(body.healthState, "inactive");
+    assert.equal("accessToken" in body, false);
+    assert.equal(JSON.stringify(body).includes("old-company-token"), false);
+    assert.equal(JSON.stringify(body).includes("new-company-token"), false);
+    assert.equal(resolver.resolve(context, company.id, connection.id), "new-company-token");
+    assert.equal((await fetch(`${path}/activation`, { method: "POST", headers })).status, 409);
+  } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); database.close(); }
+});
+
+
+test("WhatsApp configuration update preserves credentials and requires revalidation when provider identifiers change", () => {
+  const database = createDatabase(":memory:");
+  const workspaces = new WorkspaceRepository(database);
+  const context = createWorkspaceContext(workspaces.resolveDefault());
+  const companies = new CompanyRepository(database);
+  const profiles = new AssistantProfileRepository(database);
+  const connections = new WhatsAppConnectionRepository(database);
+  const cipher = new AesGcmWhatsAppCredentialCipher(Buffer.alloc(32, 12));
+
+  try {
+    const company = companies.create(context, {
+      name: "Editable WhatsApp",
+      website: "https://editable.test",
+      status: "ready"
+    });
+
+    const profile = reconstructAssistantProfile({
+      id: assistantProfileId("asp_7123456789abcdef0123456789abcdef"),
+      companyId: company.id,
+      name: "Editable",
+      normalizedName: "editable",
+      description: null,
+      businessRole: "Advisor",
+      objective: "Help",
+      audience: null,
+      tone: "friendly",
+      assistantLanguage: "en",
+      welcomeMessage: "Welcome",
+      fallbackMessage: "Fallback",
+      status: "ready",
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null
+    });
+
+    profiles.create(context, company.id, profile);
+
+    const resolver = new WhatsAppCredentialResolver(connections, cipher, "");
+
+    const service = new WhatsAppConnectionService(
+      companies,
+      profiles,
+      connections,
+      { now: () => "2026-07-28T13:00:00.000Z" },
+      {
+        credentials: connections,
+        states: connections,
+        cipher,
+        resolver,
+        validator: {
+          validateConnection: async () => ({ status: "valid" })
+        },
+        knowledge: { loadPublished: () => ({}) } as never
+      }
+    );
+
+    const created = service.create(context, company.id, {
+      assistantProfileId: profile.id,
+      phoneNumberId: "phone-old",
+      whatsappBusinessAccountId: "waba-old"
+    });
+
+    service.configureCredentials(context, company.id, created.id, {
+      accessToken: "persistent-token"
+    });
+
+    connections.replaceOperationalState(
+      context,
+      company.id,
+      reconstructWhatsAppConnectionOperationalState({
+        whatsAppConnectionId: created.id,
+        validationState: "valid",
+        validatedAt: "2026-07-28T12:30:00.000Z",
+        validationFailureCode: null,
+        healthState: "healthy",
+        lastProviderActivityAt: "2026-07-28T12:30:00.000Z",
+        lastWebhookActivityAt: null,
+        healthFailureCode: null,
+        updatedAt: "2026-07-28T12:30:00.000Z"
+      })
+    );
+
+    const updated = service.update(context, company.id, created.id, {
+      phoneNumberId: "phone-new",
+      whatsappBusinessAccountId: "waba-new"
+    });
+
+    assert.equal(updated.phoneNumberId, "phone-new");
+    assert.equal(updated.whatsappBusinessAccountId, "waba-new");
+    assert.equal(updated.status, "inactive");
+
+    const status = service.status(context, company.id, created.id);
+
+    assert.equal(status.credentialsConfigured, true);
+    assert.equal(status.validationState, "not_validated");
+    assert.equal(status.validatedAt, null);
+    assert.equal(status.healthState, "inactive");
+    assert.equal(resolver.resolve(context, company.id, created.id), "persistent-token");
+  } finally {
+    database.close();
+  }
+});

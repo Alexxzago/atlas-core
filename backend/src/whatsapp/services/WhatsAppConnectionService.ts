@@ -39,33 +39,93 @@ export class WhatsAppConnectionService {
   public get(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): WhatsAppConnection { const id = parseCompanyId(companyIdValue), connection = this.connections.findById(context, id, connectionId(connectionIdValue)); if (!connection) throw new WhatsAppConnectionNotFoundError("WhatsApp Connection was not found."); return connection; }
   public update(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown, value: unknown): WhatsAppConnection {
     const current = this.get(context, companyIdValue, connectionIdValue), input = updateInput(value);
+
     if (input.kind === "status") {
       if (input.status === "active") {
         const profile = this.profiles.findById(context, current.companyId, current.assistantProfileId);
         try { if (!profile) throw new AssistantProfilePolicyError(); this.executionPolicy.assert(profile); } catch { throw new WhatsAppConnectionProfileNotExecutableError("Assistant Profile is not executable."); }
-        // Connections created before onboarding gates existed are only exercised by legacy local callers.
+
         if (!this.onboarding) return this.updateStoredStatus(context, current, input.status);
         throw new WhatsAppConnectionConflictError("Use the activation endpoint to activate a WhatsApp Connection.");
       }
+
       return this.updateStoredStatus(context, current, input.status);
     }
-    if (current.status !== "inactive") throw new WhatsAppConnectionConflictError("Deactivate the WhatsApp Connection before changing its Assistant Profile.");
-    const profile = this.profiles.findById(context, current.companyId, input.assistantProfileId);
-    if (!profile || profile.status === "archived") throw new WhatsAppConnectionNotFoundError("Assistant Profile was not found.");
-    if (profile.id === current.assistantProfileId) return current;
-    const updated = this.connections.updateAssistantProfile(context, current.companyId, current.id, current.updatedAt, profile.id, next(current.updatedAt, this.clock.now()));
-    return updated ?? this.changed(context, current);
+
+    if (current.status !== "inactive") {
+      throw new WhatsAppConnectionConflictError("Deactivate the WhatsApp Connection before changing its configuration.");
+    }
+
+    let nextProfileId = current.assistantProfileId;
+
+    if (input.assistantProfileId !== undefined) {
+      const profile = this.profiles.findById(context, current.companyId, input.assistantProfileId);
+      if (!profile || profile.status === "archived") throw new WhatsAppConnectionNotFoundError("Assistant Profile was not found.");
+      nextProfileId = profile.id;
+    }
+
+    const nextPhoneNumberId = input.phoneNumberId ?? current.phoneNumberId;
+    const nextBusinessAccountId = input.whatsappBusinessAccountId ?? current.whatsappBusinessAccountId;
+
+    const identifiersChanged =
+      nextPhoneNumberId !== current.phoneNumberId ||
+      nextBusinessAccountId !== current.whatsappBusinessAccountId;
+
+    const configurationChanged =
+      identifiersChanged ||
+      nextProfileId !== current.assistantProfileId;
+
+    if (!configurationChanged) return current;
+
+    const updatedAt = next(current.updatedAt, this.clock.now());
+
+    let updated: WhatsAppConnection | null;
+
+    try {
+      updated = this.connections.updateConfiguration(
+        context,
+        current.companyId,
+        current.id,
+        current.updatedAt,
+        nextProfileId,
+        nextPhoneNumberId,
+        nextBusinessAccountId,
+        updatedAt
+      );
+    } catch (error: unknown) {
+      if (unique(error)) throw new WhatsAppConnectionConflictError("WhatsApp Connection configuration conflicts with an existing connection.");
+      throw error;
+    }
+
+    if (!updated) return this.changed(context, current);
+
+    if (identifiersChanged && this.onboarding) {
+      this.saveState(context, updated, {
+        validationState: "not_validated",
+        validatedAt: null,
+        validationFailureCode: null,
+        healthState: "inactive",
+        lastProviderActivityAt: null,
+        lastWebhookActivityAt: null,
+        healthFailureCode: null,
+        updatedAt
+      });
+    }
+
+    return updated;
   }
+
   public status(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): WhatsAppConnectionOperationalStatus {
     const connection = this.get(context, companyIdValue, connectionIdValue), state = this.onboarding?.states.findOperationalState(context, connection.companyId, connection.id);
     return { connection: redacted(connection), credentialsConfigured: this.onboarding ? this.onboarding.credentials.findCredentials(context, connection.companyId, connection.id) !== null : false, validationState: state?.validationState ?? "not_validated", validatedAt: state?.validatedAt ?? null, validationFailureCode: state?.validationFailureCode ?? null, healthState: state?.healthState ?? "inactive", lastProviderActivityAt: state?.lastProviderActivityAt ?? null, lastWebhookActivityAt: state?.lastWebhookActivityAt ?? null, healthFailureCode: state?.healthFailureCode ?? null, updatedAt: state?.updatedAt ?? connection.updatedAt };
   }
   public configureCredentials(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown, value: unknown): WhatsAppConnectionOperationalStatus {
     const connection = this.get(context, companyIdValue, connectionIdValue), dependencies = this.requiredOnboarding(), token = credentialToken(value), now = this.clock.now();
-    const saved = dependencies.credentials.replaceCredentials(context, connection.companyId, reconstructEncryptedWhatsAppConnectionCredentials({ whatsAppConnectionId: connection.id, encryptedAccessToken: dependencies.cipher.encrypt(token), createdAt: now, updatedAt: now }));
-    if (!saved) throw new WhatsAppConnectionNotFoundError("WhatsApp Connection was not found.");
-    this.saveState(context, connection, { validationState: "not_validated", validatedAt: null, validationFailureCode: null, healthState: "inactive", lastProviderActivityAt: null, lastWebhookActivityAt: null, healthFailureCode: null, updatedAt: now });
-    return this.status(context, connection.companyId, connection.id);
+    const credentials = reconstructEncryptedWhatsAppConnectionCredentials({ whatsAppConnectionId: connection.id, encryptedAccessToken: dependencies.cipher.encrypt(token), createdAt: now, updatedAt: now });
+    const state = reconstructWhatsAppConnectionOperationalState({ whatsAppConnectionId: connection.id, validationState: "not_validated", validatedAt: null, validationFailureCode: null, healthState: "inactive", lastProviderActivityAt: null, lastWebhookActivityAt: null, healthFailureCode: null, updatedAt: now });
+    const updated = this.connections.replaceCredentialsAndDeactivate(context, connection.companyId, connection.id, connection.updatedAt, credentials, state, next(connection.updatedAt, now));
+    if (!updated) return this.changed(context, connection);
+    return this.status(context, updated.companyId, updated.id);
   }
   public async validate(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): Promise<WhatsAppConnectionOperationalStatus> {
     const connection = this.get(context, companyIdValue, connectionIdValue), dependencies = this.requiredOnboarding(), token = dependencies.resolver.resolve(context, connection.companyId, connection.id);
@@ -140,6 +200,36 @@ function providerIdentifier(value: unknown, label: string): string { if (typeof 
 function record(value: unknown): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new WhatsAppConnectionValidationError("WhatsApp Connection input is invalid."); return value as Record<string, unknown>; }
 function credentialToken(value: unknown): string { const input = record(value); if (Object.keys(input).length !== 1 || typeof input.accessToken !== "string") throw new WhatsAppConnectionValidationError("WhatsApp credentials are invalid."); const token = input.accessToken.trim(); if (!token || token.length > 16_384) throw new WhatsAppConnectionValidationError("WhatsApp credentials are invalid."); return token; }
 function createInput(value: unknown): { assistantProfileId: ReturnType<typeof assistantProfileId>; phoneNumberId: string; whatsappBusinessAccountId: string } { const input = record(value), keys = Object.keys(input); if (keys.length !== 3 || !keys.every((key) => key === "assistantProfileId" || key === "phoneNumberId" || key === "whatsappBusinessAccountId")) throw new WhatsAppConnectionValidationError("WhatsApp Connection input is invalid."); return { assistantProfileId: profileId(input.assistantProfileId), phoneNumberId: providerIdentifier(input.phoneNumberId, "Phone Number ID"), whatsappBusinessAccountId: providerIdentifier(input.whatsappBusinessAccountId, "WhatsApp Business Account ID") }; }
-function updateInput(value: unknown): { kind: "status"; status: WhatsAppConnectionStatus } | { kind: "profile"; assistantProfileId: ReturnType<typeof assistantProfileId> } { const input = record(value), keys = Object.keys(input); if (keys.length !== 1) throw new WhatsAppConnectionValidationError("WhatsApp Connection update is invalid."); if (keys[0] === "status") { if (typeof input.status !== "string") throw new WhatsAppConnectionValidationError("WhatsApp Connection status is invalid."); try { return { kind: "status", status: whatsAppConnectionStatus(input.status) }; } catch { throw new WhatsAppConnectionValidationError("WhatsApp Connection status is invalid."); } } if (keys[0] === "assistantProfileId") return { kind: "profile", assistantProfileId: profileId(input.assistantProfileId) }; throw new WhatsAppConnectionValidationError("WhatsApp Connection update is invalid."); }
+function updateInput(value: unknown):
+  | { kind: "status"; status: WhatsAppConnectionStatus }
+  | { kind: "configuration"; assistantProfileId?: ReturnType<typeof assistantProfileId>; phoneNumberId?: string; whatsappBusinessAccountId?: string } {
+  const input = record(value), keys = Object.keys(input);
+
+  if (keys.length === 1 && keys[0] === "status") {
+    if (typeof input.status !== "string") throw new WhatsAppConnectionValidationError("WhatsApp Connection status is invalid.");
+    try { return { kind: "status", status: whatsAppConnectionStatus(input.status) }; }
+    catch { throw new WhatsAppConnectionValidationError("WhatsApp Connection status is invalid."); }
+  }
+
+  const allowed = new Set(["assistantProfileId", "phoneNumberId", "whatsappBusinessAccountId"]);
+
+  if (keys.length < 1 || !keys.every(key => allowed.has(key))) {
+    throw new WhatsAppConnectionValidationError("WhatsApp Connection update is invalid.");
+  }
+
+  return {
+    kind: "configuration",
+    ...(Object.prototype.hasOwnProperty.call(input, "assistantProfileId")
+      ? { assistantProfileId: profileId(input.assistantProfileId) }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(input, "phoneNumberId")
+      ? { phoneNumberId: providerIdentifier(input.phoneNumberId, "Phone Number ID") }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(input, "whatsappBusinessAccountId")
+      ? { whatsappBusinessAccountId: providerIdentifier(input.whatsappBusinessAccountId, "WhatsApp Business Account ID") }
+      : {})
+  };
+}
+
 function next(current: string, clock: string): string { const value = Math.max(Date.parse(current) + 1, Date.parse(clock)); return new Date(value).toISOString(); }
 function unique(error: unknown): boolean { return error instanceof Error && "errcode" in error && (error as Error & { errcode?: unknown }).errcode === 2067; }

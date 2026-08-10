@@ -48,6 +48,30 @@ export class WhatsAppConnectionRepository implements WhatsAppConnectionRepositor
     return result.changes === 1 ? this.findById(context, companyId, id) : null;
   }
 
+  public updateConfiguration(context: WorkspaceContext, companyId: number, id: WhatsAppConnectionId, expectedUpdatedAt: string, profileId: WhatsAppConnection["assistantProfileId"], phoneNumberId: string, whatsappBusinessAccountId: string, updatedAt: string): WhatsAppConnection | null {
+    const result = this.db.prepare("UPDATE whatsapp_connections SET assistant_profile_id=?,phone_number_id=?,whatsapp_business_account_id=?,updated_at=? WHERE id=? AND company_id=? AND workspace_id=? AND status='inactive' AND updated_at=? AND EXISTS (SELECT 1 FROM assistant_profiles p WHERE p.id=? AND p.company_id=?) AND company_id IN (SELECT id FROM companies WHERE id=? AND workspace_id=?)").run(profileId, phoneNumberId, whatsappBusinessAccountId, updatedAt, id, companyId, context.workspaceId, expectedUpdatedAt, profileId, companyId, companyId, context.workspaceId);
+    return result.changes === 1 ? this.findById(context, companyId, id) : null;
+  }
+
+  public replaceCredentialsAndDeactivate(context: WorkspaceContext, companyId: number, id: WhatsAppConnectionId, expectedUpdatedAt: string, value: EncryptedWhatsAppConnectionCredentials, state: WhatsAppConnectionOperationalState, updatedAt: string): WhatsAppConnection | null {
+    const ownsTransaction = !this.db.isTransaction;
+    if (ownsTransaction) this.db.exec("BEGIN IMMEDIATE;");
+    try {
+      const connection = this.db.prepare("UPDATE whatsapp_connections SET status='inactive',updated_at=? WHERE id=? AND company_id=? AND workspace_id=? AND updated_at=? AND company_id IN (SELECT id FROM companies WHERE id=? AND workspace_id=?)").run(updatedAt, id, companyId, context.workspaceId, expectedUpdatedAt, companyId, context.workspaceId);
+      if (connection.changes !== 1) {
+        if (ownsTransaction) this.db.exec("ROLLBACK;");
+        return null;
+      }
+      this.db.prepare("INSERT INTO whatsapp_connection_credentials(whatsapp_connection_id,encrypted_access_token,created_at,updated_at) VALUES(?,?,?,?) ON CONFLICT(whatsapp_connection_id) DO UPDATE SET encrypted_access_token=excluded.encrypted_access_token,updated_at=excluded.updated_at").run(value.whatsAppConnectionId, value.encryptedAccessToken, value.createdAt, value.updatedAt);
+      this.db.prepare("INSERT INTO whatsapp_connection_operational_states(whatsapp_connection_id,validation_state,validated_at,validation_failure_code,health_state,last_provider_activity_at,last_webhook_activity_at,health_failure_code,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(whatsapp_connection_id) DO UPDATE SET validation_state=excluded.validation_state,validated_at=excluded.validated_at,validation_failure_code=excluded.validation_failure_code,health_state=excluded.health_state,last_provider_activity_at=excluded.last_provider_activity_at,last_webhook_activity_at=excluded.last_webhook_activity_at,health_failure_code=excluded.health_failure_code,updated_at=excluded.updated_at").run(state.whatsAppConnectionId, state.validationState, state.validatedAt, state.validationFailureCode, state.healthState, state.lastProviderActivityAt, state.lastWebhookActivityAt, state.healthFailureCode, state.updatedAt);
+      if (ownsTransaction) this.db.exec("COMMIT;");
+      return this.findById(context, companyId, id);
+    } catch (error: unknown) {
+      if (ownsTransaction && this.db.isTransaction) this.db.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
   public findCredentials(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId): EncryptedWhatsAppConnectionCredentials | null {
     const row = this.db.prepare("SELECT credentials.* FROM whatsapp_connection_credentials credentials JOIN whatsapp_connections connection ON connection.id=credentials.whatsapp_connection_id JOIN companies company ON company.id=connection.company_id WHERE credentials.whatsapp_connection_id=? AND connection.company_id=? AND connection.workspace_id=? AND company.workspace_id=?").get(connectionId, companyId, context.workspaceId, context.workspaceId) as CredentialRow | undefined;
     return row ? credentials(row) : null;
