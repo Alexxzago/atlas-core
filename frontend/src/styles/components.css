@@ -66,6 +66,21 @@
 .guided-registration { animation: guided-registration-enter 180ms ease-out; }
 @keyframes guided-registration-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .guided-registration { animation: none; } }
+.onboarding-shell { min-block-size: 100dvh; padding: clamp(var(--atlas-space-6), 5vw, var(--atlas-space-10)); background: radial-gradient(circle at 85% 0%, var(--atlas-color-action-subtle), transparent 24rem), var(--atlas-color-canvas); }
+.onboarding-brand { display: flex; align-items: center; min-block-size: 32px; color: var(--atlas-color-text); font-size: var(--atlas-font-size-sm); letter-spacing: .12em; }
+.onboarding-progress.atlas-step-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--atlas-space-3); }
+.onboarding-progress.atlas-step-list > li { display: flex; align-items: center; min-block-size: 40px; padding: var(--atlas-space-3) var(--atlas-space-4); padding-inline-start: 34px; color: var(--atlas-color-text-muted); background: transparent; border: 1px solid transparent; border-radius: var(--atlas-radius-md); font-size: var(--atlas-font-size-xs); font-weight: 650; white-space: nowrap; }
+.onboarding-progress.atlas-step-list > li::before { inset-block-start: 50%; inset-inline-start: var(--atlas-space-3); inline-size: 16px; block-size: 16px; color: var(--atlas-color-text-muted); background: var(--atlas-color-surface-muted); border: 0; font-size: 9px; transform: translateY(-50%); }
+.onboarding-progress.atlas-step-list > li[data-state="active"] { color: var(--atlas-color-text); background: var(--atlas-color-action-subtle); border-color: var(--atlas-color-action-border); }
+.onboarding-progress.atlas-step-list > li[data-state="active"]::before { color: var(--atlas-color-action-text); background: var(--atlas-color-action); }
+.onboarding-progress.atlas-step-list > li[data-state="complete"] { color: var(--atlas-color-text-secondary); background: transparent; }
+.onboarding-progress.atlas-step-list > li[data-state="complete"]::before { color: var(--atlas-color-action-text); background: var(--atlas-color-success); }
+.guided-workspace-card { position: relative; inline-size: 100%; overflow: hidden; }
+.guided-workspace-card::before { position: absolute; inset: 0 0 auto; block-size: 3px; background: linear-gradient(90deg, var(--atlas-color-action), var(--atlas-color-warm-highlight)); content: ""; }
+.guided-workspace-card .atlas-hero { padding-block: var(--atlas-space-2) var(--atlas-space-5); }
+.guided-workspace-card .atlas-hero h1 { max-inline-size: 560px; font-size: clamp(32px, 5vw, 44px); }
+.guided-workspace-card .ds-button--primary { inline-size: 100%; }
+@media (max-width: 767px) { .onboarding-shell { padding: var(--atlas-space-5); }.onboarding-progress.atlas-step-list { gap: var(--atlas-space-1); }.onboarding-progress.atlas-step-list > li { min-block-size: 36px; padding-inline: var(--atlas-space-2); padding-inline-start: 26px; font-size: 11px; }.onboarding-progress.atlas-step-list > li::before { inset-inline-start: var(--atlas-space-2); }.guided-workspace-card .ds-button--primary { inline-size: 100%; } }
 .processing-panel { display: flex; gap: var(--space-4); padding: var(--space-5); color: var(--color-processing); background: var(--color-processing-bg); border: 1px solid var(--color-processing-border); border-radius: var(--radius-md); }
 .processing-panel p { margin-block-start: var(--space-2); color: inherit; }
 .spinner { flex: 0 0 auto; inline-size: 16px; block-size: 16px; margin-block-start: 2px; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; animation: spin 800ms linear infinite; }

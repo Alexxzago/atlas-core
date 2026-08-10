@@ -16,7 +16,7 @@ test("uses responsibility navigation and omits Analytics from primary navigation
   expect(screen.getByRole("link", { name: "Skip to content" }).getAttribute("href")).toBe("#main-content");
   const navigation = screen.getByRole("navigation", { name: "Primary navigation" });
   expect(within(navigation).getByRole("link", { name: "Today" })).toBeTruthy();
-  expect(within(navigation).getByRole("link", { name: "Prepare Atlas" })).toBeTruthy();
+  expect(within(navigation).getByRole("link", { name: "Configure assistant" })).toBeTruthy();
   expect(within(navigation).queryByText("Analytics")).toBeNull();
 });
 

@@ -1,4 +1,4 @@
-import type { AssistantPreviewResponse, AssistantProfile, AssistantProfileStatus, AssistantReadinessAssessment, ConversationControlResponse, ConversationDetail, ConversationInboxItem, DefaultAssistantAssignment, ChatResponse, Company, CompanyInput, CompanyKnowledge, CompanyUpdate, CreatedWorkspace, CreateAssistantProfileInput, CreateWhatsAppConnectionInput, KnowledgeIngestionResponse, KnowledgePublication, KnowledgeRevision, KnowledgeSource, OnboardingCompanyResponse, OnboardingResponse, OperationalAssistantExecutionResponse, OperatorConversationMessageResult, RegistrationInput, SessionBootstrapResponse, UpdateAssistantProfileInput, VerificationResponse, WebChatConnection, WebChatConnectionStatus, WhatsAppConnection, WhatsAppConnectionOperationalStatus, WorkspaceSummary } from "../types/api";
+import type { AssistantPreviewResponse, AssistantProfile, AssistantProfileStatus, AssistantReadinessAssessment, ConversationControlResponse, ConversationDetail, ConversationInboxItem, DefaultAssistantAssignment, ChatResponse, Company, CompanyInput, CompanyKnowledge, CompanyUpdate, CreatedWorkspace, CreateAssistantProfileInput, CreateWhatsAppConnectionInput, UpdateWhatsAppConnectionInput, KnowledgeIngestionResponse, KnowledgePublication, KnowledgeRevision, KnowledgeSource, OnboardingCompanyResponse, OnboardingResponse, OperationalAssistantExecutionResponse, OperatorConversationMessageResult, RegistrationInput, SessionBootstrapResponse, UpdateAssistantProfileInput, VerificationResponse, WebChatConnection, WebChatConnectionStatus, WhatsAppConnection, WhatsAppConnectionOperationalStatus, WorkspaceSummary } from "../types/api";
 
 export class ApiError extends Error {
   public readonly status: number;
@@ -69,16 +69,21 @@ function workspaceListResponse(value: unknown): WorkspaceSummary[] {
   });
 }
 
-function companyStatus(lifecycle: unknown): Company["status"] {
-  if (lifecycle === "attention_required" || lifecycle === "suspended" || lifecycle === "archived") return "failed";
-  if (lifecycle === "draft" || lifecycle === "configured" || lifecycle === "operational") return "ready";
+function companyLifecycle(value: unknown): NonNullable<Company["lifecycle"]> {
+  if (value === "draft" || value === "configured" || value === "operational" || value === "attention_required" || value === "suspended" || value === "archived") return value;
   throw malformedList("Company list");
+}
+
+function companyStatus(lifecycle: NonNullable<Company["lifecycle"]>): Company["status"] {
+  if (lifecycle === "attention_required" || lifecycle === "suspended" || lifecycle === "archived") return "failed";
+  return lifecycle === "operational" ? "ready" : "processing";
 }
 
 function coreCompanyResponse(value: unknown): Company {
   const company = record(value, "Company");
   if (!Number.isSafeInteger(company.id) || (company.id as number) < 1) throw malformedList("Company");
-  return { id: company.id as number, name: text(company.name, "Company"), website: nullableText(company.website, "Company"), phone: "", email: "", status: companyStatus(company.lifecycle), createdAt: text(company.createdAt, "Company") };
+  const lifecycle = companyLifecycle(company.lifecycle);
+  return { id: company.id as number, name: text(company.name, "Company"), website: nullableText(company.website, "Company"), phone: "", email: "", status: companyStatus(lifecycle), lifecycle, createdAt: text(company.createdAt, "Company") };
 }
 
 function legacyCompanyResponse(value: unknown): Company {
@@ -165,6 +170,7 @@ export const atlasApi = {
   updateWebChatConnectionStatus:(csrf:string,workspaceId:string,companyId:number,connectionId:string,status:WebChatConnectionStatus):Promise<WebChatConnection>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/web-chat-connections/${segment(connectionId)}`,{method:"PATCH",headers:{"x-csrf-token":csrf},body:JSON.stringify({status})}),
   listWhatsAppConnections:(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<WhatsAppConnection[]>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/whatsapp-connections`,{signal:signal??null}),
   createWhatsAppConnection:(csrf:string,workspaceId:string,companyId:number,input:CreateWhatsAppConnectionInput):Promise<WhatsAppConnection>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/whatsapp-connections`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify(input)}),
+  updateWhatsAppConnection:(csrf:string,workspaceId:string,companyId:number,connectionId:string,input:UpdateWhatsAppConnectionInput):Promise<WhatsAppConnection>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/whatsapp-connections/${segment(connectionId)}`,{method:"PATCH",headers:{"x-csrf-token":csrf},body:JSON.stringify(input)}),
   getWhatsAppConnectionStatus:(workspaceId:string,companyId:number,connectionId:string):Promise<WhatsAppConnectionOperationalStatus>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/whatsapp-connections/${segment(connectionId)}/status`),
   configureWhatsAppCredentials:(csrf:string,workspaceId:string,companyId:number,connectionId:string,accessToken:string):Promise<WhatsAppConnectionOperationalStatus>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/whatsapp-connections/${segment(connectionId)}/credentials`,{method:"PUT",headers:{"x-csrf-token":csrf},body:JSON.stringify({accessToken})}),
   validateWhatsAppConnection:(csrf:string,workspaceId:string,companyId:number,connectionId:string):Promise<WhatsAppConnectionOperationalStatus>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/whatsapp-connections/${segment(connectionId)}/validation`,{method:"POST",headers:{"x-csrf-token":csrf},body:"{}"}),

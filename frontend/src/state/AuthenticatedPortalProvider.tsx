@@ -21,7 +21,7 @@ export interface AuthenticatedPortalContextValue {
   selectCompany: (companyId: number) => Promise<boolean>;
   createWorkspace: (name: string, timezone: string, defaultLocale: "en" | "es") => Promise<boolean>;
   createCompany: (input: CompanyInput) => Promise<boolean>;
-  createOnboardingCompany: (name: string) => Promise<boolean>;
+  createOnboardingCompany: (name: string) => Promise<number | null>;
   refresh: () => Promise<void>;
   refreshCompanies: () => void;
   refreshSelectedCompany: () => Promise<void>;
@@ -31,6 +31,7 @@ export interface AuthenticatedPortalContextValue {
   reloadProfiles: () => void;
   submitProfile: (input: CreateAssistantProfileInput | UpdateAssistantProfileInput) => Promise<void>;
   transitionProfile: (profile: AssistantProfile, target: AssistantProfileStatus) => Promise<void>;
+  clearNotice: () => void;
   openProfileForm: (mode: "create" | "edit") => void;
   closeProfileForm: () => void;
 }
@@ -43,7 +44,6 @@ export function AuthenticatedPortalProvider({ csrf, children }: Props): React.JS
   const [state, dispatch] = useReducer(authenticatedPortalReducer, initialAuthenticatedPortalState);
   const sequence = useRef(0);
   const workspaceSelectionIntent = useRef(0);
-  const initialWorkspaceResolved = useRef(false);
   const companySelectionIntent = useRef(0);
   const workspaceAbort = useRef<AbortController | null>(null);
   const companiesAbort = useRef<AbortController | null>(null);
@@ -85,10 +85,17 @@ export function AuthenticatedPortalProvider({ csrf, children }: Props): React.JS
   };
 
   useEffect(() => {
-    if (state.workspacesLoading || state.workspaceError || initialWorkspaceResolved.current) return;
-    initialWorkspaceResolved.current = true;
-    void (async () => { let persisted: WorkspaceSummary | null = null; try { persisted = await atlasApi.selectedWorkspace(); } catch { /* The single-workspace fallback remains safe. */ } const workspace = initialWorkspace(state.workspaces, persisted); if (workspace) await selectWorkspace(workspace.id); })();
-  }, [state.workspacesLoading, state.workspaceError, state.workspaces]);
+    if (state.workspacesLoading || state.workspaceError || state.initialWorkspaceResolved) return;
+    let current = true;
+    void (async () => {
+      let persisted: WorkspaceSummary | null = null;
+      try { persisted = await atlasApi.selectedWorkspace(); } catch { /* The single-workspace fallback remains safe. */ }
+      const workspace = initialWorkspace(state.workspaces, persisted);
+      if (workspace) await selectWorkspace(workspace.id);
+      if (current) dispatch({ type: "initialWorkspaceResolved" });
+    })();
+    return () => { current = false; };
+  }, [state.workspacesLoading, state.workspaceError, state.initialWorkspaceResolved, state.workspaces]);
 
   const loadProfiles = async (workspaceId: string, companyId: number, generation: number): Promise<void> => {
     profilesAbort.current?.abort(); const controller = new AbortController(); profilesAbort.current = controller; const request = nextRequest(generation, workspaceId, companyId); dispatch({ type: "profilesLoadStarted", request });
@@ -115,14 +122,14 @@ export function AuthenticatedPortalProvider({ csrf, children }: Props): React.JS
     try { const company = await atlasApi.createWorkspaceCompany(csrf, workspace.id, input, controller.signal); if (!isCurrentIntent(workspaceSelectionIntent.current, workspaceIntentId)) return false; dispatch({ type: "companyCreated", request, company }); await loadCompanies(workspace, request.generation); return true; }
     catch (error: unknown) { if (aborted(error)) { dispatch({ type: "requestAborted" }); return false; } if (!isCurrentIntent(workspaceSelectionIntent.current, workspaceIntentId)) return false; dispatch(error instanceof ApiError && error.status === 404 ? { type: "companyCreateNotFound", request } : { type: "companyCreateFailed", request }); return false; }
   };
-  const createOnboardingCompany = async (name: string): Promise<boolean> => {
+  const createOnboardingCompany = async (name: string): Promise<number | null> => {
     const workspace = stateRef.current.selectedWorkspace;
-    if (!workspace) return false;
+    if (!workspace) return null;
     try {
       const created = await atlasApi.createOnboardingCompany(csrf, workspace.id, name);
-      refreshCompanies();
-      return selectCompany(created.data.id);
-    } catch { return false; }
+      await loadCompanies(workspace, stateRef.current.workspaceGeneration);
+      return await selectCompany(created.data.id) ? created.data.id : null;
+    } catch { return null; }
   };
 
   const selectProfile = async (profileId: string): Promise<void> => { const current = stateRef.current, workspace = current.selectedWorkspace, companyId = current.selectedCompanyId; if (!workspace || !companyId) return; profileAbort.current?.abort(); const controller = new AbortController(); profileAbort.current = controller; dispatch({ type: "profileSelected", profileId }); const request = nextRequest(current.profileGeneration, workspace.id, companyId, profileId); dispatch({ type: "profileLoadStarted", request }); try { dispatch({ type: "profileLoaded", request, profile: await atlasApi.getAssistantProfile(workspace.id, companyId, profileId, controller.signal) }); } catch (error: unknown) { if (aborted(error)) { dispatch({ type: "requestAborted" }); return; } dispatch(error instanceof ApiError && error.status === 404 ? { type: "profileNotFound", request } : { type: "profileLoadFailed", request }); } };
@@ -132,8 +139,9 @@ export function AuthenticatedPortalProvider({ csrf, children }: Props): React.JS
   const submitProfile = async (input: CreateAssistantProfileInput | UpdateAssistantProfileInput): Promise<void> => { const current = stateRef.current, workspace = current.selectedWorkspace, companyId = current.selectedCompanyId; if (!workspace || !companyId) return; mutationAbort.current?.abort(); const controller = new AbortController(); mutationAbort.current = controller; const operation: ProfileMutationOperation = current.formMode === "create" ? "create" : "update"; const request = nextMutation(operation, current.profileGeneration, workspace.id, companyId, operation === "update" ? current.selectedProfileId ?? undefined : undefined); dispatch({ type: "submissionStarted", request }); try { if (current.formMode === "create") dispatch({ type: "profileCreated", request, profile: await atlasApi.createAssistantProfile(csrf, workspace.id, companyId, input as CreateAssistantProfileInput, controller.signal) }); else if (current.selectedProfileId) dispatch({ type: "profileUpdated", request, profile: await atlasApi.updateAssistantProfile(csrf, workspace.id, companyId, current.selectedProfileId, input, controller.signal) }); } catch (error: unknown) { if (aborted(error)) { dispatch({ type: "requestAborted" }); return; } if (error instanceof ApiError && error.status === 404) dispatch(operation === "create" ? { type: "profileCreateNotFound", request } : { type: "profileMutationNotFound", request }); else if (error instanceof ApiError && error.status === 409) dispatch({ type: "submissionFailed", request, noticeKey: operation === "create" ? "profiles.nameConflict" : "profiles.updateConflict" }); else if (error instanceof ApiError && error.status === 400) dispatch({ type: "submissionFailed", request, noticeKey: "profiles.validationError" }); else dispatch({ type: "submissionFailed", request, noticeKey: operation === "create" ? "profiles.createError" : "profiles.updateError" }); } };
   const transitionProfile = async (profile: AssistantProfile, target: AssistantProfileStatus): Promise<void> => { const current = stateRef.current, workspace = current.selectedWorkspace, companyId = current.selectedCompanyId; if (!workspace || !companyId) return; mutationAbort.current?.abort(); const controller = new AbortController(); mutationAbort.current = controller; const request = nextMutation("transition", current.profileGeneration, workspace.id, companyId, profile.id); dispatch({ type: "transitionStarted", request, target }); try { dispatch({ type: "profileTransitioned", request, profile: await atlasApi.transitionAssistantProfile(csrf, workspace.id, companyId, profile.id, target, controller.signal) }); } catch (error: unknown) { if (aborted(error)) { dispatch({ type: "requestAborted" }); return; } dispatch(error instanceof ApiError && error.status === 404 ? { type: "profileMutationNotFound", request } : { type: "transitionFailed", request, noticeKey: error instanceof ApiError && error.status === 409 ? "profiles.transitionConflict" : "profiles.transitionError" }); } };
 
+  const clearNotice = useCallback((): void => dispatch({ type: "noticeCleared" }), []);
   const selectedCompany = state.companies.find((company) => company.id === state.selectedCompanyId) ?? null;
-  const value = useMemo<AuthenticatedPortalContextValue>(() => ({ state, workspaces: state.workspaces, selectedWorkspace: state.selectedWorkspace, companies: state.companies, selectedCompany, needsWorkspace: !state.workspacesLoading && !state.workspaceError && state.workspaces.length === 0, needsWorkspaceSelection: !state.workspacesLoading && !state.workspaceError && state.workspaces.length > 1 && !state.selectedWorkspace && !state.pendingWorkspaceId, needsCompany: !!state.selectedWorkspace && !state.selectedCompanyId, hasSelectedCompany: state.selectedCompanyId !== null, isLoading: state.workspacesLoading || state.pendingWorkspaceId !== null || state.companiesLoading, selectWorkspace, selectCompany, createWorkspace, createCompany, createOnboardingCompany, refresh, refreshCompanies, refreshSelectedCompany, clearWorkspace: () => { abortTenant(); dispatch({ type: "workspaceCleared" }); }, loadProfiles, selectProfile, reloadProfiles, submitProfile, transitionProfile, openProfileForm: (mode) => dispatch({ type: "formOpened", mode }), closeProfileForm: () => dispatch({ type: "formClosed" }) }), [state, selectedCompany, refresh]);
+  const value = useMemo<AuthenticatedPortalContextValue>(() => ({ state, workspaces: state.workspaces, selectedWorkspace: state.selectedWorkspace, companies: state.companies, selectedCompany, needsWorkspace: !state.workspacesLoading && !state.workspaceError && state.workspaces.length === 0, needsWorkspaceSelection: !state.workspacesLoading && !state.workspaceError && state.initialWorkspaceResolved && state.workspaces.length > 1 && !state.selectedWorkspace && !state.pendingWorkspaceId, needsCompany: !!state.selectedWorkspace && !state.selectedCompanyId, hasSelectedCompany: state.selectedCompanyId !== null, isLoading: state.workspacesLoading || !state.initialWorkspaceResolved || state.pendingWorkspaceId !== null || state.companiesLoading, selectWorkspace, selectCompany, createWorkspace, createCompany, createOnboardingCompany, refresh, refreshCompanies, refreshSelectedCompany, clearWorkspace: () => { abortTenant(); dispatch({ type: "workspaceCleared" }); }, loadProfiles, selectProfile, reloadProfiles, submitProfile, transitionProfile, clearNotice, openProfileForm: (mode) => dispatch({ type: "formOpened", mode }), closeProfileForm: () => dispatch({ type: "formClosed" }) }), [state, selectedCompany, refresh, clearNotice]);
   return <AuthenticatedPortalContext value={value}>{children}</AuthenticatedPortalContext>;
 }
 

@@ -22,12 +22,38 @@ export function CompanySetupChecklist({ workspace, companies, company, onNavigat
     let current = true;
     setSnapshot(null); setUnavailable(false);
     void Promise.all([
-      atlasApi.getAssistantReadiness(workspace.id, company.id),
-      atlasApi.listWebChatConnections(workspace.id, company.id),
-      atlasApi.listWhatsAppConnections(workspace.id, company.id),
-    ]).then(([readiness, webChat, whatsApp]) => {
-      if (current) setSnapshot({ readiness, webChatConnections: webChat.length, whatsAppConnections: whatsApp.length });
-    }).catch(() => { if (current) setUnavailable(true); });
+    atlasApi.getAssistantReadiness(workspace.id, company.id),
+    atlasApi.listWebChatConnections(workspace.id, company.id),
+    atlasApi.listWhatsAppConnections(workspace.id, company.id),
+  ]).then(async ([readiness, webChat, whatsApp]) => {
+    const whatsAppStatuses = await Promise.all(
+      whatsApp.map((connection) =>
+        atlasApi.getWhatsAppConnectionStatus(
+          workspace.id,
+          company.id,
+          connection.id
+        )
+      )
+    );
+
+    if (current) {
+      setSnapshot({
+        readiness,
+        webChatConnections: webChat.length,
+        whatsAppConnections: whatsApp.length,
+        operationalWebChatConnections: webChat.filter(
+          (connection) => connection.status === "active"
+        ).length,
+        operationalWhatsAppConnections: whatsAppStatuses.filter(
+          (status) =>
+            status.connection.status === "active" &&
+            status.validationState === "valid"
+        ).length,
+      });
+    }
+  }).catch(() => {
+    if (current) setUnavailable(true);
+  });
     return () => { current = false; };
   }, [workspace.id, company.id, generation]);
 

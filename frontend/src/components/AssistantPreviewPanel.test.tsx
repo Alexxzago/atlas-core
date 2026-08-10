@@ -77,6 +77,12 @@ afterEach(() => {
 });
 
 describe("AssistantPreviewPanel", () => {
+  it("uses product copy when preview is blocked until review is complete", () => {
+    renderPanel({ profile: { ...profile, status: "draft" } });
+    expect(screen.getByText("Complete the review to test the assistant.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Preview response" })).toHaveProperty("disabled", true);
+  });
+
   it.each([
     ["Workspace", { workspaceId: "workspace-2" }],
     ["Company", { companyId: 8 }],
@@ -131,7 +137,7 @@ describe("AssistantPreviewPanel", () => {
     const lifecycleSignal = (fetchMock.mock.calls[0]?.[1] as RequestInit).signal as AbortSignal;
     view.rerenderPanel({ profile: { ...profile, status: "disabled" } });
     expect(lifecycleSignal.aborted).toBe(true);
-    expect(screen.getByRole("status").textContent).toContain("Mark the Profile ready");
+    expect(screen.getByRole("status").textContent).toContain("Complete the review");
     expect(screen.getByRole("button").hasAttribute("disabled")).toBe(true);
 
     view.rerenderPanel({ profile });

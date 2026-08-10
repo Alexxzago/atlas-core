@@ -1,4 +1,5 @@
 export type CompanyStatus = "processing" | "ready" | "failed";
+export type CompanyLifecycle = "draft" | "configured" | "operational" | "attention_required" | "suspended" | "archived";
 
 export interface Company {
   id: number;
@@ -7,6 +8,7 @@ export interface Company {
   phone: string;
   email: string;
   status: CompanyStatus;
+  lifecycle?: CompanyLifecycle;
   createdAt: string;
 }
 
@@ -159,6 +161,12 @@ export interface CreateWhatsAppConnectionInput {
   assistantProfileId: string;
   phoneNumberId: string;
   whatsappBusinessAccountId: string;
+}
+
+export interface UpdateWhatsAppConnectionInput {
+  assistantProfileId?: string;
+  phoneNumberId?: string;
+  whatsappBusinessAccountId?: string;
 }
 
 export interface WhatsAppConnectionOperationalStatus {
