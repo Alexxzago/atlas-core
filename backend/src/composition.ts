@@ -118,6 +118,12 @@ import { DefaultAssistantRepository } from "./repositories/defaultAssistantRepos
 import { DefaultAssistantService } from "./assistant/services/defaultAssistantService.js";
 import { createGetDefaultAssistantController, createPutDefaultAssistantController } from "./controllers/defaultAssistantController.js";
 import { createGetAssistantReadinessController, createRefreshAssistantReadinessController } from "./controllers/assistantReadinessController.js";
+import { PlatformAdministratorRepository } from "./repositories/platformAdministratorRepository.js";
+import { PlatformAdministrationRepository } from "./repositories/platformAdministrationRepository.js";
+import { PlatformAuthorizationService } from "./platformAdmin/services/platformAuthorizationService.js";
+import { PlatformAdministrationService } from "./platformAdmin/services/platformAdministrationService.js";
+import { createPlatformAdminControllers } from "./controllers/platformAdminController.js";
+import { createPlatformAdminRouter } from "./routes/platformAdmin.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -156,7 +162,9 @@ const resendVerificationService = new ResendEmailVerificationService(identityTra
   verificationLifetimeMilliseconds, verificationCooldownMilliseconds);
 const verifyEmailService = new VerifyEmailService(identityTransaction, verificationHashProvider, identityClock);
 const authenticationTransaction = new SqliteAuthenticationTransaction(database);
-const authenticationService=new AuthenticationService(authenticationTransaction,randomProvider,new Sha256CredentialEnrollmentHashProvider(),passwordProvider,new Sha256SessionIdentifierProvider(),identityClock,verificationDelivery,verificationOrigin,process.env.NODE_ENV==="production");
+const platformAdministrators = new PlatformAdministratorRepository(database);
+const platformAuthorizationService = new PlatformAuthorizationService(platformAdministrators);
+const authenticationService=new AuthenticationService(authenticationTransaction,randomProvider,new Sha256CredentialEnrollmentHashProvider(),passwordProvider,new Sha256SessionIdentifierProvider(),identityClock,verificationDelivery,verificationOrigin,process.env.NODE_ENV==="production",30*60*1000,12*60*60*1000,30*60*1000,60*1000,platformAdministrators);
 const passwordResetControllers = createPasswordResetControllers(new PasswordResetService(authenticationTransaction, randomProvider, verificationHashProvider, passwordProvider, identityClock, verificationDelivery, verificationOrigin));
 const requestOriginPolicy=new ExactRequestOriginPolicy(production?[verificationOrigin]:[verificationOrigin,"http://localhost:5173"],production);
 const authenticationControllers=createAuthenticationControllers(authenticationService,requestOriginPolicy);
@@ -216,6 +224,7 @@ configureProductionConversationControlControllers({ takeover: (context, actor) =
 export const whatsAppWebhookService = new WhatsAppWebhookService({ appSecret: process.env.WHATSAPP_APP_SECRET ?? "", verifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? "" }, whatsAppConnectionService, new WhatsAppConversationRepository(database), new ChannelProviderEventRepository(database), conversationService, operationalConversationTurnService, identityClock, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), undefined, whatsAppCredentialResolver, (accessToken) => new WhatsAppCloudApiProvider(accessToken, process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0"), new ConversationRepository(database), whatsAppOutboundDeliveryService, whatsAppDeliveryStatusService);
 const whatsAppWebhookRouter = createWhatsAppWebhookRouter(createWhatsAppWebhookControllers(whatsAppWebhookService));
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));
+export const platformAdminRouter=createPlatformAdminRouter(authenticationService,platformAuthorizationService,createPlatformAdminControllers(new PlatformAdministrationService(new PlatformAdministrationRepository(database))));
 function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
   const runtime = new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), identityClock);
   const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, "gemini");
@@ -234,5 +243,5 @@ function whatsAppPlatformEncryptionKey(value: string | undefined): Uint8Array {
 export const authorizedCompaniesRouter = createProductionAuthorizedCompaniesRouter(agent);
 
 export function createProductionAppRouters(execution: AssistantExecutionPort = agent): AppRouters {
-  return { authorizedCompaniesRouter: createProductionAuthorizedCompaniesRouter(execution), chatRouter, companiesRouter, identityRouter, knowledgeRouter, publicWebChatRouter, scrapeRouter, whatsAppWebhookRouter, workspacesRouter };
+  return { authorizedCompaniesRouter: createProductionAuthorizedCompaniesRouter(execution), chatRouter, companiesRouter, identityRouter, knowledgeRouter, publicWebChatRouter, scrapeRouter, whatsAppWebhookRouter, workspacesRouter, platformAdminRouter };
 }

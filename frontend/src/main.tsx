@@ -17,5 +17,6 @@ import "./styles/workspace.css";
 import "./styles/design-v2.css";
 import "./styles/conversations.css";
 import "./styles/product.css";
+import "./styles/admin.css";
 
 createRoot(document.getElementById("root")!).render(<StrictMode><ThemeProvider><I18nProvider><RouterProvider><AuthenticationProvider><App /></AuthenticationProvider></RouterProvider></I18nProvider></ThemeProvider></StrictMode>);

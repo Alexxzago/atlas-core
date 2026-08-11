@@ -1,7 +1,7 @@
 import express, { type Router } from "express";
 import healthRouter from "./routes/health.js";
 
-export interface AppRouters { readonly authorizedCompaniesRouter: Router; readonly chatRouter: Router; readonly companiesRouter: Router; readonly identityRouter: Router; readonly knowledgeRouter: Router; readonly publicWebChatRouter: Router; readonly scrapeRouter: Router; readonly whatsAppWebhookRouter?: Router; readonly workspacesRouter: Router; }
+export interface AppRouters { readonly authorizedCompaniesRouter: Router; readonly chatRouter: Router; readonly companiesRouter: Router; readonly identityRouter: Router; readonly knowledgeRouter: Router; readonly publicWebChatRouter: Router; readonly scrapeRouter: Router; readonly whatsAppWebhookRouter?: Router; readonly workspacesRouter: Router; readonly platformAdminRouter?: Router; }
 export interface AppOptions { readonly production?: boolean; readonly trustedLocalMode?: boolean; }
 
 function operationalPath(url: string): boolean { return /^\/workspaces\/[^/]+\/companies\/[^/]+\/assistant\/executions\/?(?:\?.*)?$/i.test(url); }
@@ -20,6 +20,7 @@ export function createApp(routers: AppRouters, options: AppOptions = {}): expres
   const trustedLocalMode = options.trustedLocalMode ?? (!Boolean(options.production) && process.env.ATLAS_TRUSTED_LOCAL_MODE === "true");
   if (trustedLocalMode) { app.use(routers.knowledgeRouter); app.use(routers.chatRouter); app.use("/companies", routers.companiesRouter); }
   app.use("/identity", routers.identityRouter);
+  if (routers.platformAdminRouter) app.use("/admin", routers.platformAdminRouter);
   app.use("/workspaces", routers.workspacesRouter);
   app.use("/workspaces", routers.authorizedCompaniesRouter);
   app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction): void => {
