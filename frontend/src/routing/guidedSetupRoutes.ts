@@ -25,11 +25,12 @@ export function guidedSetupPath(route: Exclude<GuidedSetupRoute, { name: "not-fo
   return ({ landing: "/", register: "/register", "verify-email": "/verify-email", "sign-in": "/sign-in", "forgot-password": "/forgot-password", "reset-password": "/reset-password", "workspace-setup": "/onboarding/workspace", "company-setup": "/onboarding/company", "activation-pending": "/activation-pending" })[route.name];
 }
 
-export function resolveGuidedSetupRoute(route: GuidedSetupRoute, state: GuidedSetupGuardState): GuidedSetupRoute | { readonly redirect: string } {
+import { authenticatedDestination } from "./authenticatedDestination.ts";
+export function resolveGuidedSetupRoute(route: GuidedSetupRoute, state: GuidedSetupGuardState, isPlatformAdmin = false): GuidedSetupRoute | { readonly redirect: string } {
   if (state === "booting") return route;
   const publicRoute = route.name === "register" || route.name === "verify-email" || route.name === "sign-in" || route.name === "forgot-password" || route.name === "reset-password";
   if (state === "unauthenticated") return route.name === "register" || route.name === "verify-email" || route.name === "sign-in" || route.name === "forgot-password" || route.name === "reset-password" ? route : { redirect: "/sign-in" };
-  const destination = state === "authenticated-needs-workspace" ? "/onboarding/workspace" : state === "authenticated-needs-company" ? "/onboarding/company" : state === "authenticated-activation-pending" ? "/activation-pending" : "/dashboard";
+  const destination = isPlatformAdmin ? authenticatedDestination(true) : state === "authenticated-needs-workspace" ? "/onboarding/workspace" : state === "authenticated-needs-company" ? "/onboarding/company" : state === "authenticated-activation-pending" ? "/activation-pending" : authenticatedDestination(false);
   if (route.name === "landing" || publicRoute) return { redirect: destination };
   if (state === "authenticated-needs-workspace") return route.name === "workspace-setup" ? route : { redirect: "/onboarding/workspace" };
   if (state === "authenticated-needs-company") return route.name === "company-setup" ? route : { redirect: "/onboarding/company" };

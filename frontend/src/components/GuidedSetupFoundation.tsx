@@ -31,6 +31,7 @@ export function GuidedSetupFoundation(): React.JSX.Element {
   if (auth.status === "booting") return <StartupState />;
   if (auth.status === "retryable-error") return <StartupState unavailable onRetry={() => void bootstrap()} />;
   if (auth.status !== "authenticated") return <GuidedSetupContent guardState="unauthenticated" />;
+  if (auth.identity.isPlatformAdmin) return <GuidedSetupContent guardState="authenticated-ready" isPlatformAdmin />;
   return <AuthenticatedPortalProvider csrf={auth.csrfToken}><AuthenticatedGuidedSetup /></AuthenticatedPortalProvider>;
 }
 
@@ -55,10 +56,10 @@ function OnboardingLoadFailure({ message, onRetry }: { readonly message: string;
   return <OnboardingLayout step="workspace"><Surface tone="raised"><Stack gap="4"><p role="alert">{message}</p><Button onClick={onRetry}>{t("common.retry")}</Button></Stack></Surface></OnboardingLayout>;
 }
 
-function GuidedSetupContent({ guardState }: { readonly guardState: GuidedSetupGuardState }): React.JSX.Element {
+function GuidedSetupContent({ guardState, isPlatformAdmin = false }: { readonly guardState: GuidedSetupGuardState; readonly isPlatformAdmin?: boolean }): React.JSX.Element {
   const { t } = useI18n(); const { appRoute, search, navigate, pathname } = useRouter();
   const route = appRoute.kind === "public" && appRoute.name === "guided" ? appRoute.route : { name: "not-found" } as const;
-  const resolved = resolveGuidedSetupRoute(route, guardState);
+  const resolved = resolveGuidedSetupRoute(route, guardState, isPlatformAdmin);
   const redirect = "redirect" in resolved ? resolved.redirect : null;
   useEffect(() => {
     if (pathname === "/identity/verify-email") {

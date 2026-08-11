@@ -66,9 +66,13 @@ export interface Identity {
   email: string;
   locale: string;
   status: string;
+  isPlatformAdmin: boolean;
   idleExpiresAt: string;
   absoluteExpiresAt: string;
 }
+export interface PlatformOverview { totalUsers:number; totalWorkspaces:number; totalCompanies:number; totalAssistantProfiles:number; webChatConnections:number; whatsAppConnections:{total:number;active:number;healthy:number;degraded:number}; }
+export interface PlatformWorkspaceSummary { id:string; name:string; createdAt:string; memberCount:number; companyCount:number; assistantProfileCount:number; webChatConnectionCount:number; whatsApp:{total:number;active:number;healthy:number;degraded:number}; latestActivityAt:string|null; }
+export interface PlatformWorkspacesPage { workspaces:PlatformWorkspaceSummary[]; nextCursor:string|null; }
 
 export interface SessionBootstrapResponse {
   status: "authenticated";
