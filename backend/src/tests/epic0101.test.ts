@@ -47,3 +47,20 @@ test("bootstrap HTTP contract is no-store, generic, empty-body only, and exposes
     assert.equal((await fetch(`${origin}/identity/session/bootstrap`,{method:"POST",headers:{"content-type":"application/json",cookie,origin},body:'{"unexpected":true}'})).status,400);
   }finally{await new Promise<void>((resolve,reject)=>listener.close(error=>error?reject(error):resolve()));database.close();}
 });
+
+test("logout HTTP requires the current CSRF token and revokes only a valid current session",async()=>{
+  const{database,service,grant}=await setup();const allow={allows:()=>true} satisfies RequestOriginPolicy;
+  const authentication=createAuthenticationControllers(service,allow),deniedAuthentication=createAuthenticationControllers(service,{allows:()=>false});const noop=((_request:unknown,response:{status:(value:number)=>{json:(body:unknown)=>void}}):void=>{response.status(501).json({});}) as never;
+  const app=express();app.use(express.json());app.use("/identity",createIdentityRouter({register:noop,resend:noop,verify:noop,...authentication}));app.use("/denied",createIdentityRouter({register:noop,resend:noop,verify:noop,...deniedAuthentication}));
+  const listener=app.listen(0,"127.0.0.1");await new Promise<void>((resolve,reject)=>{listener.once("listening",resolve);listener.once("error",reject);});
+  const address=listener.address()as AddressInfo,origin=`http://127.0.0.1:${address.port}`,cookie=`${service.cookieName()}=${encodeURIComponent(grant.rawIdentifier)}`;
+  try{
+    const headers={"content-type":"application/json",cookie,origin,"sec-fetch-site":"same-origin"};
+    assert.equal((await fetch(`${origin}/identity/logout`,{method:"POST",headers,body:"{}"})).status,401);
+    assert.equal((await fetch(`${origin}/identity/logout`,{method:"POST",headers:{...headers,"x-csrf-token":"invalid"},body:"{}"})).status,401);
+    assert.equal((await fetch(`${origin}/identity/logout`,{method:"POST",headers:{...headers,"x-csrf-token":grant.csrfToken},body:"{}"})).status,204);
+    assert.equal((await fetch(`${origin}/identity/me`,{headers:{cookie}})).status,401);
+    assert.equal((await fetch(`${origin}/denied/logout`,{method:"POST",headers:{...headers,"x-csrf-token":grant.csrfToken},body:"{}"})).status,403);
+    assert.equal((await fetch(`${origin}/identity/logout`,{method:"POST",headers:{"content-type":"application/json",origin},body:"{}"})).status,204);
+  }finally{await new Promise<void>((resolve,reject)=>listener.close(error=>error?reject(error):resolve()));database.close();}
+});
