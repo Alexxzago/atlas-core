@@ -19,6 +19,7 @@ interface AppShellProps {
   readonly companyTransitioning: boolean;
   readonly companyAutoSelecting?: boolean;
   readonly email: string;
+  readonly isPlatformAdmin?: boolean;
   readonly onNavigate: Navigate;
   readonly onSelectWorkspace: (workspaceId: string) => void;
   readonly onSelectCompany: (companyId: number) => void;
@@ -113,7 +114,7 @@ function AccountMenu({ ref, style, ...props }: AppShellProps & { readonly naviga
     <section><p>{t("shell.menu.workspace")}</p><strong>{props.workspace?.name ?? t("shell.noWorkspace")}</strong>{props.workspaces.length > 1 && <label><span>{t("shell.workspaceContext")}</span><select value={props.workspace?.id ?? ""} onChange={(event) => { if (event.target.value) props.onSelectWorkspace(event.target.value); }}>{props.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>}<button type="button" onClick={() => props.navigate("/settings")}>{t("shell.workspaceSettings")}</button></section>
     <section><p>{t("shell.menu.appearance")}</p><ThemeSelector/></section>
     <LanguageControl/>
-    <section><p>{t("shell.menu.account")}</p><small>{props.email}</small><button type="button" onClick={props.onPassword}>{t("portal.password")}</button><button type="button" onClick={props.onLogout}>{t("shell.signOut")}</button></section>
+    <section><p>{t("shell.menu.account")}</p><small>{props.email}</small>{props.isPlatformAdmin&&<button type="button" onClick={() => props.navigate("/admin")}>Volver a Administración</button>}<button type="button" onClick={props.onPassword}>{t("portal.password")}</button><button type="button" onClick={props.onLogout}>{t("shell.signOut")}</button></section>
   </div>;
 }
 

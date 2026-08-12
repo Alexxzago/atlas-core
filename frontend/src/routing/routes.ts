@@ -15,7 +15,7 @@ export type PortalRoute =
 export type AppRoute =
   | { readonly kind: "public"; readonly name: "guided"; readonly route: GuidedSetupRoute }
   | { readonly kind: "public"; readonly name: "chat"; readonly connectionPublicId: string }
-  | { readonly kind: "admin"; readonly route: "overview" | "workspaces" | "not-found" }
+  | { readonly kind: "admin"; readonly route: "overview" | "workspaces" | "users" | "not-found" }
   | { readonly kind: "portal"; readonly route: PortalRoute };
 
 function companyId(value: string | undefined): number | null {
@@ -53,6 +53,7 @@ export function parseAppRoute(pathname: string): AppRoute {
   if (chat?.[1]) return { kind: "public", name: "chat", connectionPublicId: chat[1] };
   if (path === "/admin") return { kind: "admin", route: "overview" };
   if (path === "/admin/workspaces") return { kind: "admin", route: "workspaces" };
+  if (path === "/admin/users") return { kind: "admin", route: "users" };
   if (path.startsWith("/admin/")) return { kind: "admin", route: "not-found" };
   return { kind: "portal", route: parsePortalRoute(path) };
 }
