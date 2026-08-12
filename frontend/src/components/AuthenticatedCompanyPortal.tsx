@@ -21,13 +21,13 @@ import { ChannelHub } from "./ChannelHub";
 import { onboardingProgressPath, resolveAuthenticatedOnboardingProgress } from "../routing/onboardingProgress";
 import { StartupState } from "./StartupState";
 
-interface Props { csrf: string; userId?: string | undefined; email: string; onPassword: () => void; onLogout: () => void }
+interface Props { csrf: string; userId?: string | undefined; email: string; isPlatformAdmin?: boolean; onPassword: () => void; onLogout: () => void }
 
-export function AuthenticatedCompanyPortal({ csrf, userId, email, onPassword, onLogout }: Props): React.JSX.Element {
-  return <AuthenticatedPortalProvider csrf={csrf}><AuthenticatedCompanyPortalContent csrf={csrf} userId={userId} email={email} onPassword={onPassword} onLogout={onLogout} /></AuthenticatedPortalProvider>;
+export function AuthenticatedCompanyPortal({ csrf, userId, email, isPlatformAdmin, onPassword, onLogout }: Props): React.JSX.Element {
+  return <AuthenticatedPortalProvider csrf={csrf}><AuthenticatedCompanyPortalContent csrf={csrf} userId={userId} email={email} isPlatformAdmin={isPlatformAdmin ?? false} onPassword={onPassword} onLogout={onLogout} /></AuthenticatedPortalProvider>;
 }
 
-function AuthenticatedCompanyPortalContent({ csrf, userId, email, onPassword, onLogout }: Props): React.JSX.Element {
+function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmin, onPassword, onLogout }: Props): React.JSX.Element {
   const { t } = useI18n();
   const { route, navigate } = useRouter();
   const [routeCompanyValidation, setRouteCompanyValidation] = useState<CompanyRouteValidation>({ key: null, status: "idle" });
@@ -98,7 +98,7 @@ function AuthenticatedCompanyPortalContent({ csrf, userId, email, onPassword, on
   };
 
   if (onboardingRedirect) return <StartupState />;
-  return <AppShell route={route} workspace={state.selectedWorkspace} workspaces={state.workspaces} companies={state.companies} selectedCompany={selectedCompany} companiesLoading={state.companiesLoading || companyAutoSelecting} companyError={state.companyError} companyCreating={state.companyCreating} companyTransitioning={routeCompanyState === "loading" || companyAutoSelecting} companyAutoSelecting={companyAutoSelecting} email={email} onNavigate={navigate} onSelectWorkspace={(id) => { void selectWorkspace(id).then((selected) => { if (selected) navigate("/companies", { replace: true }); }); }} onSelectCompany={(id) => navigate(`/companies/${id}`)} onCreateCompany={createCompany} onRetryCompanies={refreshCompanies} onPassword={onPassword} onLogout={onLogout}>
+  return <AppShell route={route} workspace={state.selectedWorkspace} workspaces={state.workspaces} companies={state.companies} selectedCompany={selectedCompany} companiesLoading={state.companiesLoading || companyAutoSelecting} companyError={state.companyError} companyCreating={state.companyCreating} companyTransitioning={routeCompanyState === "loading" || companyAutoSelecting} companyAutoSelecting={companyAutoSelecting} email={email} isPlatformAdmin={isPlatformAdmin ?? false} onNavigate={navigate} onSelectWorkspace={(id) => { void selectWorkspace(id).then((selected) => { if (selected) navigate("/companies", { replace: true }); }); }} onSelectCompany={(id) => navigate(`/companies/${id}`)} onCreateCompany={createCompany} onRetryCompanies={refreshCompanies} onPassword={onPassword} onLogout={onLogout}>
     {state.notice && <div className={`portal-notice inline-message inline-message--${state.notice.type}`} role={state.notice.type === "error" ? "alert" : "status"}><span>{t(state.notice.key as Parameters<typeof t>[0])}</span>{state.notice.type === "success" && <button className="button button--quiet button--compact" type="button" onClick={clearNotice}>{t("common.close")}</button>}</div>}
     <RouteLoadingBoundary loading={state.workspacesLoading || state.pendingWorkspaceId !== null || companyAutoSelecting || routeCompanyState === "loading"}><RouteErrorBoundary active={route.name === "not-found" || routeCompanyState === "error"} onBack={() => navigate("/companies", { replace: true })}>{routeContent()}</RouteErrorBoundary></RouteLoadingBoundary>
   </AppShell>;
