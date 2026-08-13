@@ -25,12 +25,14 @@ export class WhatsAppConnectionRepository implements WhatsAppConnectionRepositor
     return row ? connection(row) : null;
   }
   public findByIdForRecovery(id: WhatsAppConnectionId): WhatsAppConnection | null {
-    const row = this.db.prepare("SELECT wc.* FROM whatsapp_connections wc JOIN companies c ON c.id=wc.company_id AND c.workspace_id=wc.workspace_id WHERE wc.id=?").get(id) as Row | undefined;
+    const commercialJoin = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_commercial_controls'").get() ? "JOIN workspace_commercial_controls cc ON cc.workspace_id=wc.workspace_id AND cc.status='active'" : "";
+    const row = this.db.prepare(`SELECT wc.* FROM whatsapp_connections wc ${commercialJoin} JOIN companies c ON c.id=wc.company_id AND c.workspace_id=wc.workspace_id WHERE wc.id=?`).get(id) as Row | undefined;
     return row ? connection(row) : null;
   }
 
   public findByPhoneNumberId(phoneNumberId: string): WhatsAppConnection | null {
-    const row = this.db.prepare("SELECT wc.* FROM whatsapp_connections wc JOIN companies c ON c.id=wc.company_id AND c.workspace_id=wc.workspace_id JOIN assistant_profiles p ON p.id=wc.assistant_profile_id AND p.company_id=c.id WHERE wc.phone_number_id=?").get(phoneNumberId) as Row | undefined;
+    const commercialJoin=this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_commercial_controls'").get()?"JOIN workspace_commercial_controls cc ON cc.workspace_id=wc.workspace_id AND cc.status='active'":"";
+    const row = this.db.prepare(`SELECT wc.* FROM whatsapp_connections wc ${commercialJoin} JOIN companies c ON c.id=wc.company_id AND c.workspace_id=wc.workspace_id AND c.lifecycle_state!='archived' JOIN assistant_profiles p ON p.id=wc.assistant_profile_id AND p.company_id=c.id AND p.status!='archived' WHERE wc.phone_number_id=?`).get(phoneNumberId) as Row | undefined;
     return row ? connection(row) : null;
   }
 

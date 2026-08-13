@@ -45,6 +45,7 @@ export interface WorkspaceSummary {
   name: string;
   role: string;
   capabilities: Permission[];
+  commercialStatus?: WorkspaceCommercialStatus;
 }
 export type Permission = "workspace:read"|"workspace:manage"|"company:read"|"company:manage"|"onboarding:run"|"chat:use"|"conversation:message:send"|"conversation:manage"|"assistant:preview"|"knowledge:read"|"knowledge:ingest"|"knowledge:publish"|"knowledge:archive"|"membership:list"|"membership:invite"|"membership:manage"|"administrator:manage"|"owner:manage"|"owner:transfer";
 
@@ -75,6 +76,12 @@ export interface PlatformWorkspaceSummary { id:string; name:string; createdAt:st
 export interface PlatformWorkspacesPage { workspaces:PlatformWorkspaceSummary[]; nextCursor:string|null; }
 export interface PlatformUserSummary { id:string; email:string; createdAt:string; emailVerified:boolean; activeWorkspaceMembershipCount:number; hasActiveWorkspaceMembership:boolean; }
 export interface PlatformUsersPage { users:PlatformUserSummary[]; nextCursor:string|null; }
+export type WorkspaceCommercialStatus = "active" | "suspended";
+export interface PlatformWorkspaceCommercialUsage { companies:number; assistantProfiles:number; activeChannels:number; }
+export interface PlatformWorkspaceCommercialControls { workspaceId:number; status:WorkspaceCommercialStatus; maxCompanies:number|null; maxAssistantProfiles:number|null; maxActiveChannels:number|null; usage:PlatformWorkspaceCommercialUsage; version:number; createdAt:string; updatedAt:string; suspendedAt:string|null; }
+export interface PlatformUserCommercialUsage { ownedWorkspaces:number; }
+export interface PlatformUserCommercialControls { userId:string; maxOwnedWorkspaces:number|null; usage:PlatformUserCommercialUsage; version:number; createdAt:string; updatedAt:string; }
+export interface CommercialControlAuditEvent { id:string; actorUserId:string; subjectType:"user"|"workspace"; subjectId:string; eventType:string; oldValue:Record<string,unknown>; newValue:Record<string,unknown>; version:number; occurredAt:string; }
 
 export interface SessionBootstrapResponse {
   status: "authenticated";

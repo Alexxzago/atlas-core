@@ -85,6 +85,10 @@ export class ChannelProviderEventRepository implements ChannelProviderEventRepos
     if (this.db.prepare("UPDATE channel_execution_requests SET state=?,lease_owner=NULL,lease_expires_at=NULL,outcome=?,updated_at=? WHERE id=? AND state='leased' AND lease_owner=?").run(state, outcome, updatedAt, id, owner).changes !== 1) return null;
     const row = this.db.prepare("SELECT * FROM channel_execution_requests WHERE id=?").get(id) as RequestRow | undefined; return row ? request(row) : null;
   }
+  public releaseExecutionRequest(id: ChannelExecutionRequestId, owner: string, updatedAt: string): ChannelExecutionRequest | null {
+    if (this.db.prepare("UPDATE channel_execution_requests SET state='pending',lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE id=? AND state='leased' AND lease_owner=?").run(updatedAt, id, owner).changes !== 1) return null;
+    const row = this.db.prepare("SELECT * FROM channel_execution_requests WHERE id=?").get(id) as RequestRow | undefined; return row ? request(row) : null;
+  }
   public captureUnsupportedExecution(value: ChannelProviderEvent, execution: ChannelExecutionRequest): { readonly event: ChannelProviderEvent; readonly request: ChannelExecutionRequest; readonly claimed: boolean } {
     this.db.exec("BEGIN IMMEDIATE;"); try {
       const inserted = this.db.prepare("INSERT INTO channel_provider_events(id,communication_channel,transport_provider,transport_connection_id,external_event_id,state,conversation_id,conversation_message_id,created_at,updated_at) VALUES(?,?,?,?,?,'completed',NULL,NULL,?,?) ON CONFLICT(transport_provider,external_event_id) DO NOTHING").run(value.id, value.communicationChannel, value.transportProvider, value.transportConnectionId, value.externalEventId, value.createdAt, value.updatedAt).changes === 1;

@@ -27,5 +27,7 @@ test("classifies public and authenticated application routes", () => {
   assert.deepEqual(parseAppRoute("/chat/public_connection"), { kind: "public", name: "chat", connectionPublicId: "public_connection" });
   assert.deepEqual(parseAppRoute("/admin"), { kind: "admin", route: "overview" });
   assert.deepEqual(parseAppRoute("/admin/workspaces"), { kind: "admin", route: "workspaces" });
+  assert.deepEqual(parseAppRoute("/admin/workspaces/wsp_1"), { kind: "admin", route: "workspace-commercial", id: "wsp_1" });
+  assert.deepEqual(parseAppRoute("/admin/users/usr_1"), { kind: "admin", route: "user-commercial", id: "usr_1" });
   assert.deepEqual(parseAppRoute("/companies"), { kind: "portal", route: { name: "companies" } });
 });
