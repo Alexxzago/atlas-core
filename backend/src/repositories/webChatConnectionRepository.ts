@@ -30,8 +30,9 @@ export class WebChatConnectionRepository implements WebChatConnectionRepositoryP
   }
 
   public findActiveByPublicId(publicId: WebChatConnectionPublicId): WebChatConnection | null {
-    const row = this.db.prepare("SELECT wcc.* FROM web_chat_connections wcc JOIN workspaces w ON w.id=wcc.workspace_id JOIN companies c ON c.id=wcc.company_id AND c.workspace_id=w.id JOIN assistant_profiles p ON p.id=wcc.assistant_profile_id AND p.company_id=c.id WHERE wcc.public_id=? AND wcc.status='active'").get(publicId) as Row | undefined;
+    const row = this.db.prepare(`SELECT wcc.* FROM web_chat_connections wcc JOIN workspaces w ON w.id=wcc.workspace_id ${this.commercialJoin()} JOIN companies c ON c.id=wcc.company_id AND c.workspace_id=w.id AND c.lifecycle_state!='archived' JOIN assistant_profiles p ON p.id=wcc.assistant_profile_id AND p.company_id=c.id AND p.status!='archived' WHERE wcc.public_id=? AND wcc.status='active'`).get(publicId) as Row | undefined;
     return row ? connection(row) : null;
   }
-  public findActiveById(id: WebChatConnectionId): WebChatConnection | null { const row=this.db.prepare("SELECT wcc.* FROM web_chat_connections wcc JOIN workspaces w ON w.id=wcc.workspace_id JOIN companies c ON c.id=wcc.company_id AND c.workspace_id=w.id JOIN assistant_profiles p ON p.id=wcc.assistant_profile_id AND p.company_id=c.id WHERE wcc.id=? AND wcc.status='active'").get(id) as Row|undefined; return row?connection(row):null; }
+  public findActiveById(id: WebChatConnectionId): WebChatConnection | null { const row=this.db.prepare(`SELECT wcc.* FROM web_chat_connections wcc JOIN workspaces w ON w.id=wcc.workspace_id ${this.commercialJoin()} JOIN companies c ON c.id=wcc.company_id AND c.workspace_id=w.id AND c.lifecycle_state!='archived' JOIN assistant_profiles p ON p.id=wcc.assistant_profile_id AND p.company_id=c.id AND p.status!='archived' WHERE wcc.id=? AND wcc.status='active'`).get(id) as Row|undefined; return row?connection(row):null; }
+  private commercialJoin():string{return this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_commercial_controls'").get()?"JOIN workspace_commercial_controls cc ON cc.workspace_id=w.id AND cc.status='active'":"";}
 }

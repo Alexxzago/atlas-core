@@ -11,6 +11,7 @@ export interface ChannelProviderEventRepositoryPort {
   captureInboundExecution(event: ChannelProviderEvent, inbound: ConversationMessage, providerMessage: ProviderMessageRecord, request: ChannelExecutionRequest): { readonly event: ChannelProviderEvent; readonly inbound: ConversationMessage; readonly request: ChannelExecutionRequest; readonly claimed: boolean };
   leaseExecutionRequests(owner: string, now: string, expiresAt: string, limit: number): ChannelExecutionRequest[];
   completeExecutionRequest(id: ChannelExecutionRequestId, owner: string, state: "completed" | "failed", outcome: string | null, updatedAt: string): ChannelExecutionRequest | null;
+  releaseExecutionRequest(id: ChannelExecutionRequestId, owner: string, updatedAt: string): ChannelExecutionRequest | null;
   captureUnsupportedExecution(event: ChannelProviderEvent, request: ChannelExecutionRequest): { readonly event: ChannelProviderEvent; readonly request: ChannelExecutionRequest; readonly claimed: boolean };
 }
 

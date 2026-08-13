@@ -15,7 +15,7 @@ export type PortalRoute =
 export type AppRoute =
   | { readonly kind: "public"; readonly name: "guided"; readonly route: GuidedSetupRoute }
   | { readonly kind: "public"; readonly name: "chat"; readonly connectionPublicId: string }
-  | { readonly kind: "admin"; readonly route: "overview" | "workspaces" | "users" | "not-found" }
+  | { readonly kind: "admin"; readonly route: "overview" | "workspaces" | "workspace-commercial" | "users" | "user-commercial" | "not-found"; readonly id?: string }
   | { readonly kind: "portal"; readonly route: PortalRoute };
 
 function companyId(value: string | undefined): number | null {
@@ -53,7 +53,11 @@ export function parseAppRoute(pathname: string): AppRoute {
   if (chat?.[1]) return { kind: "public", name: "chat", connectionPublicId: chat[1] };
   if (path === "/admin") return { kind: "admin", route: "overview" };
   if (path === "/admin/workspaces") return { kind: "admin", route: "workspaces" };
+  const workspaceCommercial = /^\/admin\/workspaces\/([a-zA-Z0-9_-]+)$/.exec(path);
+  if (workspaceCommercial?.[1]) return { kind: "admin", route: "workspace-commercial", id: workspaceCommercial[1] };
   if (path === "/admin/users") return { kind: "admin", route: "users" };
+  const userCommercial = /^\/admin\/users\/([a-zA-Z0-9_-]+)$/.exec(path);
+  if (userCommercial?.[1]) return { kind: "admin", route: "user-commercial", id: userCommercial[1] };
   if (path.startsWith("/admin/")) return { kind: "admin", route: "not-found" };
   return { kind: "portal", route: parsePortalRoute(path) };
 }

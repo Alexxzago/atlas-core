@@ -41,8 +41,9 @@ function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmi
   const progress = resolveAuthenticatedOnboardingProgress({ workspacesLoading: state.workspacesLoading, workspaceError: state.workspaceError, initialWorkspaceResolved: state.initialWorkspaceResolved, pendingWorkspaceId: state.pendingWorkspaceId, selectedWorkspaceId: state.selectedWorkspace?.id ?? null, workspaceCount: state.workspaces.length, companiesLoading: state.companiesLoading, companyError: state.companyError, companies: state.companies });
   const onboardingRedirect = onboardingProgressPath(progress);
   const companyAutoSelecting = autoSelectingCompanyId !== null || (!requestedCompanyId && !!state.selectedWorkspace && !state.companiesLoading && !state.companyError && state.selectedCompanyId === null && state.companies.length === 1);
+  const workspaceSuspended = state.selectedWorkspace?.commercialStatus === "suspended";
 
-  useEffect(() => { if (onboardingRedirect) navigate(onboardingRedirect, { replace: true }); }, [navigate, onboardingRedirect]);
+  useEffect(() => { if (onboardingRedirect && !workspaceSuspended) navigate(onboardingRedirect, { replace: true }); }, [navigate, onboardingRedirect, workspaceSuspended]);
 
   useEffect(() => {
     if (!requestedCompanyId || !state.selectedWorkspace || state.companiesLoading) {
@@ -97,6 +98,7 @@ function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmi
     return <></>;
   };
 
+  if (workspaceSuspended) return <main className="app-shell"><section className="auth-card"><h1>Workspace suspendido</h1><p>El acceso a este workspace está suspendido. Contactá a tu administrador para reactivarlo.</p><button onClick={onLogout}>Cerrar sesión</button></section></main>;
   if (onboardingRedirect) return <StartupState />;
   return <AppShell route={route} workspace={state.selectedWorkspace} workspaces={state.workspaces} companies={state.companies} selectedCompany={selectedCompany} companiesLoading={state.companiesLoading || companyAutoSelecting} companyError={state.companyError} companyCreating={state.companyCreating} companyTransitioning={routeCompanyState === "loading" || companyAutoSelecting} companyAutoSelecting={companyAutoSelecting} email={email} isPlatformAdmin={isPlatformAdmin ?? false} onNavigate={navigate} onSelectWorkspace={(id) => { void selectWorkspace(id).then((selected) => { if (selected) navigate("/companies", { replace: true }); }); }} onSelectCompany={(id) => navigate(`/companies/${id}`)} onCreateCompany={createCompany} onRetryCompanies={refreshCompanies} onPassword={onPassword} onLogout={onLogout}>
     {state.notice && <div className={`portal-notice inline-message inline-message--${state.notice.type}`} role={state.notice.type === "error" ? "alert" : "status"}><span>{t(state.notice.key as Parameters<typeof t>[0])}</span>{state.notice.type === "success" && <button className="button button--quiet button--compact" type="button" onClick={clearNotice}>{t("common.close")}</button>}</div>}

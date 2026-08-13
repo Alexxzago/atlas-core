@@ -8,7 +8,8 @@ export interface InvitationRepositoryPort{findById(id:string):Invitation|null;fi
 export interface WorkspaceSelectionRepository{find(userId:UserId):number|null;save(userId:UserId,workspaceId:number,at:string):void;clear(userId:UserId,workspaceId?:number):void;}
 export interface WorkspaceAdministrationWorkspaceRepository{findById(id:number):Workspace|null;findByPublicId(id:WorkspacePublicId):Workspace|null;create(input:{publicId:WorkspacePublicId;key:string;name:string;timezone:string|null;defaultLocale:"en"|"es"|null}):Workspace;}
 export interface WorkspaceAdministrationUserRepository{findById(id:UserId):User|null;findByNormalizedEmail(email:NormalizedEmail):User|null;}
-export interface WorkspaceAdministrationRepositories{users:WorkspaceAdministrationUserRepository;workspaces:WorkspaceAdministrationWorkspaceRepository;memberships:MembershipRepositoryPort;invitations:InvitationRepositoryPort;selections:WorkspaceSelectionRepository;}
+export interface WorkspaceCommercialRepository{ownedWorkspaceCount(userId:UserId):number;ownedWorkspaceLimit(userId:UserId):number;}
+export interface WorkspaceAdministrationRepositories{users:WorkspaceAdministrationUserRepository;workspaces:WorkspaceAdministrationWorkspaceRepository;memberships:MembershipRepositoryPort;invitations:InvitationRepositoryPort;selections:WorkspaceSelectionRepository;commercial:WorkspaceCommercialRepository;}
 export interface WorkspaceAdministrationTransactionPort{execute<T>(operation:(repositories:WorkspaceAdministrationRepositories)=>T):T;}
 export interface InvitationProof{raw:string;digest:string;version:"sha256-v1";}
 export interface InvitationProofProvider{create():InvitationProof;parse(raw:string):InvitationProof|null;}

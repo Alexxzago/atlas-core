@@ -8,6 +8,7 @@ import { WorkspaceResolver } from "../workspace/services/workspaceResolver.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 import { createActorContext, type ActorContext } from "../knowledge/domain/actorContext.js";
 import type { CompanyCoreControllers } from "../controllers/companyCoreController.js";
+import { CommercialControlsRepository } from "../repositories/commercialControlsRepository.js";
 
 interface ContextualControllers {
   list: (context: WorkspaceContext) => RequestHandler;
@@ -70,6 +71,7 @@ interface AuthorizedCompanyDependencies {
   conversationReadControllers?: ContextualConversationReadControllers;
   conversationControlControllers?: ContextualConversationControlControllers;
   pdfBodyParser?: RequestHandler;
+  commercial?: CommercialControlsRepository;
 }
 
 let productionConversationMessageController: ((context: WorkspaceContext, actor: ActorContext) => RequestHandler) | null = null;
@@ -78,12 +80,14 @@ let productionConversationControlControllers: ContextualConversationControlContr
 let productionCompanyCoreControllers: CompanyCoreControllers | null = null;
 let productionAssistantReadinessControllers: ContextualAssistantReadinessControllers | null = null;
 let productionDefaultAssistantControllers: ContextualDefaultAssistantControllers | null = null;
+let productionCommercialControls: CommercialControlsRepository | null = null;
 export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
 export function configureProductionConversationReadControllers(controllers: ContextualConversationReadControllers): void { productionConversationReadControllers = controllers; }
 export function configureProductionConversationControlControllers(controllers: ContextualConversationControlControllers): void { productionConversationControlControllers = controllers; }
 export function configureProductionCompanyCoreControllers(controllers: CompanyCoreControllers): void { productionCompanyCoreControllers = controllers; }
 export function configureProductionAssistantReadinessControllers(controllers: ContextualAssistantReadinessControllers): void { productionAssistantReadinessControllers = controllers; }
 export function configureProductionDefaultAssistantControllers(controllers: ContextualDefaultAssistantControllers): void { productionDefaultAssistantControllers = controllers; }
+export function configureProductionCommercialControls(controls: CommercialControlsRepository): void { productionCommercialControls = controls; }
 
 function rawCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -131,6 +135,7 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
       const user = dependencies.users.findById(identity.userId as UserId);
       if (!user) throw new Error();
       const decision = dependencies.authorization.authorize(user, workspaceId(req), permission);
+      if (changing && dependencies.commercial && !dependencies.commercial.isWorkspaceActive(decision.workspaceId)) { res.status(409).json({ error: { code: "commercial_account_suspended", message: "Commercial account is suspended." } }); return; }
       const context = dependencies.resolver.resolve(decision);
       const actor = createActorContext({ userId: decision.userId, membershipId: decision.membershipId, role: decision.role, capabilities: decision.capabilities });
       await controller(context, actor)(req, res, next);
