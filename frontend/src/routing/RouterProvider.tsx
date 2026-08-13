@@ -28,7 +28,7 @@ export function RouterProvider({ children }: { readonly children: ReactNode }): 
 
   const navigate = useCallback((path: string, options?: { readonly replace?: boolean }): void => {
     if (path === window.location.pathname) return;
-    if (!path.startsWith("/companies") && path !== "/dashboard" && path !== "/conversations" && path !== "/analytics" && path !== "/settings") setIntentionalWorkspaceAccess(false);
+    if (!path.startsWith("/companies") && !path.startsWith("/onboarding/") && path !== "/dashboard" && path !== "/conversations" && path !== "/analytics" && path !== "/settings" && path !== "/activation-pending") setIntentionalWorkspaceAccess(false);
     if (options?.replace) window.history.replaceState({}, "", path);
     else window.history.pushState({}, "", path);
     setRoute(parsePortalRoute(path)); setAppRoute(parseAppRoute(path)); setPathname(path); setSearch("");
