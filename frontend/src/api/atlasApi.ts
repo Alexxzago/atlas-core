@@ -29,7 +29,8 @@ async function request<T>(path: string, options?: RequestInit, recoveryAttempted
   });
   if (!response.ok) {
     const method=(options?.method??"GET").toUpperCase();
-    if(response.status===401&&!recoveryAttempted&&authenticationRecovery&&path!=="/identity/session/bootstrap"){
+    const tenantNonDisclosure=response.status===404&&isTenantNonDisclosure(path,await response.clone().json().catch(()=>null));
+    if((response.status===401||tenantNonDisclosure)&&!recoveryAttempted&&authenticationRecovery&&path!=="/identity/session/bootstrap"){
       const recovered=await authenticationRecovery(method);
       if(recovered&&(method==="GET"||method==="HEAD"))return request<T>(path,options,true);
     }
@@ -51,6 +52,8 @@ async function request<T>(path: string, options?: RequestInit, recoveryAttempted
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
+
+function isTenantNonDisclosure(path:string,body:unknown):boolean{return /^\/workspaces\/[^/?]+(?:\/|$)/.test(path)&&!!body&&typeof body==="object"&&!Array.isArray(body)&&(body as {error?:unknown}).error==="Resource not found.";}
 
 function segment(value: string | number): string { return encodeURIComponent(String(value)); }
 

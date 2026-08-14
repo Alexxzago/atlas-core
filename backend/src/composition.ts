@@ -166,7 +166,7 @@ const verifyEmailService = new VerifyEmailService(identityTransaction, verificat
 const authenticationTransaction = new SqliteAuthenticationTransaction(database);
 const platformAdministrators = new PlatformAdministratorRepository(database);
 const platformAuthorizationService = new PlatformAuthorizationService(platformAdministrators);
-const authenticationService=new AuthenticationService(authenticationTransaction,randomProvider,new Sha256CredentialEnrollmentHashProvider(),passwordProvider,new Sha256SessionIdentifierProvider(),identityClock,verificationDelivery,verificationOrigin,process.env.NODE_ENV==="production",30*60*1000,12*60*60*1000,30*60*1000,60*1000,platformAdministrators);
+const authenticationService=new AuthenticationService(authenticationTransaction,randomProvider,new Sha256CredentialEnrollmentHashProvider(),passwordProvider,new Sha256SessionIdentifierProvider(),identityClock,verificationDelivery,verificationOrigin,process.env.NODE_ENV==="production",platformAdministrators);
 const passwordResetControllers = createPasswordResetControllers(new PasswordResetService(authenticationTransaction, randomProvider, verificationHashProvider, passwordProvider, identityClock, verificationDelivery, verificationOrigin));
 const requestOriginPolicy=new ExactRequestOriginPolicy(production?[verificationOrigin]:[verificationOrigin,"http://localhost:5173"],production);
 const authenticationControllers=createAuthenticationControllers(authenticationService,requestOriginPolicy);

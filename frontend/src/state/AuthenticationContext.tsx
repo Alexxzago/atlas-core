@@ -10,6 +10,7 @@ const AuthenticationContext = createContext<AuthenticationValue | null>(null);
 let bootstrapFlight: Promise<SessionBootstrapResponse> | null = null;
 function bootstrapSingleFlight(): Promise<SessionBootstrapResponse> { if (!bootstrapFlight) bootstrapFlight = atlasApi.bootstrapSession().finally(() => { bootstrapFlight = null; }); return bootstrapFlight; }
 const sessionIncarnationKey = "atlas-auth-session-incarnation";
+const sessionRenewalMs = 30 * 60 * 1000;
 function storedSessionIncarnation(): string | null { try { return localStorage.getItem(sessionIncarnationKey); } catch { return null; } }
 function storeSessionIncarnation(value: string | null): void { try { if (value) localStorage.setItem(sessionIncarnationKey, value); else localStorage.removeItem(sessionIncarnationKey); } catch { /* Storage is optional cross-tab coordination. */ } }
 
@@ -45,7 +46,7 @@ export function AuthenticationProvider({ children }: { readonly children: ReactN
     return logoutFlight.current;
   };
   useEffect(() => { if (typeof BroadcastChannel === "undefined") return; const instance = new BroadcastChannel("atlas-auth"); channel.current = instance; instance.onmessage = (event: MessageEvent<ChannelMessage>) => { const message = event.data; if (message.type === "csrf-rotated") { if (message.sessionIncarnation === sessionIncarnation.current) dispatch({ type: "token", csrfToken: message.csrfToken, csrfGeneration: message.csrfGeneration }); } else if (message.type === "session-replaced") { sessionIncarnation.current = message.sessionIncarnation; storeSessionIncarnation(message.sessionIncarnation); invalidate(); void bootstrap(); } else { storeSessionIncarnation(null); invalidate(); } }; return () => { instance.close(); channel.current = null; }; }, []);
-  useEffect(() => { let active = true; const start = (): void => { if (active && document.visibilityState === "visible") void bootstrap(); }; if (document.visibilityState === "visible") start(); else document.addEventListener("visibilitychange", start, { once: true }); return () => { active = false; document.removeEventListener("visibilitychange", start); }; }, []);
+  useEffect(() => { let active = true; const renew = (): void => { if (active && document.visibilityState === "visible") void bootstrap(); }; renew(); document.addEventListener("visibilitychange", renew); const interval = window.setInterval(renew, sessionRenewalMs); return () => { active = false; document.removeEventListener("visibilitychange", renew); window.clearInterval(interval); }; }, []);
   useEffect(() => { setAuthenticationRecovery(async (method) => { const recovered = await bootstrap(); if (!recovered && method !== "GET" && method !== "HEAD") publish({ type: "session-invalidated" }); return recovered; }); return () => setAuthenticationRecovery(null); });
   const value = useMemo<AuthenticationValue>(() => ({ state, bootstrap: () => bootstrap(), login, logout, invalidate }), [state]);
   return <AuthenticationContext.Provider value={value}>{children}</AuthenticationContext.Provider>;
