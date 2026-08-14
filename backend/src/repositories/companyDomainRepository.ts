@@ -37,6 +37,7 @@ function required(value: string | null, label: string): string { if (value === n
 function changed(value: number | bigint): boolean { return Number(value) > 0; }
 function isConstraint(error: unknown, column: string): boolean { return error instanceof Error && (error as SqliteConstraintError).errcode === 2067 && error.message.includes(column); }
 const eventTypes = new Set<CompanyEventType>(["CompanyCreated", "CompanyIdentityUpdated", "CompanyBrandingUpdated", "CompanyConfigurationUpdated", "CompanyConfigured", "CompanyActivated", "CompanyAttentionRequired", "CompanySuspended", "CompanyRestored", "CompanyArchived", "CompanyUpdated"]);
+const commercialCompanyCreationUnavailable = "workspace company creation is unavailable";
 
 function strictIsoTimestamp(value: string): boolean {
   const parsed = new Date(value);
@@ -89,7 +90,7 @@ export class CompanyDomainRepository implements CompanyDomainRepositoryPort {
     } catch (error: unknown) {
       if (isConstraint(error, "companies.workspace_id, companies.slug")) return { status: "slug_conflict" };
       if (isConstraint(error, "companies.workspace_id, companies.name_normalized")) return { status: "name_conflict" };
-      if (error instanceof Error && error.message === "workspace company creation is unavailable") return { status: "commercial_limit_reached" };
+      if (error instanceof Error && error.message.includes(commercialCompanyCreationUnavailable)) return { status: "commercial_limit_reached" };
       throw error;
     }
   }
