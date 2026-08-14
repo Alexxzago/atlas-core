@@ -15,6 +15,7 @@ import { CompanyApplicationService } from "../company/application/companyApplica
 import { createCompanyCoreControllers } from "../controllers/companyCoreController.js";
 import { createAuthorizedCompaniesRouter } from "../routes/authorizedCompanies.js";
 import { createWorkspaceContext } from "../types/workspaceContext.js";
+import { CommercialControlsRepository } from "../repositories/commercialControlsRepository.js";
 
 const now = "2026-07-30T10:00:00.000Z";
 
@@ -80,5 +81,26 @@ test("Company onboarding derives collision-resolved slugs and rejects client-own
     assert.equal(second.status, 201);
     assert.equal((await second.json() as { data: { slug: string } }).data.slug, "cafe-de-l-atlas-2");
     assert.equal((await fetch(base, { method: "POST", headers, body: JSON.stringify({ name: "Rejected", id: 7, slug: "client-slug", lifecycle: "operational" }) })).status, 400);
+  } finally { await http.close(); db.close(); }
+});
+
+test("Company onboarding enforces commercial company limits while Company Core remains strict", async () => {
+  const db = createDatabase(":memory:"), workspace = new WorkspaceRepository(db).resolveDefault(), context = createWorkspaceContext(workspace), controls = new CommercialControlsRepository(db);
+  db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('manage','active','en',?,?)").run(now, now);
+  const service = new CompanyApplicationService(new CompanyDomainRepository(db), { clock: { now: () => now } });
+  const app = express(); app.use(express.json()); app.use("/workspaces", createAuthorizedCompaniesRouter({ authentication: { cookieName: () => "atlas", current: (raw: string) => raw === "manage" ? { userId: "manage" } : null, validateCsrf: (_raw: string, csrf: string) => csrf === "valid" } as never, users: { findById: (id: string) => id === "manage" ? { id } : null } as never, authorization: { authorize: () => ({ userId: "manage", membershipId: "membership", role: "operator", capabilities: [] }) } as never, resolver: { resolve: () => context } as never, controllers: {} as never, assistantControllers: {} as never, companyCoreControllers: createCompanyCoreControllers(service) }));
+  const http = await server(app), base = `${http.origin}/workspaces/${workspace.key}/companies`, headers = { "content-type": "application/json", cookie: "atlas=manage", origin: http.origin, "sec-fetch-site": "same-origin", "x-csrf-token": "valid" };
+  try {
+    assert.equal((await fetch(base, { method: "POST", headers, body: JSON.stringify({ name: "Wrong contract", website: null }) })).status, 400);
+    assert.equal((await fetch(`${base}/onboarding`, { method: "POST", headers, body: JSON.stringify({ name: "First", website: null }) })).status, 201);
+    const current = controls.workspace(workspace.id)!;
+    assert.ok(controls.updateWorkspaceLimits("manage", workspace.id, { maxCompanies: 1, maxAssistantProfiles: null, maxActiveChannels: null }, current.version, now));
+    const denied = await fetch(`${base}/onboarding`, { method: "POST", headers, body: JSON.stringify({ name: "Second", website: "https://example.test" }) });
+    assert.equal(denied.status, 409); assert.equal((await denied.json() as { error: { code: string } }).error.code, "commercial_limit_reached");
+    const afterDenied = service.listCompanies(context); assert.equal(afterDenied.status, "success"); if (afterDenied.status === "success") assert.equal(afterDenied.companies.length, 1);
+    const raised = controls.workspace(workspace.id)!;
+    assert.ok(controls.updateWorkspaceLimits("manage", workspace.id, { maxCompanies: 2, maxAssistantProfiles: null, maxActiveChannels: null }, raised.version, now));
+    assert.equal((await fetch(`${base}/onboarding`, { method: "POST", headers, body: JSON.stringify({ name: "Second", website: "https://example.test" }) })).status, 201);
+    const afterRaised = service.listCompanies(context); assert.equal(afterRaised.status, "success"); if (afterRaised.status === "success") assert.equal(afterRaised.companies.length, 2);
   } finally { await http.close(); db.close(); }
 });

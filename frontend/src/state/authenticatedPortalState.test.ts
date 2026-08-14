@@ -113,19 +113,21 @@ test("current Company creation accepts the server DTO without auto-selecting it"
   assert.equal(state.companyCreating, false); assert.equal(state.notice?.key, "companies.createSuccess");
 });
 
-test("Company creation sends only the allowed payload with CSRF and same-origin credentials", async () => {
+test("Company creation sends the simple onboarding contract with CSRF and same-origin credentials", async () => {
   const originalFetch = globalThis.fetch; let capturedInput: string | URL | Request = ""; let capturedInit: RequestInit | undefined;
   globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     capturedInput = input; capturedInit = init;
     return new Response(JSON.stringify(companyB), { status: 201, headers: { "content-type": "application/json" } });
   };
   try {
-    assert.deepEqual(await atlasApi.createWorkspaceCompany("csrf-company", workspaceA.id,
-      { name: companyB.name, website: companyB.website }), companyB);
-    assert.equal(capturedInput, `/api/workspaces/${workspaceA.id}/companies`);
+    assert.deepEqual(await atlasApi.createOnboardingCompany("csrf-company", workspaceA.id,
+      { name: companyB.name, website: null }), companyB);
+    assert.equal(capturedInput, `/api/workspaces/${workspaceA.id}/companies/onboarding`);
     assert.equal(capturedInit?.method, "POST"); assert.equal(capturedInit?.credentials, "same-origin");
     assert.equal((capturedInit?.headers as Record<string, string>)["x-csrf-token"], "csrf-company");
-    assert.deepEqual(JSON.parse(String(capturedInit?.body)), { name: companyB.name, website: companyB.website });
+    assert.deepEqual(JSON.parse(String(capturedInit?.body)), { name: companyB.name, website: null });
+    await atlasApi.createOnboardingCompany("csrf-company", workspaceA.id, { name: companyB.name, website: "https://example.test" });
+    assert.deepEqual(JSON.parse(String(capturedInit?.body)), { name: companyB.name, website: "https://example.test" });
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -149,6 +151,8 @@ test("current Company create failure ends pending and no Workspace rejects creat
   state = authenticatedPortalReducer(state, { type: "companyCreateStarted", request });
   state = authenticatedPortalReducer(state, { type: "companyCreateFailed", request });
   assert.equal(state.companyCreating, false); assert.equal(state.notice?.key, "companies.operationError");
+  state = authenticatedPortalReducer({ ...initialAuthenticatedPortalState, selectedWorkspace: workspaceA, workspacesLoading: false, activeCompanyCreateRequest: request, companyCreating: true }, { type: "companyCreateFailed", request, noticeKey: "companies.commercialLimitReached" });
+  assert.equal(state.notice?.key, "companies.commercialLimitReached");
 });
 
 test("selecting another Company clears Profile and transient archive state", () => {

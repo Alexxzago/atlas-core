@@ -73,3 +73,35 @@ test("reports workspace selection when no persisted workspace can be restored", 
   expect(portal.current?.selectedWorkspace).toBeNull();
   expect(portal.current?.needsCompany).toBe(false);
 });
+
+test("simple company creation uses onboarding, reloads server state, and maps commercial quota errors", async () => {
+  const portal: { current: AuthenticatedPortalContextValue | null } = { current: null };
+  const company = { id: 7, name: "Created", website: null, lifecycle: "draft", version: 1, createdAt: "2026-01-01T00:00:00.000Z" };
+  let onboardingResult: Response = json({ data: company }); let companies = 0;
+  const fetchMock = vi.fn((input: string | URL | Request, _init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/workspaces") && !url.includes("/selected")) return Promise.resolve(json([workspace]));
+    if (url.endsWith("/workspaces/selected")) return Promise.resolve(json(workspace));
+    if (url.endsWith("/workspaces/workspace/select")) return Promise.resolve(json(workspace));
+    if (url.endsWith("/workspaces/workspace/companies/onboarding")) return Promise.resolve(onboardingResult);
+    if (url.endsWith("/workspaces/workspace/companies")) { companies += 1; return Promise.resolve(json(companies > 1 ? { data: [company] } : { data: [] })); }
+    return Promise.resolve(new Response("", { status: 404 }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  function Consumer(): null { portal.current = useAuthenticatedPortal(); return null; }
+  render(<AuthenticatedPortalProvider csrf="csrf"><Consumer /></AuthenticatedPortalProvider>);
+  await waitFor(() => expect(portal.current?.selectedWorkspace).toEqual(workspace));
+  expect(await portal.current?.createCompany({ name: "Created", website: null, phone: "ignored", email: "ignored" })).toBe(true);
+  const onboarding = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/companies/onboarding"));
+  expect(JSON.parse(String(onboarding?.[1]?.body))).toEqual({ name: "Created", website: null });
+  await waitFor(() => expect(portal.current?.companies).toHaveLength(1));
+  onboardingResult = new Response(JSON.stringify({ error: { code: "commercial_limit_reached", message: "limit" } }), { status: 409, headers: { "content-type": "application/json" } });
+  expect(await portal.current?.createCompany({ name: "Denied", website: null, phone: "", email: "" })).toBe(false);
+  await waitFor(() => expect(portal.current?.state.notice?.key).toBe("companies.commercialLimitReached"));
+  onboardingResult = new Response(JSON.stringify({ error: { code: "other", message: "other" } }), { status: 500, headers: { "content-type": "application/json" } });
+  expect(await portal.current?.createCompany({ name: "Failure", website: null, phone: "", email: "" })).toBe(false);
+  await waitFor(() => expect(portal.current?.state.notice?.key).toBe("companies.operationError"));
+  onboardingResult = new Response("", { status: 404 });
+  expect(await portal.current?.createCompany({ name: "Missing", website: null, phone: "", email: "" })).toBe(false);
+  await waitFor(() => expect(portal.current?.selectedWorkspace).toBeNull());
+});
