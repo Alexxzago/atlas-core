@@ -8,6 +8,7 @@ import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
 import { createWorkspaceContext } from "../types/workspaceContext.js";
 import { createCompany, reconstructCompany, updateCompanyBranding, type Company } from "../company/domain/company.js";
 import type { CompanyEvent } from "../company/application/ports.js";
+import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
 
 const createdAt = "2026-07-30T10:00:00.000Z";
 function company(id: number, workspaceId: number, name = "Atlas Realty"): Company {
@@ -16,6 +17,7 @@ function company(id: number, workspaceId: number, name = "Atlas Realty"): Compan
 function event(company: Company, id: string, sequence = 1): CompanyEvent {
   return { id, type: "CompanyCreated", aggregateVersion: company.version, sequence, occurredAt: company.updatedAt, actorId: null, payload: { companyId: company.id } };
 }
+function createFailureDatabase(message: string): SynchronousDatabase { return { isTransaction: false, prepare: () => ({ get: () => undefined, all: () => [], run: () => { throw new Error(message); } }), exec: () => {}, close: () => {} }; }
 
 test("Company domain repository persists, lists and isolates aggregate reads by Workspace", () => {
   const db = createDatabase(":memory:"), workspaces = new WorkspaceRepository(db);
@@ -69,6 +71,14 @@ test("Company repository maps uniqueness conflicts and persists ordered event ba
   const invalid = updateCompanyBranding(updated, { publicName: "Again" }, "2026-07-30T12:00:00.000Z");
   assert.throws(() => repository.saveWithEvents(context, invalid, 2, [{ ...event(invalid, "evt-701-invalid", 2), type: "CompanyBrandingUpdated" }]));
   db.close();
+});
+
+test("Company repository maps only canonical commercial-limit trigger errors, including libSQL wrappers", () => {
+  const context = { workspaceId: 1, workspaceKey: "default" }, current = company(704, context.workspaceId);
+  for (const message of ["workspace company creation is unavailable", "LibsqlError: SQLITE_CONSTRAINT: workspace company creation is unavailable"]) {
+    assert.equal(new CompanyDomainRepository(createFailureDatabase(message)).createWithEvents(context, current, [event(current, "evt-704")]).status, "commercial_limit_reached");
+  }
+  assert.throws(() => new CompanyDomainRepository(createFailureDatabase("LibsqlError: SQLITE_CONSTRAINT: unrelated failure")).createWithEvents(context, current, [event(current, "evt-704")]), /unrelated failure/);
 });
 
 test("migration 26 backfills Company core columns, validates names and preserves legacy status", () => {
