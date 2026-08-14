@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, expect, test, vi } from "vitest";
 import { I18nProvider } from "../i18n/I18nContext";
 import { AuthenticationProvider, useAuthentication } from "./AuthenticationContext";
+import { atlasApi } from "../api/atlasApi";
 
 function json(value: unknown): Response { return new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } }); }
 class TestBroadcastChannel {
@@ -17,13 +18,17 @@ class TestBroadcastChannel {
 
 function Probe(): React.JSX.Element { const { state, logout } = useAuthentication(); return <><p>{state.status === "authenticated" ? `${state.identity.email}:${state.csrfToken}:${state.csrfGeneration}` : state.status}</p><button onClick={() => void logout()}>Logout</button></>; }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); TestBroadcastChannel.instances = []; });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); TestBroadcastChannel.instances = []; });
 
 test("owns bootstrap authentication state", async () => {
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(json({ status: "authenticated", identity: { userId: "user", email: "customer@example.test", locale: "en", status: "active", idleExpiresAt: "2026-01-01", absoluteExpiresAt: "2026-01-01" }, csrfToken: "csrf", csrfGeneration: 1 }))));
   render(<I18nProvider><AuthenticationProvider><Probe /></AuthenticationProvider></I18nProvider>);
   await waitFor(() => expect(screen.getByText("customer@example.test:csrf:1")).toBeTruthy());
 });
+
+test("renews a visible session once every thirty minutes",async()=>{vi.useFakeTimers();const response=(csrfToken:string,csrfGeneration:number)=>json({status:"authenticated",identity:{userId:"user",email:"customer@example.test",locale:"en",status:"active",idleExpiresAt:"2026-01-01",absoluteExpiresAt:"2026-01-01"},csrfToken,csrfGeneration});const fetch=vi.fn().mockResolvedValueOnce(response("csrf-a",1)).mockResolvedValueOnce(response("csrf-b",2));vi.stubGlobal("fetch",fetch);render(<I18nProvider><AuthenticationProvider><Probe /></AuthenticationProvider></I18nProvider>);await vi.advanceTimersByTimeAsync(0);expect(fetch).toHaveBeenCalledTimes(1);await vi.advanceTimersByTimeAsync(30*60*1000);expect(fetch).toHaveBeenCalledTimes(2);});
+
+test("a generic tenant 404 with an expired session invalidates authentication",async()=>{const authenticated=json({status:"authenticated",identity:{userId:"user",email:"customer@example.test",locale:"en",status:"active",idleExpiresAt:"2026-01-01",absoluteExpiresAt:"2026-01-01"},csrfToken:"csrf",csrfGeneration:1});vi.stubGlobal("fetch",vi.fn().mockResolvedValueOnce(authenticated).mockResolvedValueOnce(new Response(JSON.stringify({error:"Resource not found."}),{status:404,headers:{"content-type":"application/json"}})).mockResolvedValueOnce(new Response(JSON.stringify({status:"unauthenticated"}),{status:401,headers:{"content-type":"application/json"}})));render(<I18nProvider><AuthenticationProvider><Probe /></AuthenticationProvider></I18nProvider>);await screen.findByText("customer@example.test:csrf:1");await expect(atlasApi.listWorkspaceCompanies("wsp_one")).rejects.toMatchObject({status:404});await screen.findByText("unauthenticated");});
 
 test("retries logout once with the CSRF token bootstrapped from the shared replacement session", async () => {
   vi.stubGlobal("fetch", vi.fn()
