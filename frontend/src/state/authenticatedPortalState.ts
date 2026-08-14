@@ -99,7 +99,7 @@ type Action =
   | { type: "companiesNotFound"; request: RequestContext }
   | { type: "companyCreateStarted"; request: RequestContext }
   | { type: "companyCreated"; request: RequestContext; company: Company }
-  | { type: "companyCreateFailed"; request: RequestContext }
+  | { type: "companyCreateFailed"; request: RequestContext; noticeKey?: "companies.commercialLimitReached" }
   | { type: "companyCreateNotFound"; request: RequestContext }
   | { type: "companySelected"; companyId: number }
   | { type: "companyRefreshed"; workspaceId: string; company: Company }
@@ -208,7 +208,7 @@ export function authenticatedPortalReducer(state: AuthenticatedPortalState, acti
         notice: { type: "success", key: "companies.createSuccess" } } : state;
     case "companyCreateFailed": return matches(state, state.activeCompanyCreateRequest, action.request)
       ? { ...state, companyCreating: false, activeCompanyCreateRequest: null,
-        notice: { type: "error", key: "companies.operationError" } } : state;
+        notice: { type: "error", key: action.noticeKey ?? "companies.operationError" } } : state;
     case "companyCreateNotFound": return matches(state, state.activeCompanyCreateRequest, action.request)
       ? clearCompanies({ ...state, selectedWorkspace: null, pendingWorkspaceId: null,
         notice: { type: "error", key: "portal.resourceUnavailable" } }) : state;

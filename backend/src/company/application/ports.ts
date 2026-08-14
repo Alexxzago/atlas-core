@@ -16,7 +16,8 @@ export interface CompanyEvent {
 export type CreateCompanyPersistenceResult =
   | { readonly status: "created"; readonly company: Company }
   | { readonly status: "slug_conflict" }
-  | { readonly status: "name_conflict" };
+  | { readonly status: "name_conflict" }
+  | { readonly status: "commercial_limit_reached" };
 
 export type SaveCompanyPersistenceResult =
   | { readonly status: "saved"; readonly company: Company }

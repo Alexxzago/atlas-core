@@ -82,6 +82,7 @@ export type CompanyApplicationFailure =
   | { readonly status: "slug_conflict" }
   | { readonly status: "name_conflict" }
   | { readonly status: "version_conflict" }
+  | { readonly status: "commercial_limit_reached" }
   | { readonly status: "persistence_failure" };
 
 export type CompanyCommandResult = { readonly status: "success"; readonly company: Company } | CompanyApplicationFailure;

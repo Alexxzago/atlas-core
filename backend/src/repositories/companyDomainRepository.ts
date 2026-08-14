@@ -89,6 +89,7 @@ export class CompanyDomainRepository implements CompanyDomainRepositoryPort {
     } catch (error: unknown) {
       if (isConstraint(error, "companies.workspace_id, companies.slug")) return { status: "slug_conflict" };
       if (isConstraint(error, "companies.workspace_id, companies.name_normalized")) return { status: "name_conflict" };
+      if (error instanceof Error && error.message === "workspace company creation is unavailable") return { status: "commercial_limit_reached" };
       throw error;
     }
   }

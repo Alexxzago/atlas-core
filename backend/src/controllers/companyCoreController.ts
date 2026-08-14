@@ -124,6 +124,7 @@ function readinessResponse(assessment: ReadinessAssessment): ReadinessAssessment
 function respondApplication(res: Response, result: Exclude<CompanyApplicationFailure, { readonly status: "validation_failed" }> | { readonly status: "validation_failed"; readonly message: string } | { readonly status: "persistence_failure" }): void {
   if (result.status === "validation_failed") { res.status(400).json({ error: { code: result.status, message: result.message } }); return; }
   if (result.status === "not_found") { res.status(404).json({ error: { code: result.status, message: "Company was not found." } }); return; }
+  if (result.status === "commercial_limit_reached") { res.status(409).json({ error: { code: result.status, message: "Workspace company limit has been reached." } }); return; }
   if (result.status === "slug_conflict" || result.status === "name_conflict" || result.status === "version_conflict") { res.status(409).json({ error: { code: result.status, message: "Company update conflicts with current state." } }); return; }
   res.status(500).json({ error: { code: "company_unavailable", message: "Company service is temporarily unavailable." } });
 }

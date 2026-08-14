@@ -119,16 +119,16 @@ export function AuthenticatedPortalProvider({ csrf, children }: Props): React.JS
 
   const createCompany = async (input: CompanyInput): Promise<boolean> => {
     const workspace = stateRef.current.selectedWorkspace; if (!workspace) return false; companyCreateAbort.current?.abort(); const controller = new AbortController(); companyCreateAbort.current = controller; const request = nextRequest(stateRef.current.workspaceGeneration, workspace.id); const workspaceIntentId = workspaceSelectionIntent.current; dispatch({ type: "companyCreateStarted", request });
-    try { const company = await atlasApi.createWorkspaceCompany(csrf, workspace.id, input, controller.signal); if (!isCurrentIntent(workspaceSelectionIntent.current, workspaceIntentId)) return false; dispatch({ type: "companyCreated", request, company }); await loadCompanies(workspace, request.generation); return true; }
-    catch (error: unknown) { if (aborted(error)) { dispatch({ type: "requestAborted" }); return false; } if (!isCurrentIntent(workspaceSelectionIntent.current, workspaceIntentId)) return false; dispatch(error instanceof ApiError && error.status === 404 ? { type: "companyCreateNotFound", request } : { type: "companyCreateFailed", request }); return false; }
+    try { const company = await atlasApi.createOnboardingCompany(csrf, workspace.id, { name: input.name, ...(input.website === undefined ? {} : { website: input.website }) }, controller.signal); if (!isCurrentIntent(workspaceSelectionIntent.current, workspaceIntentId)) return false; dispatch({ type: "companyCreated", request, company }); await loadCompanies(workspace, request.generation); return true; }
+    catch (error: unknown) { if (aborted(error)) { dispatch({ type: "requestAborted" }); return false; } if (!isCurrentIntent(workspaceSelectionIntent.current, workspaceIntentId)) return false; if (error instanceof ApiError && error.status === 404) dispatch({ type: "companyCreateNotFound", request }); else if (error instanceof ApiError && error.code === "commercial_limit_reached") dispatch({ type: "companyCreateFailed", request, noticeKey: "companies.commercialLimitReached" }); else dispatch({ type: "companyCreateFailed", request }); return false; }
   };
   const createOnboardingCompany = async (name: string): Promise<number | null> => {
     const workspace = stateRef.current.selectedWorkspace;
     if (!workspace) return null;
     try {
-      const created = await atlasApi.createOnboardingCompany(csrf, workspace.id, name);
+      const created = await atlasApi.createOnboardingCompany(csrf, workspace.id, { name });
       await loadCompanies(workspace, stateRef.current.workspaceGeneration);
-      return await selectCompany(created.data.id) ? created.data.id : null;
+      return await selectCompany(created.id) ? created.id : null;
     } catch { return null; }
   };
 
