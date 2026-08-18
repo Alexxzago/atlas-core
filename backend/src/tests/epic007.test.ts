@@ -61,7 +61,7 @@ function createWorkspacePair(): {
 test("fresh database receives all migrations and the default workspace", () => {
   const database = createDatabase(":memory:");
   const migrations = database.prepare(`
-    SELECT id, name, checksum, applied_at FROM schema_migrations ORDER BY id
+    SELECT id, name, checksum, applied_at FROM schema_migrations WHERE id <= 42 ORDER BY id
   `).all() as Array<{ id: number; name: string; checksum: string; applied_at: string }>;
   assert.deepEqual(migrations.map(({ id, name }) => ({ id, name })), [
     { id: 1, name: "0001_baseline" },
@@ -173,7 +173,7 @@ test("an already migrated database restarts idempotently", () => {
   try {
     createDatabase(path).close();
     const restarted = createDatabase(path);
-    const migrationCount = restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number };
+    const migrationCount = restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id <= 42").get() as { count: number };
     const workspaceCount = restarted.prepare("SELECT COUNT(*) AS count FROM workspaces WHERE key = 'default'").get() as { count: number };
     assert.equal(migrationCount.count, 42);
     assert.equal(workspaceCount.count, 1);

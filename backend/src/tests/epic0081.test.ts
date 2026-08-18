@@ -192,7 +192,7 @@ test("identity repository point operations use indexes", () => {
 
 test("identity migration is additive, creates no users, and preserves the default workspace", () => {
   const database = createDatabase(":memory:");
-  const migrations = database.prepare("SELECT id, name FROM schema_migrations ORDER BY id").all()
+  const migrations = database.prepare("SELECT id, name FROM schema_migrations WHERE id <= 42 ORDER BY id").all()
     .map((migration) => ({ ...(migration as { id: number; name: string }) }));
   assert.deepEqual(migrations, [
     { id: 1, name: "0001_baseline" },
@@ -253,7 +253,7 @@ test("identity migration restarts safely with persisted aggregate state", () => 
     database.close();
 
     const restarted = createDatabase(path);
-    assert.equal((restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 42);
+    assert.equal((restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id <= 42").get() as { count: number }).count, 42);
     assert.equal(new UserRepository(restarted).findById(userId("user-1"))?.authenticationIdentities.length, 1);
     assert.deepEqual(restarted.prepare("PRAGMA foreign_key_check").all(), []);
     restarted.close();

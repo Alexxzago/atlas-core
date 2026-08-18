@@ -1195,6 +1195,89 @@ const migrations: Migration[] = [
     CREATE TRIGGER live_data_observations_no_delete BEFORE DELETE ON live_data_observations BEGIN SELECT RAISE(ABORT,'live data observations are append-only'); END;
   `);}},
   { id:42,name:"0042_live_data_observation_trace_link",checksumSource:"live-data-observation-one-tool-trace-forward-compatibility",apply(_database):void{}},
+  { id:43,name:"0043_scheduling_domain_core",checksumSource:"scheduling-resources-services-availability-holds-bookings-single-resource-v1",apply(database):void{database.exec(`
+    CREATE TABLE scheduling_locations(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,name TEXT NOT NULL,address TEXT,timezone TEXT NOT NULL,
+      active INTEGER NOT NULL CHECK(active IN (0,1)),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      UNIQUE(workspace_id,company_id,id)
+    );
+    CREATE INDEX idx_scheduling_locations_scope ON scheduling_locations(workspace_id,company_id,active,id);
+    CREATE TABLE scheduling_resources(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,location_id TEXT,name TEXT NOT NULL,
+      timezone TEXT NOT NULL,capacity INTEGER NOT NULL CHECK(capacity BETWEEN 1 AND 10000),active INTEGER NOT NULL CHECK(active IN (0,1)),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id,company_id,location_id) REFERENCES scheduling_locations(workspace_id,company_id,id) ON DELETE RESTRICT,
+      UNIQUE(workspace_id,company_id,id)
+    );
+    CREATE INDEX idx_scheduling_resources_scope ON scheduling_resources(workspace_id,company_id,active,id);
+    CREATE TABLE scheduling_services(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,resource_id TEXT NOT NULL,
+      name TEXT NOT NULL,duration_minutes INTEGER NOT NULL CHECK(duration_minutes BETWEEN 1 AND 1440),buffer_before_minutes INTEGER NOT NULL CHECK(buffer_before_minutes BETWEEN 0 AND 1440),buffer_after_minutes INTEGER NOT NULL CHECK(buffer_after_minutes BETWEEN 0 AND 1440),slot_granularity_minutes INTEGER NOT NULL CHECK(slot_granularity_minutes BETWEEN 1 AND 1440),minimum_lead_minutes INTEGER NOT NULL CHECK(minimum_lead_minutes BETWEEN 0 AND 525600),maximum_horizon_days INTEGER NOT NULL CHECK(maximum_horizon_days BETWEEN 1 AND 730),active INTEGER NOT NULL CHECK(active IN (0,1)),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id,company_id,resource_id) REFERENCES scheduling_resources(workspace_id,company_id,id) ON DELETE RESTRICT,
+      UNIQUE(workspace_id,company_id,id)
+    );
+    CREATE INDEX idx_scheduling_services_scope ON scheduling_services(workspace_id,company_id,resource_id,active,id);
+    CREATE TABLE scheduling_working_windows(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,resource_id TEXT NOT NULL,
+      weekday INTEGER NOT NULL CHECK(weekday BETWEEN 0 AND 6),start_time TEXT NOT NULL,end_time TEXT NOT NULL,created_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id,resource_id) REFERENCES scheduling_resources(workspace_id,company_id,id) ON DELETE CASCADE,
+      UNIQUE(resource_id,weekday,start_time,end_time),CHECK(length(start_time)=5 AND length(end_time)=5 AND start_time<end_time)
+    );
+    CREATE INDEX idx_scheduling_working_windows_scope ON scheduling_working_windows(workspace_id,company_id,resource_id,weekday,start_time);
+    CREATE TABLE scheduling_availability_exceptions(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,resource_id TEXT NOT NULL,local_date TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('closed','open')),start_time TEXT,end_time TEXT,
+      FOREIGN KEY(workspace_id,company_id,resource_id) REFERENCES scheduling_resources(workspace_id,company_id,id) ON DELETE CASCADE,
+      CHECK((start_time IS NULL AND end_time IS NULL) OR (length(start_time)=5 AND length(end_time)=5 AND start_time<end_time)),
+      UNIQUE(workspace_id,company_id,resource_id,local_date,kind,start_time,end_time)
+    );
+    CREATE INDEX idx_scheduling_exceptions_scope ON scheduling_availability_exceptions(workspace_id,company_id,resource_id,local_date);
+    CREATE TABLE scheduling_busy_intervals(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,resource_id TEXT NOT NULL,start_at TEXT NOT NULL,end_at TEXT NOT NULL,
+      units INTEGER NOT NULL CHECK(units BETWEEN 1 AND 10000),source TEXT NOT NULL,external_reference TEXT,created_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id,resource_id) REFERENCES scheduling_resources(workspace_id,company_id,id) ON DELETE CASCADE,
+      CHECK(start_at<end_at),UNIQUE(workspace_id,company_id,resource_id,source,external_reference)
+    );
+    CREATE INDEX idx_scheduling_busy_occupancy ON scheduling_busy_intervals(workspace_id,company_id,resource_id,start_at,end_at);
+    CREATE TABLE scheduling_holds(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,service_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,start_at TEXT NOT NULL,end_at TEXT NOT NULL,occupied_start_at TEXT NOT NULL,occupied_end_at TEXT NOT NULL,expires_at TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','released','expired')),
+      created_at TEXT NOT NULL,released_at TEXT,
+      FOREIGN KEY(workspace_id,company_id,service_id) REFERENCES scheduling_services(workspace_id,company_id,id) ON DELETE CASCADE,
+      CHECK(start_at<end_at),CHECK(occupied_start_at<occupied_end_at),CHECK(expires_at>=created_at),CHECK((state='active' AND released_at IS NULL) OR (state IN ('released','expired') AND released_at IS NOT NULL)),
+      UNIQUE(workspace_id,company_id,idempotency_key)
+    );
+    CREATE INDEX idx_scheduling_holds_conflicts ON scheduling_holds(workspace_id,company_id,service_id,state,start_at,end_at,expires_at);
+    CREATE TABLE scheduling_bookings(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,service_id TEXT NOT NULL,hold_id TEXT UNIQUE,reference TEXT NOT NULL,
+      start_at TEXT NOT NULL,end_at TEXT NOT NULL,occupied_start_at TEXT NOT NULL,occupied_end_at TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('confirmed','cancelled')),created_at TEXT NOT NULL,cancelled_at TEXT,
+      FOREIGN KEY(workspace_id,company_id,service_id) REFERENCES scheduling_services(workspace_id,company_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(hold_id) REFERENCES scheduling_holds(id) ON DELETE SET NULL,
+      CHECK(start_at<end_at),CHECK(occupied_start_at<occupied_end_at),CHECK((state='confirmed' AND cancelled_at IS NULL) OR (state='cancelled' AND cancelled_at IS NOT NULL)),
+      UNIQUE(workspace_id,company_id,reference)
+    );
+    CREATE INDEX idx_scheduling_bookings_conflicts ON scheduling_bookings(workspace_id,company_id,service_id,state,start_at,end_at);
+    CREATE TRIGGER scheduling_booking_hold_scope BEFORE INSERT ON scheduling_bookings WHEN NEW.hold_id IS NOT NULL AND NOT EXISTS(
+      SELECT 1 FROM scheduling_holds h WHERE h.id=NEW.hold_id AND h.workspace_id=NEW.workspace_id AND h.company_id=NEW.company_id AND h.service_id=NEW.service_id
+    ) BEGIN SELECT RAISE(ABORT,'Scheduling booking hold scope is invalid'); END;
+  `);}},
+  { id:44,name:"0044_scheduling_normalized_names",checksumSource:"scheduling-location-resource-service-normalized-name-backfill-unique-v1",apply(database):void{const tables=["scheduling_locations","scheduling_resources","scheduling_services"];if(!tables.every((table)=>database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)))return;for(const table of tables){const columns=database.prepare(`PRAGMA table_info(${table})`).all() as Array<{name:string}>;if(!columns.some((column)=>column.name==="normalized_name")){database.exec(`ALTER TABLE ${table} ADD COLUMN normalized_name TEXT NOT NULL DEFAULT '';UPDATE ${table} SET normalized_name=lower(trim(name));`);}}database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduling_locations_normalized_name ON scheduling_locations(workspace_id,company_id,normalized_name);CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduling_resources_normalized_name ON scheduling_resources(workspace_id,company_id,normalized_name);CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduling_services_normalized_name ON scheduling_services(workspace_id,company_id,normalized_name);`);}},
+  { id:45,name:"0045_scheduling_busy_interval_validation",checksumSource:"scheduling-busy-interval-source-reference-trigger-validation-v1",apply(database):void{if(!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduling_busy_intervals'").get())return;database.exec(`
+    CREATE TRIGGER scheduling_busy_intervals_validate_insert BEFORE INSERT ON scheduling_busy_intervals
+    WHEN NEW.source NOT IN ('internal_block','external_observed') OR NOT (
+      (NEW.source='internal_block' AND NEW.external_reference IS NULL) OR
+      (NEW.source='external_observed' AND NEW.external_reference IS NOT NULL AND length(NEW.external_reference) BETWEEN 1 AND 200)
+    ) BEGIN SELECT RAISE(ABORT,'Scheduling busy interval source or reference is invalid'); END;
+    CREATE TRIGGER scheduling_busy_intervals_validate_update BEFORE UPDATE ON scheduling_busy_intervals
+    WHEN NEW.source NOT IN ('internal_block','external_observed') OR NOT (
+      (NEW.source='internal_block' AND NEW.external_reference IS NULL) OR
+      (NEW.source='external_observed' AND NEW.external_reference IS NOT NULL AND length(NEW.external_reference) BETWEEN 1 AND 200)
+    ) BEGIN SELECT RAISE(ABORT,'Scheduling busy interval source or reference is invalid'); END;
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {
