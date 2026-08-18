@@ -27,6 +27,6 @@ export type ToolTraceState = "requested" | "completed" | "failed";
 export interface ToolExecutionTrace { readonly id: string; readonly assistantExecutionRecordId: string; readonly modelToolCallId: string; readonly toolName: string; readonly state: ToolTraceState; }
 export interface ToolExecutionTraceRepositoryPort {
   createRequested(value: ToolExecutionTrace & { readonly workspaceId: number; readonly companyId: number; readonly assistantProfileId: string; readonly auditInput: unknown; readonly requestedAt: string }): Promise<ToolExecutionTrace>;
-  complete(id: string, expectedState: "requested", value: { readonly auditOutput: unknown; readonly completedAt: string; readonly durationMilliseconds: number }): Promise<boolean>;
+  complete(id: string, expectedState: "requested", value: { readonly auditOutput: unknown; readonly outputReference?: string | null; readonly completedAt: string; readonly durationMilliseconds: number }): Promise<boolean>;
   fail(id: string, expectedState: "requested", value: { readonly errorCode: string; readonly completedAt: string; readonly durationMilliseconds: number }): Promise<boolean>;
 }

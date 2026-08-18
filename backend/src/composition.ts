@@ -142,6 +142,11 @@ import { ConversationIntelligenceRepository } from "./repositories/conversationI
 import { ConversationIntelligenceService } from "./conversationIntelligence/services/conversationIntelligenceService.js";
 import { ConversationToolMemoryRepository } from "./repositories/conversationToolMemoryRepository.js";
 import { ConversationToolMemoryCoordinator } from "./conversationIntelligence/services/conversationToolMemoryCoordinator.js";
+import { FakeLiveDataProvider } from "./liveData/infrastructure/fakeLiveDataProvider.js";
+import { LiveDataService } from "./liveData/services/liveDataService.js";
+import { LiveDataToolAvailabilityPolicy } from "./liveData/services/liveDataToolAvailabilityPolicy.js";
+import { LiveDataObservationRepository } from "./repositories/liveDataObservationRepository.js";
+import { liveDataReadToolDefinition } from "./liveData/application/liveDataReadToolDefinition.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -199,7 +204,9 @@ const assistantCapabilityRepository=new AssistantCapabilityRepository(new Synchr
 const assistantCapabilityService=new AssistantCapabilityService(productionAssistantCapabilityCatalog,assistantCapabilityRepository,identityClock);
 configureProductionAssistantCapabilityControllers({list:context=>createListAssistantCapabilitiesController(assistantCapabilityService,context),replace:(context,actor)=>createReplaceAssistantCapabilitiesController(assistantCapabilityService,context,actor)});
 const integrationConnections = new IntegrationConnectionRepository(new SynchronousSqlDatabaseAdapter(database));
-const productionAssistantTools=new AssistantToolOrchestrator(geminiProvider.toolModel(),new ToolRegistry(productionAssistantCapabilityCatalog,[]),assistantCapabilityRepository,new IntegrationToolAvailabilityPolicy(new NoIntegrationToolAvailabilityPolicy(),integrationConnections),new ToolExecutionService(new AssistantToolExecutionTraceRepository(new SynchronousSqlDatabaseAdapter(database)),identityClock),identityClock);
+const liveDataProvider = new FakeLiveDataProvider();
+const liveDataService = new LiveDataService(new LiveDataObservationRepository(new SynchronousSqlDatabaseAdapter(database)), integrationConnections, liveDataProvider, identityClock);
+const productionAssistantTools=new AssistantToolOrchestrator(geminiProvider.toolModel(),new ToolRegistry(productionAssistantCapabilityCatalog,[liveDataReadToolDefinition(liveDataService)]),assistantCapabilityRepository,new LiveDataToolAvailabilityPolicy(new IntegrationToolAvailabilityPolicy(new NoIntegrationToolAvailabilityPolicy(),integrationConnections),integrationConnections),new ToolExecutionService(new AssistantToolExecutionTraceRepository(new SynchronousSqlDatabaseAdapter(database)),identityClock),identityClock);
 const webChatConnectionService = new WebChatConnectionService(companyRepository, new AssistantProfileRepository(database), new WebChatConnectionRepository(database), identityClock);
 const whatsAppConnections = new WhatsAppConnectionRepository(database);
 const whatsAppCredentialCipher = new AesGcmWhatsAppCredentialCipher(whatsAppPlatformEncryptionKey(process.env.WHATSAPP_PLATFORM_ENCRYPTION_KEY));

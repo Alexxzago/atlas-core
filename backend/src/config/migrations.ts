@@ -1180,6 +1180,21 @@ const migrations: Migration[] = [
     CREATE TRIGGER integration_connection_audit_no_update BEFORE UPDATE ON integration_connection_audit_events BEGIN SELECT RAISE(ABORT,'integration audit events are append-only'); END;
     CREATE TRIGGER integration_connection_audit_no_delete BEFORE DELETE ON integration_connection_audit_events BEGIN SELECT RAISE(ABORT,'integration audit events are append-only'); END;
   `);}},
+  { id:41,name:"0041_live_data_observations",checksumSource:"live-data-observations-v1|workspace-company-scoped|bounded-append-only",apply(database):void{database.exec(`
+    CREATE TABLE live_data_observations(
+      id TEXT PRIMARY KEY,tool_trace_id TEXT NOT NULL UNIQUE REFERENCES tool_execution_traces(id) ON DELETE CASCADE,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,
+      resource_type TEXT NOT NULL CHECK(length(resource_type) BETWEEN 1 AND 100),provider TEXT NOT NULL CHECK(length(provider) BETWEEN 1 AND 100),
+      outcome TEXT NOT NULL CHECK(outcome IN ('confirmed','empty','not_found','unavailable')),observed_at TEXT NOT NULL,fetched_at TEXT NOT NULL,expires_at TEXT NOT NULL,
+      freshness TEXT NOT NULL CHECK(freshness IN ('fresh','stale','expired')),safe_payload_json TEXT NOT NULL CHECK(json_valid(safe_payload_json)) CHECK(length(safe_payload_json)<=8512),
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      CHECK(fetched_at>=observed_at)
+    );
+    CREATE INDEX idx_live_data_observations_scope_resource_observed ON live_data_observations(workspace_id,company_id,resource_type,observed_at DESC,id DESC);
+    CREATE TRIGGER live_data_observations_no_update BEFORE UPDATE ON live_data_observations BEGIN SELECT RAISE(ABORT,'live data observations are append-only'); END;
+    CREATE TRIGGER live_data_observations_no_delete BEFORE DELETE ON live_data_observations BEGIN SELECT RAISE(ABORT,'live data observations are append-only'); END;
+  `);}},
+  { id:42,name:"0042_live_data_observation_trace_link",checksumSource:"live-data-observation-one-tool-trace-forward-compatibility",apply(_database):void{}},
 ];
 
 function migrationChecksum(migration: Migration): string {
