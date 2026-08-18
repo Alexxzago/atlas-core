@@ -7,6 +7,7 @@ import type { AssistantProfileRepositoryPort } from "../application/ports.js";
 import { assistantProfileId } from "../domain/assistantProfile.js";
 import { AssistantProfileExecutionPolicy, AssistantProfilePolicyError } from "../domain/assistantProfilePolicies.js";
 import type { OperationalAssistantRuntime } from "./operationalAssistantRuntime.js";
+import type { LexicalKnowledgeRetrievalService } from "../../knowledgeV2/services/knowledgeRetrievalService.js";
 
 export class OperationalAssistantExecutionValidationError extends Error {}
 export class OperationalAssistantExecutionNotFoundError extends Error {}
@@ -25,6 +26,7 @@ export class OperationalAssistantExecutionService {
     private readonly runtime: OperationalAssistantRuntime,
     private readonly budget: OperationalExecutionBudgetPort,
     private readonly provider: string,
+    private readonly retrieval?: LexicalKnowledgeRetrievalService,
   ) {}
 
   public async execute(context: WorkspaceContext, companyIdValue: unknown, input: unknown): Promise<AssistantExecutionResult> {
@@ -47,6 +49,7 @@ export class OperationalAssistantExecutionService {
     try {
       return (await this.runtime.execute(company, profile, knowledge, parsed.message, [], {
         purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
+        ...(this.retrieval ? { retrieval: this.retrieval.context(context, scopedCompanyId, knowledge.sourceRevisionIds, parsed.message) } : {}),
       })).response;
     } finally { lease.release(); }
   }

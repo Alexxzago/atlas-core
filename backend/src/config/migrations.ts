@@ -1301,6 +1301,15 @@ const migrations: Migration[] = [
     ALTER TABLE scheduling_booking_mutations_v47 RENAME TO scheduling_booking_mutations;
     CREATE INDEX idx_scheduling_booking_mutations_lookup ON scheduling_booking_mutations(workspace_id,company_id,operation,idempotency_key);
   `);}},
+  { id:48,name:"0048_knowledge_retrieval_v2",checksumSource:"knowledge-v2-document-chunk-index-provenance-lexical-retrieval-v1",apply(database):void{database.exec(`
+    CREATE TABLE knowledge_v2_documents(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,source_id TEXT NOT NULL,source_revision_id TEXT NOT NULL UNIQUE,content_digest TEXT NOT NULL,normalized_text TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(source_id) REFERENCES knowledge_sources(id) ON DELETE CASCADE,FOREIGN KEY(source_revision_id) REFERENCES knowledge_source_revisions(id) ON DELETE CASCADE);
+    CREATE INDEX idx_knowledge_v2_documents_scope ON knowledge_v2_documents(workspace_id,company_id,source_revision_id);
+    CREATE TABLE knowledge_v2_chunks(id TEXT PRIMARY KEY,document_id TEXT NOT NULL,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,ordinal INTEGER NOT NULL,text TEXT NOT NULL,normalized_text TEXT NOT NULL,byte_length INTEGER NOT NULL,FOREIGN KEY(document_id) REFERENCES knowledge_v2_documents(id) ON DELETE CASCADE,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,UNIQUE(document_id,ordinal),CHECK(ordinal>=0),CHECK(byte_length>0));
+    CREATE INDEX idx_knowledge_v2_chunks_scope ON knowledge_v2_chunks(workspace_id,company_id,document_id,ordinal);
+    CREATE TABLE knowledge_v2_chunk_provenance(chunk_id TEXT PRIMARY KEY,source_revision_id TEXT NOT NULL,content_digest TEXT NOT NULL,character_start INTEGER NOT NULL,character_end INTEGER NOT NULL,FOREIGN KEY(chunk_id) REFERENCES knowledge_v2_chunks(id) ON DELETE CASCADE,FOREIGN KEY(source_revision_id) REFERENCES knowledge_source_revisions(id) ON DELETE CASCADE,CHECK(character_start>=0),CHECK(character_end>character_start));
+    CREATE TABLE knowledge_v2_indexes(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,source_revision_id TEXT NOT NULL UNIQUE,document_id TEXT NOT NULL UNIQUE,kind TEXT NOT NULL CHECK(kind='lexical'),status TEXT NOT NULL CHECK(status IN ('building','ready','failed')),chunk_count INTEGER NOT NULL,created_at TEXT NOT NULL,completed_at TEXT,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(source_revision_id) REFERENCES knowledge_source_revisions(id) ON DELETE CASCADE,FOREIGN KEY(document_id) REFERENCES knowledge_v2_documents(id) ON DELETE CASCADE,CHECK(chunk_count>=0),CHECK((status='ready' AND completed_at IS NOT NULL) OR (status!='ready')));
+    CREATE INDEX idx_knowledge_v2_indexes_ready ON knowledge_v2_indexes(workspace_id,company_id,status,source_revision_id);
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

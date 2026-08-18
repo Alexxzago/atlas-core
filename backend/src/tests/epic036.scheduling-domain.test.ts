@@ -51,7 +51,7 @@ test("EPIC036 upgrades the original 0043 schema additively and remains restart-s
     assert.doesNotMatch(originalBusy, /source IN|external_reference IS NULL|length\(external_reference\)/);
     runMigrations(from43);
     assert.equal((from43.prepare("SELECT checksum FROM schema_migrations WHERE id=43").get() as { checksum: string }).checksum, checksum43);
-    assert.equal((from43.prepare("SELECT COUNT\(\*\) AS count FROM schema_migrations").get() as { count: number }).count, 47);
+    assert.equal((from43.prepare("SELECT COUNT\(\*\) AS count FROM schema_migrations").get() as { count: number }).count, 48);
     assert.ok(from43.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name='scheduling_busy_intervals_validate_insert'").get());
     const inventory = from43.prepare("SELECT id,name,checksum FROM schema_migrations ORDER BY id").all();
     runMigrations(from43);
