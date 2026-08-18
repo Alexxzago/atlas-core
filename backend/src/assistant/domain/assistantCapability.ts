@@ -38,4 +38,6 @@ export class AssistantCapabilityCatalog {
   public list(): readonly AssistantCapabilityDefinition[] { return Object.freeze([...this.definitions.values()]); }
 }
 
-export const productionAssistantCapabilityCatalog = new AssistantCapabilityCatalog([]);
+export const productionAssistantCapabilityCatalog = new AssistantCapabilityCatalog([
+  { key: assistantCapabilityKey("live_data.read"), kind: "tool" },
+]);

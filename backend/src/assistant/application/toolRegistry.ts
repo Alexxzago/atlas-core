@@ -15,7 +15,8 @@ export class ToolRegistry {
       try { validateDefinitionSchema(definition.inputSchema); validateDefinitionSchema(definition.outputSchema); }
       catch { throw new ToolRegistryError("Tool schema is invalid."); }
       for (const capability of definition.requiredCapabilities) try { catalog.require(capability); } catch { throw new ToolRegistryError("Tool references an unknown capability."); }
-      tools.set(definition.name, Object.freeze({ ...definition, requiredCapabilities: Object.freeze([...definition.requiredCapabilities]), auditPolicy: Object.freeze({ inputFields: Object.freeze([...definition.auditPolicy.inputFields ?? []]), outputFields: Object.freeze([...definition.auditPolicy.outputFields ?? []]) }) }));
+      const frozen: ToolDefinition = Object.freeze({ ...definition, requiredCapabilities: Object.freeze([...definition.requiredCapabilities]), auditPolicy: Object.freeze({ inputFields: Object.freeze([...definition.auditPolicy.inputFields ?? []]), outputFields: Object.freeze([...definition.auditPolicy.outputFields ?? []]) }), ...(definition.liveData ? { liveData: Object.freeze({ ...definition.liveData }) } : {}) });
+      tools.set(definition.name, frozen);
     }
     this.tools = tools; Object.freeze(this);
   }

@@ -29,7 +29,7 @@ export class ToolExecutionService {
     let timer: ReturnType<typeof setTimeout> | null=null;
     let timedOut=false;
     let executorSettled=false;
-    const operation=Promise.resolve().then(()=>definition.executor(context,validatedInput,controller.signal));
+    const operation=Promise.resolve().then(()=>definition.executor({ ...context, toolTraceId: traceId },validatedInput,controller.signal));
     const observedOperation=operation.then(
       (output)=>{executorSettled=true;return output;},
       (error:unknown)=>{executorSettled=true;throw error;},
@@ -41,7 +41,7 @@ export class ToolExecutionService {
       const output=await Promise.race([observedOperation,timeout]);
       let validatedOutput:unknown;
       try { validatedOutput=validateToolSchema(definition.outputSchema,output); } catch { await this.fail(traceId,"invalid_tool_output",started); throw new ToolExecutionError("invalid_tool_output"); }
-      if(!await this.traces.complete(traceId,"requested",{auditOutput:redact(validatedOutput,definition.auditPolicy.outputFields),completedAt:this.clock.now(),durationMilliseconds:duration(started,this.clock.now())})) throw new ToolExecutionError("tool_execution_failed");
+      if(!await this.traces.complete(traceId,"requested",{auditOutput:redact(validatedOutput,definition.auditPolicy.outputFields),...(definition.outputReference ? { outputReference: definition.outputReference(output) } : {}),completedAt:this.clock.now(),durationMilliseconds:duration(started,this.clock.now())})) throw new ToolExecutionError("tool_execution_failed");
       let conversationMemory: unknown = null;
       try {
         const policy = definition.conversationMemoryPolicy;

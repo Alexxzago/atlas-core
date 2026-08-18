@@ -25,7 +25,7 @@ export interface ToolExecutionContext {
   readonly workspaceId: number; readonly companyId: number; readonly assistantProfileId: string;
   readonly assistantExecutionRecordId: string; readonly conversationId: string | null;
   readonly channel: "whatsapp" | "web_chat" | "internal"; readonly invocationId: string;
-  readonly idempotencyKey: string | null; readonly confirmation: ToolConfirmation | null;
+  readonly idempotencyKey: string | null; readonly confirmation: ToolConfirmation | null; readonly toolTraceId?: string;
 }
 export interface ToolDefinition {
   readonly name: string; readonly description: string; readonly inputSchema: ToolSchema; readonly outputSchema: ToolSchema;
@@ -36,6 +36,10 @@ export interface ToolDefinition {
   readonly conversationStatePolicy?: ToolConversationStatePolicy;
   /** A code-owned readiness requirement; secret material is never available to tools. */
   readonly integration?: { readonly provider: string; readonly kind: string };
+  /** A code-owned live-data requirement; providers remain outside the tool contract. */
+  readonly liveData?: { readonly provider: string; readonly kind: string };
+  /** Runtime-only durable output reference; it is never included in model declarations or results. */
+  readonly outputReference?: (executorOutput: unknown) => string | null;
   readonly executor: (context: ToolExecutionContext, input: unknown, signal: AbortSignal) => Promise<unknown>;
 }
 export class ToolSchemaError extends Error {}
