@@ -1,5 +1,6 @@
 import { createClient, type Client, type InArgs, type InStatement } from "@libsql/client";
 import { DatabaseSync } from "node:sqlite";
+import type { SynchronousDatabase } from "./synchronousDatabase.js";
 
 export type SqlValue = string | number | bigint | null | Uint8Array;
 export interface SqlResult { readonly rowsAffected: number | bigint; readonly lastInsertRowid?: number | bigint; }
@@ -45,6 +46,15 @@ export class LocalSqlDatabase implements SqlDatabase {
     }
   }
 
+  public async close(): Promise<void> { this.database.close(); }
+}
+
+/** Async-shaped adapter for the existing local and worker-backed synchronous runtime database. */
+export class SynchronousSqlDatabaseAdapter implements SqlDatabase {
+  public constructor(private readonly database: SynchronousDatabase) {}
+  public async execute(sql: string, args: readonly SqlValue[] = []): Promise<SqlResult> { const result=this.database.prepare(sql).run(...args); return { rowsAffected:result.changes,lastInsertRowid:result.lastInsertRowid }; }
+  public async query<Row extends Record<string, unknown>>(sql: string, args: readonly SqlValue[] = []): Promise<Row[]> { return (this.database.prepare(sql).all(...args) as Row[]).map(row=>({...row})); }
+  public async transaction<T>(operation: (database: SqlDatabase) => Promise<T>): Promise<T> { if(this.database.isTransaction)return operation(this);this.database.exec("BEGIN IMMEDIATE;");try{const value=await operation(this);this.database.exec("COMMIT;");return value;}catch(error:unknown){this.database.exec("ROLLBACK;");throw error;} }
   public async close(): Promise<void> { this.database.close(); }
 }
 
