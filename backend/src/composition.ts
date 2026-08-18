@@ -25,7 +25,7 @@ import { SqliteAuthenticationTransaction, SqliteIdentityTransaction } from "./re
 import { AuthenticationService } from "./identity/services/authenticationService.js";
 import { createIdentityRouter } from "./routes/identity.js";
 import { firecrawlProvider } from "./providers/firecrawl.js";
-import { GeminiKnowledgeFactExtractor, geminiProvider } from "./providers/gemini.js";
+import { GeminiConversationIntelligenceDerivation, GeminiKnowledgeFactExtractor, geminiProvider } from "./providers/gemini.js";
 import { ManualTextKnowledgeFactExtractor } from "./knowledge/services/manualTextKnowledgeFactExtractor.js";
 import { companyRepository } from "./repositories/companyRepository.js";
 import { knowledgeRepository } from "./repositories/knowledgeRepository.js";
@@ -136,6 +136,10 @@ import { NoIntegrationToolAvailabilityPolicy } from "./assistant/application/too
 import { AssistantToolOrchestrator } from "./assistant/services/assistantToolOrchestrator.js";
 import { ToolExecutionService } from "./assistant/services/toolExecutionService.js";
 import { AssistantToolExecutionTraceRepository } from "./repositories/assistantToolExecutionTraceRepository.js";
+import { ConversationIntelligenceRepository } from "./repositories/conversationIntelligenceRepository.js";
+import { ConversationIntelligenceService } from "./conversationIntelligence/services/conversationIntelligenceService.js";
+import { ConversationToolMemoryRepository } from "./repositories/conversationToolMemoryRepository.js";
+import { ConversationToolMemoryCoordinator } from "./conversationIntelligence/services/conversationToolMemoryCoordinator.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -204,7 +208,9 @@ configureProductionAssistantReadinessControllers({ get: (context) => createGetAs
 const whatsAppConnectionService = new WhatsAppConnectionService(companyRepository, new AssistantProfileRepository(database), whatsAppConnections, identityClock, { credentials: whatsAppConnections, states: whatsAppConnections, cipher: whatsAppCredentialCipher, resolver: whatsAppCredentialResolver, validator: new WhatsAppCloudApiProvider("", process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0"), knowledge: new CompanyKnowledgeRepository(database) }, assistantReadinessService);
 export const conversationService = new ConversationService(new ConversationRepository(database), identityClock);
 const publicWebChatSessionService = new PublicWebChatSessionService(webChatConnectionService, conversationService, new WebChatSessionRepository(database), identityClock);
-export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock, productionAssistantTools), new InMemoryConversationTurnLock(), "gemini", 20);
+const conversationIntelligenceService = new ConversationIntelligenceService(new ConversationIntelligenceRepository(database), new GeminiConversationIntelligenceDerivation(geminiProvider), identityClock);
+const conversationToolMemory = new ConversationToolMemoryCoordinator(new ConversationToolMemoryRepository(new SynchronousSqlDatabaseAdapter(database)), identityClock);
+export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock, productionAssistantTools), new InMemoryConversationTurnLock(), "gemini", 20, conversationIntelligenceService, conversationToolMemory);
 const publicWebChatConversationService = new PublicWebChatConversationService(publicWebChatSessionService, operationalConversationTurnService, conversationService);
 const companyKnowledgeService=new FrozenKnowledgeService(companyRepository,new CompanyKnowledgeRepository(database),new SecurePublicUrlProvider(),new WorkerPdfTextExtractor(),new ManualTextKnowledgeFactExtractor(new GeminiKnowledgeFactExtractor(geminiProvider)),identityClock);
 const companyKnowledgeControllers=createCompanyKnowledgeControllers(companyKnowledgeService);
@@ -233,7 +239,7 @@ export const identityRouter = createIdentityRouter({
 export const publicWebChatRouter = createPublicWebChatRouter(publicWebChatSessionService, publicWebChatConversationService, production);
 export const whatsAppOutboundDeliveryService = new WhatsAppOutboundDeliveryService(new ConversationRepository(database), whatsAppConnections, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), whatsAppCredentialResolver, (accessToken) => new WhatsAppCloudApiProvider(accessToken, process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0"), identityClock, whatsAppConnectionService, new WhatsAppConversationRepository(database));
 const whatsAppDeliveryStatusService = new WhatsAppDeliveryStatusService(new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), new MetaDeliveryStatusMapper(), new DeliveryLifecyclePolicy(), identityClock, whatsAppConnectionService);
-const operatorConversationMessagingService = new OperatorConversationMessagingService(conversationService, new ConversationRepository(database), new ConversationRepository(database), new WhatsAppConversationRepository(database), whatsAppOutboundDeliveryService, identityClock);
+const operatorConversationMessagingService = new OperatorConversationMessagingService(conversationService, new ConversationRepository(database), new ConversationRepository(database), new WhatsAppConversationRepository(database), whatsAppOutboundDeliveryService, identityClock, conversationIntelligenceService);
 configureProductionConversationMessageController((context, actor) => createOperatorConversationMessageController(operatorConversationMessagingService, context, actor));
 configureProductionConversationReadControllers({ list: (context) => createListConversationController(conversationService, context), get: (context) => createGetConversationController(conversationService, context) });
 const conversationControlService = new ConversationControlService(conversationService, new ConversationRepository(database), identityClock);

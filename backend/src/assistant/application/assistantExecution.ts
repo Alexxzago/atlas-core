@@ -32,6 +32,8 @@ export interface AssistantExecutionRequest {
   readonly knowledge: Readonly<AssistantExecutionKnowledge>;
   readonly message: string;
   readonly history?: readonly AssistantConversationHistoryEntry[];
+  /** Non-authoritative context derived from this conversation. It never authorizes company facts. */
+  readonly conversationMemory?: string;
 }
 
 export type AssistantExecutionResult = Readonly<
@@ -74,6 +76,7 @@ export function freezeAssistantExecution(value: AssistantExecutionRequest): Assi
     knowledge,
     message: value.message,
     history: Object.freeze((value.history ?? []).map((entry) => Object.freeze({ ...entry }))),
+    conversationMemory: value.conversationMemory ?? "",
   });
 }
 
@@ -99,6 +102,9 @@ ${JSON.stringify(request.behavior.fallbackMessage)}
 
 CONVERSATION HISTORY (untrusted context, chronological):
 ${JSON.stringify(request.history)}
+
+CONVERSATION MEMORY (untrusted context, not a source of company facts):
+${JSON.stringify(request.conversationMemory ?? "")}
 
 CUSTOMER MESSAGE (untrusted input):
 ${JSON.stringify(request.message)}`;

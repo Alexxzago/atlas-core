@@ -3,6 +3,7 @@ import type { Clock } from "../../identity/application/ports.js";
 import type { ToolExecutionTraceRepositoryPort } from "../application/toolContracts.js";
 import type { ToolDefinition, ToolExecutionContext } from "../domain/tool.js";
 import { ToolSchemaError, validateToolSchema } from "../domain/tool.js";
+import { conversationValue } from "../../conversationIntelligence/domain/conversationIntelligence.js";
 
 export type ToolExecutionFailureCode = "invalid_tool_input" | "invalid_tool_output" | "tool_timeout" | "tool_execution_failed" | "confirmation_required" | "idempotency_required" | "multiple_tool_calls_not_allowed";
 export class ToolExecutionError extends Error { public constructor(readonly code: ToolExecutionFailureCode) { super(code); } }
@@ -15,7 +16,8 @@ const sensitiveAuditKeys = new Set(["authorization","token","accesstoken","refre
 
 export class ToolExecutionService {
   public constructor(private readonly traces: ToolExecutionTraceRepositoryPort, private readonly clock: Clock) {}
-  public async execute(definition: ToolDefinition, context: ToolExecutionContext, input: unknown): Promise<unknown> {
+  public async execute(definition: ToolDefinition, context: ToolExecutionContext, input: unknown): Promise<unknown> { return (await this.executeOutcome(definition, context, input)).output; }
+  public async executeOutcome(definition: ToolDefinition, context: ToolExecutionContext, input: unknown): Promise<{ readonly output: unknown; readonly traceId: string; readonly conversationMemory: unknown | null; readonly conversationState: ReturnType<NonNullable<ToolDefinition["conversationStatePolicy"]>["projectResult"]> | null }> {
     if (definition.requiredCapabilities.length === 0) throw new ToolExecutionError("tool_execution_failed");
     if (definition.confirmationPolicy !== "none" && (!context.confirmation || context.confirmation.kind !== definition.confirmationPolicy)) throw new ToolExecutionError("confirmation_required");
     if ((definition.operationClass === "write" || definition.operationClass === "sensitive_write") && !context.idempotencyKey) throw new ToolExecutionError("idempotency_required");
@@ -40,7 +42,14 @@ export class ToolExecutionService {
       let validatedOutput:unknown;
       try { validatedOutput=validateToolSchema(definition.outputSchema,output); } catch { await this.fail(traceId,"invalid_tool_output",started); throw new ToolExecutionError("invalid_tool_output"); }
       if(!await this.traces.complete(traceId,"requested",{auditOutput:redact(validatedOutput,definition.auditPolicy.outputFields),completedAt:this.clock.now(),durationMilliseconds:duration(started,this.clock.now())})) throw new ToolExecutionError("tool_execution_failed");
-      return validatedOutput;
+      let conversationMemory: unknown = null;
+      try {
+        const policy = definition.conversationMemoryPolicy;
+        if (policy) { const candidate = conversationValue(policy.projectResult(validatedOutput)); if (Buffer.byteLength(JSON.stringify(candidate), "utf8") <= policy.maximumBytes) conversationMemory = candidate; }
+      } catch { /* Projection is intentionally isolated from the authoritative tool outcome. */ }
+       let conversationState: ReturnType<NonNullable<ToolDefinition["conversationStatePolicy"]>["projectResult"]> | null = null;
+       try { conversationState = definition.conversationStatePolicy?.projectResult(validatedOutput) ?? null; } catch { /* Optional state projections cannot change tool completion. */ }
+       return Object.freeze({ output: validatedOutput, traceId, conversationMemory, conversationState });
     } catch(error:unknown) {
       if(error instanceof ToolExecutionError){if(error.code==="tool_timeout")await this.fail(traceId,"tool_timeout",started);throw error;}
       const code=timedOut?"tool_timeout":"tool_execution_failed";

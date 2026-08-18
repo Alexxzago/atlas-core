@@ -8,10 +8,12 @@ import type { ToolSchema } from "../assistant/domain/tool.js";
 import { KNOWLEDGE_EXTRACTION_PROMPT } from "./prompts.js";
 import type { KnowledgeFactExtractor } from "../knowledge/application/ports.js";
 import type { KnowledgeSourceKind } from "../knowledge/domain/knowledge.js";
+import type { ConversationStateDerivationPort, ConversationStateOperation } from "../conversationIntelligence/application/ports.js";
+import type { ConversationMessageId } from "../conversation/domain/conversation.js";
 
 interface GeminiClient {
   readonly models: {
-    generateContent(input: { model: string; contents: string; config?: { responseMimeType?: string; abortSignal?: AbortSignal } }): Promise<{ text?: string | undefined }>;
+    generateContent(input: { model: string; contents: string; config?: { responseMimeType?: string; responseJsonSchema?: unknown; abortSignal?: AbortSignal } }): Promise<{ text?: string | undefined }>;
   };
 }
 interface GeminiFunctionCall { readonly id?: string; readonly name?: string; readonly args?: unknown; }
@@ -97,7 +99,7 @@ ${markdown}`,
     return Object.freeze({ createSession: (): AssistantModelSession => new GeminiToolAdapter(this.gemini() as unknown as GeminiToolClient).createSession() });
   }
 
-  private gemini(): GeminiClient {
+  public gemini(): GeminiClient {
     if (!this.client) this.client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
     return this.client;
   }
@@ -152,6 +154,26 @@ export class GeminiKnowledgeFactExtractor implements KnowledgeFactExtractor {
     return { services: fields.services, hours: fields.hours, locations: fields.locations, faq: record.faq };
   }
 }
+
+/** Provider adapter only: the service decides when a derived memory update is accepted. */
+export class GeminiConversationIntelligenceDerivation implements ConversationStateDerivationPort {
+  public constructor(private readonly provider: GeminiProvider) {}
+  public async derive(input: { readonly state: import("../conversationIntelligence/domain/conversationIntelligence.js").ConversationIntelligenceState | null; readonly message: { readonly id: ConversationMessageId; readonly direction: "inbound" | "outbound"; readonly content: string; readonly createdAt: string } }): Promise<readonly ConversationStateOperation[]> {
+    try {
+      const response = await this.provider.gemini().models.generateContent({ model: "gemini-3.5-flash", contents: `Derive bounded semantic conversation state operations. Do not state or infer company facts. Keep only customer preferences, unresolved requests, and commitments explicitly present in the message or existing state.
+
+EXISTING STATE:\n${JSON.stringify(input.state)}\nMESSAGE:\n${JSON.stringify({ direction: input.message.direction, content: input.message.content })}`, config: { responseMimeType: "application/json", responseJsonSchema: conversationStateDeltaSchema, abortSignal: AbortSignal.timeout(5_000) } });
+      const value: unknown = response.text ? JSON.parse(response.text) : null;
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid conversation intelligence response.");
+      const record = value as Record<string, unknown>;
+      if (!Array.isArray(record.operations)) throw new Error("Invalid conversation intelligence response.");
+      return Object.freeze(record.operations as ConversationStateOperation[]);
+    } catch { return Object.freeze([]); }
+  }
+}
+
+// This is a transport schema only. Atlas still rejects unsupported semantics at its validator boundary.
+const conversationStateDeltaSchema = Object.freeze({ type: "array", maxItems: 16, items: { type: "object", required: ["kind"], properties: { kind: { type: "string", enum: ["set_fact", "remove_fact", "mark_pending", "resolve_pending", "set_active_intent", "replace_reference_group", "stale_reference_group"] }, key: { type: "string" }, value: {}, askedAt: { type: "boolean" }, groupKind: { type: "string" }, options: { type: "array", maxItems: 10, items: { type: "object", required: ["referenceId", "label", "safePayload"], properties: { referenceId: { type: "string" }, label: { type: "string" }, safePayload: {} }, additionalProperties: false } } }, additionalProperties: false } });
 
 function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));

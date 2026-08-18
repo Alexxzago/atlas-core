@@ -1077,6 +1077,75 @@ const migrations: Migration[] = [
     );
     CREATE INDEX idx_tool_execution_traces_profile_requested ON tool_execution_traces(workspace_id,company_id,assistant_profile_id,requested_at DESC,id DESC);
   `);}},
+  { id:39,name:"0039_conversation_intelligence",checksumSource:"conversation-intelligence-state-v1|unbounded-applied-message-ledger|cas-memory-references-pruning",apply(database):void{database.exec(`
+    CREATE TABLE conversation_intelligence_states(
+      conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+      workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT,
+      company_id INTEGER NOT NULL,
+      active_intent_json TEXT,version INTEGER NOT NULL CHECK(version>=1),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_conversation_intelligence_states_scope ON conversation_intelligence_states(workspace_id,company_id,updated_at DESC,conversation_id);
+    CREATE TABLE conversation_intelligence_applied_messages(
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      conversation_message_id TEXT NOT NULL REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      state_version INTEGER NOT NULL CHECK(state_version>=1),applied_at TEXT NOT NULL,
+      PRIMARY KEY(conversation_id,conversation_message_id)
+    );
+    CREATE INDEX idx_conversation_intelligence_applied_messages_message ON conversation_intelligence_applied_messages(conversation_message_id);
+    CREATE TABLE conversation_intelligence_applied_tool_traces(
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      tool_trace_id TEXT NOT NULL REFERENCES tool_execution_traces(id) ON DELETE CASCADE,
+      applied_at TEXT NOT NULL,
+      PRIMARY KEY(conversation_id,tool_trace_id)
+    );
+    CREATE TABLE conversation_intelligence_facts(
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      fact_key TEXT NOT NULL, value_json TEXT NOT NULL, authority TEXT NOT NULL CHECK(authority IN ('human_asserted','tool_observed','assistant_inference')),
+      source_kind TEXT NOT NULL CHECK(source_kind IN ('user','operator','tool','assistant_inference')), source_message_id TEXT REFERENCES conversation_messages(id) ON DELETE SET NULL,
+      source_tool_trace_id TEXT REFERENCES tool_execution_traces(id) ON DELETE SET NULL, source_order TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY(conversation_id,fact_key)
+    );
+    CREATE TABLE conversation_intelligence_pending_items(
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, pending_key TEXT NOT NULL, asked_at TEXT, created_at TEXT NOT NULL,
+      PRIMARY KEY(conversation_id,pending_key)
+    );
+    CREATE TABLE conversation_intelligence_reference_groups(
+      id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, group_kind TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('active','stale')), source_message_id TEXT REFERENCES conversation_messages(id) ON DELETE SET NULL,
+      source_tool_trace_id TEXT REFERENCES tool_execution_traces(id) ON DELETE SET NULL, created_at TEXT NOT NULL, stale_at TEXT, expires_at TEXT
+    );
+    CREATE INDEX idx_conversation_intelligence_reference_groups_scope ON conversation_intelligence_reference_groups(conversation_id,status,group_kind,created_at DESC);
+    CREATE TABLE conversation_intelligence_reference_options(
+      group_id TEXT NOT NULL REFERENCES conversation_intelligence_reference_groups(id) ON DELETE CASCADE, reference_id TEXT NOT NULL,
+      ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 1 AND 10), label TEXT NOT NULL, safe_payload_json TEXT NOT NULL,
+      PRIMARY KEY(group_id,reference_id), UNIQUE(group_id,ordinal)
+    );
+    CREATE TABLE conversation_intelligence_tool_memory(
+      id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      tool_trace_id TEXT NOT NULL REFERENCES tool_execution_traces(id) ON DELETE CASCADE, category TEXT NOT NULL, value_json TEXT NOT NULL, created_at TEXT NOT NULL,
+      UNIQUE(conversation_id,tool_trace_id,category)
+    );
+    CREATE INDEX idx_conversation_intelligence_tool_memory_scope ON conversation_intelligence_tool_memory(conversation_id,created_at DESC);
+    CREATE TRIGGER conversation_intelligence_states_scope_insert
+    BEFORE INSERT ON conversation_intelligence_states
+    WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id)
+    BEGIN SELECT RAISE(ABORT,'Conversation intelligence state scope is invalid'); END;
+    CREATE TRIGGER conversation_intelligence_states_scope_update
+    BEFORE UPDATE OF conversation_id,workspace_id,company_id ON conversation_intelligence_states
+    WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id)
+    BEGIN SELECT RAISE(ABORT,'Conversation intelligence state scope is invalid'); END;
+    CREATE TRIGGER conversation_intelligence_applied_message_scope_insert
+    BEFORE INSERT ON conversation_intelligence_applied_messages
+    WHEN NOT EXISTS(SELECT 1 FROM conversation_messages m WHERE m.id=NEW.conversation_message_id AND m.conversation_id=NEW.conversation_id)
+    BEGIN SELECT RAISE(ABORT,'Conversation intelligence applied message scope is invalid'); END;
+    CREATE TRIGGER conversation_intelligence_fact_message_scope_insert
+    BEFORE INSERT ON conversation_intelligence_facts WHEN NEW.source_message_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM conversation_messages m WHERE m.id=NEW.source_message_id AND m.conversation_id=NEW.conversation_id)
+    BEGIN SELECT RAISE(ABORT,'Conversation intelligence fact message scope is invalid'); END;
+    CREATE TRIGGER conversation_intelligence_group_message_scope_insert
+    BEFORE INSERT ON conversation_intelligence_reference_groups WHEN NEW.source_message_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM conversation_messages m WHERE m.id=NEW.source_message_id AND m.conversation_id=NEW.conversation_id)
+    BEGIN SELECT RAISE(ABORT,'Conversation intelligence group message scope is invalid'); END;
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {
