@@ -14,6 +14,7 @@ export interface OperationalAssistantRuntimeContext {
   readonly purpose: AssistantRuntimePurpose;
   readonly provider: string;
   readonly fallbackOnUnavailable: boolean;
+  readonly conversationMemory?: string;
   readonly snapshotContext?: {
     readonly whatsAppConnectionId?: string;
     readonly whatsAppPhoneNumberId?: string;
@@ -25,6 +26,7 @@ export interface OperationalAssistantRuntimeContext {
 export interface OperationalAssistantRuntimeResult {
   readonly response: AssistantExecutionResult;
   readonly record: AssistantExecutionRecord;
+  readonly toolMemoryCandidates: readonly { readonly traceId: string; readonly value: unknown; readonly facts: readonly { readonly key: string; readonly value: unknown }[]; readonly referenceGroups: readonly { readonly groupKind: string; readonly options: readonly { readonly referenceId: string; readonly label: string; readonly safePayload: unknown }[] }[] }[];
 }
 
 export class OperationalAssistantRuntime {
@@ -54,27 +56,28 @@ export class OperationalAssistantRuntime {
         knowledge: knowledge.knowledge,
         message,
         history,
+        conversationMemory: context.conversationMemory ?? "",
       });
-      const result = this.tools
-        ? Object.freeze({ outcome: "answered" as const, answer: await this.tools.run(assistantModelPrompt(request), {
+      const toolOutcome = this.tools
+        ? await this.tools.runOutcome(assistantModelPrompt(request), {
           workspaceId: company.workspaceId, companyId: company.id, assistantProfileId: profile.id,
           assistantExecutionRecordId: started.id, conversationId: context.snapshotContext?.conversationId ?? null,
           channel: context.snapshotContext?.channelProvider === "whatsapp" ? "whatsapp" : context.snapshotContext?.channelProvider === "web_chat" ? "web_chat" : "internal",
           invocationId: "", idempotencyKey: null, confirmation: null,
-        }) })
-        : await this.execution.execute(request);
+        }) : null;
+      const result = toolOutcome ? Object.freeze({ outcome: "answered" as const, answer: toolOutcome.answer }) : await this.execution.execute(request);
       const response = validResponse(result)
         ? context.fallbackOnUnavailable && result.outcome === "safe_fallback" ? fallback(profile.fallbackMessage) : result
         : fallback(profile.fallbackMessage);
       const completed = this.complete(started, response, null, this.clock.now());
       this.persistCompletion(completed);
-      return { response, record: completed };
+      return { response, record: completed, toolMemoryCandidates: Object.freeze(toolOutcome?.conversationMemory ?? []) };
     } catch (error: unknown) {
       if (context.fallbackOnUnavailable && (error instanceof AnswerGenerationUnavailableError || error instanceof ToolExecutionError)) {
         const response = fallback(profile.fallbackMessage);
         const completed = this.complete(started, response, null, this.clock.now());
         this.persistCompletion(completed);
-        return { response, record: completed };
+        return { response, record: completed, toolMemoryCandidates: Object.freeze([]) };
       }
       const completed = this.complete(started, null, "provider_unavailable", this.clock.now());
       this.persistCompletion(completed);

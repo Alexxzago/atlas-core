@@ -6,6 +6,7 @@ import type { ConversationRepositoryPort } from "../application/ports.js";
 import type { ConversationId } from "../domain/conversation.js";
 import { reconstructConversationControl } from "../domain/conversationControl.js";
 import type { ConversationService } from "./conversationService.js";
+import type { ConversationIntelligenceService } from "../../conversationIntelligence/services/conversationIntelligenceService.js";
 
 export class OperatorConversationMessageValidationError extends Error {}
 export class OperatorConversationMessageForbiddenError extends Error {}
@@ -17,7 +18,7 @@ export interface OperatorConversationMessageResult {
 }
 
 export class OperatorConversationMessagingService {
-  public constructor(private readonly conversations: ConversationService, private readonly repository: ConversationRepositoryPort, private readonly controls: ConversationRepositoryPort, private readonly bindings: WhatsAppConversationRepositoryPort, private readonly outbound: WhatsAppOutboundDeliveryService, private readonly clock: { now(): string }) {}
+  public constructor(private readonly conversations: ConversationService, private readonly repository: ConversationRepositoryPort, private readonly controls: ConversationRepositoryPort, private readonly bindings: WhatsAppConversationRepositoryPort, private readonly outbound: WhatsAppOutboundDeliveryService, private readonly clock: { now(): string }, private readonly intelligence?: ConversationIntelligenceService) {}
 
   public async send(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown): Promise<OperatorConversationMessageResult> {
     const companyId = parseCompanyId(companyIdValue), parsed = parseInput(input);
@@ -37,6 +38,7 @@ export class OperatorConversationMessagingService {
       ?? this.conversations.addParticipant(context, companyId, conversation.id, { type: "human_operator", reference: actorId });
     if (participant.type !== "human_operator" || participant.reference !== actorId) throw new OperatorConversationMessageForbiddenError("Operator participant is invalid.");
     const message = this.conversations.addMessage(context, companyId, conversation.id, { senderParticipantId: participant.id, direction: "outbound", content: parsed.content, idempotencyKey: parsed.idempotencyKey });
+    if (this.intelligence) await this.intelligence.apply(context, companyId, message);
     const delivery = await this.outbound.deliverWhatsAppText(context, companyId, { conversationId: conversation.id, conversationMessageId: message.id, whatsAppConnectionId: binding.whatsAppConnectionId, recipientWaId: binding.waId });
     this.recordActivity(context, companyId, conversation.id);
     return Object.freeze({ messageId: message.id, delivery });

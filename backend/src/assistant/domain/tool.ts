@@ -1,4 +1,5 @@
 import type { AssistantCapabilityKey } from "./assistantCapability.js";
+import type { ConversationValue } from "../../conversationIntelligence/domain/conversationIntelligence.js";
 
 export type ToolOperationClass = "read" | "write" | "sensitive_write";
 export type ToolConfirmationPolicy = "none" | "user" | "operator";
@@ -15,6 +16,10 @@ export type ToolSchema = ToolScalarSchema | {
 };
 
 export interface ToolAuditPolicy { readonly inputFields?: readonly string[]; readonly outputFields?: readonly string[]; }
+/** Runtime-only; ToolRegistry never maps this policy into model declarations. */
+export interface ToolConversationMemoryPolicy { readonly maximumBytes: number; readonly projectResult: (validatedOutput: unknown) => unknown; }
+/** Runtime-only projections. Tool definitions, not model output, select state keys and groups. */
+export interface ToolConversationStatePolicy { readonly projectResult: (validatedOutput: unknown) => { readonly facts?: readonly { readonly key: string; readonly value: ConversationValue }[]; readonly referenceGroups?: readonly { readonly groupKind: string; readonly options: readonly { readonly referenceId: string; readonly label: string; readonly safePayload: ConversationValue }[] }[] }; }
 export interface ToolConfirmation { readonly kind: "user" | "operator"; readonly confirmationId: string; }
 export interface ToolExecutionContext {
   readonly workspaceId: number; readonly companyId: number; readonly assistantProfileId: string;
@@ -27,6 +32,8 @@ export interface ToolDefinition {
   readonly requiredCapabilities: readonly AssistantCapabilityKey[]; readonly operationClass: ToolOperationClass;
   readonly timeoutMilliseconds: number; readonly idempotencyPolicy: ToolIdempotencyPolicy;
   readonly confirmationPolicy: ToolConfirmationPolicy; readonly auditPolicy: ToolAuditPolicy;
+  readonly conversationMemoryPolicy?: ToolConversationMemoryPolicy;
+  readonly conversationStatePolicy?: ToolConversationStatePolicy;
   readonly executor: (context: ToolExecutionContext, input: unknown, signal: AbortSignal) => Promise<unknown>;
 }
 export class ToolSchemaError extends Error {}

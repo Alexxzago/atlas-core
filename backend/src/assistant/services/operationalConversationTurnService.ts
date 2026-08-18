@@ -8,6 +8,9 @@ import type { AssistantConversationHistoryEntry, AssistantExecutionResult } from
 import { assistantProfileId } from "../domain/assistantProfile.js";
 import { AssistantProfileExecutionPolicy, AssistantProfilePolicyError } from "../domain/assistantProfilePolicies.js";
 import type { OperationalAssistantRuntime } from "./operationalAssistantRuntime.js";
+import type { ConversationIntelligenceService } from "../../conversationIntelligence/services/conversationIntelligenceService.js";
+import { conversationWorkingMemory } from "../../conversationIntelligence/services/conversationWorkingMemory.js";
+import type { ConversationToolMemoryCoordinator } from "../../conversationIntelligence/services/conversationToolMemoryCoordinator.js";
 
 export class OperationalConversationTurnValidationError extends Error {}
 export class OperationalConversationTurnNotFoundError extends Error {}
@@ -54,6 +57,8 @@ export class OperationalConversationTurnService {
     private readonly locks: InMemoryConversationTurnLock,
     private readonly provider: string,
     private readonly historyLimit: number,
+    private readonly intelligence?: ConversationIntelligenceService,
+    private readonly toolMemory?: ConversationToolMemoryCoordinator,
   ) {
     if (!Number.isSafeInteger(historyLimit) || historyLimit < 1) throw new Error("Conversation history limit is invalid.");
   }
@@ -71,7 +76,7 @@ export class OperationalConversationTurnService {
         senderParticipantId: parsed.inboundParticipantId, direction: "inbound", content: parsed.content,
       });
       await hooks?.afterInbound?.(inbound);
-      const profile = this.profiles.findById(context, scopedCompanyId, parsed.profileId);
+       const profile = this.profiles.findById(context, scopedCompanyId, parsed.profileId);
       if (!profile) throw new OperationalConversationTurnNotFoundError("Assistant Profile was not found.");
       try { this.profilePolicy.assert(profile); }
       catch (error: unknown) {
@@ -83,15 +88,19 @@ export class OperationalConversationTurnService {
       if (!knowledge) throw new OperationalConversationTurnKnowledgeUnavailableError("Published knowledge is unavailable.");
       const history = historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit);
       if (await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
-      const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, history, {
-        purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
-        snapshotContext: { conversationId: conversation.id, channelProvider: conversation.channel },
+        const intelligenceResult = this.intelligence ? await this.intelligence.apply(context, scopedCompanyId, inbound) : null;
+        const memory = intelligenceResult?.state ? conversationWorkingMemory(intelligenceResult.state) : "";
+       const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, history, {
+         purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
+         snapshotContext: { conversationId: conversation.id, channelProvider: conversation.channel }, conversationMemory: memory,
       });
-      const outbound = this.conversations.addMessage(context, scopedCompanyId, conversation.id, {
-        senderParticipantId: parsed.outboundParticipantId, direction: "outbound", content: executed.response.answer,
-        executionRecordId: executed.record.id,
-      });
-      return Object.freeze({ inbound, outbound, response: executed.response, executionRecordId: executed.record.id });
+       await this.appendToolMemory(context, scopedCompanyId, conversation.id, executed.toolMemoryCandidates);
+       const outbound = this.conversations.addMessage(context, scopedCompanyId, conversation.id, {
+         senderParticipantId: parsed.outboundParticipantId, direction: "outbound", content: executed.response.answer,
+         executionRecordId: executed.record.id,
+       });
+        if (this.intelligence) await this.intelligence.apply(context, scopedCompanyId, outbound);
+        return Object.freeze({ inbound, outbound, response: executed.response, executionRecordId: executed.record.id });
     } finally { release(); }
   }
 
@@ -117,18 +126,27 @@ export class OperationalConversationTurnService {
       const knowledge = this.knowledge.loadCurrentVersion(context, scopedCompanyId);
       if (!knowledge) throw new OperationalConversationTurnKnowledgeUnavailableError("Published knowledge is unavailable.");
       if (await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
-      const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit), {
+        const intelligenceResult = this.intelligence ? await this.intelligence.apply(context, scopedCompanyId, inbound) : null;
+        const memory = intelligenceResult?.state ? conversationWorkingMemory(intelligenceResult.state) : "";
+       const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit), {
         purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
         snapshotContext: {
           conversationId: conversation.id,
           channelProvider: conversation.channel,
           ...(input.whatsAppConnectionId ? { whatsAppConnectionId: input.whatsAppConnectionId } : {}),
           ...(input.whatsAppPhoneNumberId ? { whatsAppPhoneNumberId: input.whatsAppPhoneNumberId } : {}),
-        },
+         }, conversationMemory: memory,
       });
-      const outbound = this.conversations.addMessage(context, scopedCompanyId, conversation.id, { senderParticipantId: outboundParticipantId, direction: "outbound", content: executed.response.answer, idempotencyKey: input.replyIdempotencyKey, executionRecordId: executed.record.id });
-      return Object.freeze({ inbound, outbound, response: executed.response, executionRecordId: executed.record.id });
+        await this.appendToolMemory(context, scopedCompanyId, conversation.id, executed.toolMemoryCandidates);
+        const outbound = this.conversations.addMessage(context, scopedCompanyId, conversation.id, { senderParticipantId: outboundParticipantId, direction: "outbound", content: executed.response.answer, idempotencyKey: input.replyIdempotencyKey, executionRecordId: executed.record.id });
+        if (this.intelligence) await this.intelligence.apply(context, scopedCompanyId, outbound);
+        return Object.freeze({ inbound, outbound, response: executed.response, executionRecordId: executed.record.id });
     } finally { release(); }
+  }
+
+  private async appendToolMemory(context: WorkspaceContext, companyId: number, conversationIdValue: ConversationMessage["conversationId"], candidates: readonly { readonly traceId: string; readonly value: unknown; readonly facts: readonly { readonly key: string; readonly value: unknown }[]; readonly referenceGroups: readonly { readonly groupKind: string; readonly options: readonly { readonly referenceId: string; readonly label: string; readonly safePayload: unknown }[] }[] }[]): Promise<void> {
+    try { await this.toolMemory?.append(context, companyId, conversationIdValue, candidates); }
+    catch { /* Derived tool memory must never block an otherwise completed conversation turn. */ }
   }
 }
 
