@@ -1,4 +1,5 @@
 import { createClient, type Client, type InArgs, type InStatement } from "@libsql/client";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { DatabaseSync } from "node:sqlite";
 import type { SynchronousDatabase } from "./synchronousDatabase.js";
 
@@ -17,9 +18,30 @@ function statement(sql: string, args: readonly SqlValue[] = []): InStatement {
   return { sql, args: args as InArgs };
 }
 
+interface TransactionCoordinator { tail: Promise<void>; }
+const fileTransactionCoordinators = new Map<string, TransactionCoordinator>();
+const memoryTransactionCoordinators = new WeakMap<DatabaseSync, TransactionCoordinator>();
+
+function transactionCoordinator(database: DatabaseSync): TransactionCoordinator {
+  const file = (database.prepare("PRAGMA database_list").get() as { file: string }).file;
+  if (!file) {
+    const existing = memoryTransactionCoordinators.get(database);
+    if (existing) return existing;
+    const coordinator = { tail: Promise.resolve() };
+    memoryTransactionCoordinators.set(database, coordinator);
+    return coordinator;
+  }
+  const existing = fileTransactionCoordinators.get(file);
+  if (existing) return existing;
+  const coordinator = { tail: Promise.resolve() };
+  fileTransactionCoordinators.set(file, coordinator);
+  return coordinator;
+}
+
 export class LocalSqlDatabase implements SqlDatabase {
-  private transactionDepth = 0;
-  public constructor(private readonly database: DatabaseSync) {}
+  private readonly transactionContext = new AsyncLocalStorage<boolean>();
+  private readonly coordinator: TransactionCoordinator;
+  public constructor(private readonly database: DatabaseSync) { this.coordinator = transactionCoordinator(database); }
 
   public async execute(sql: string, args: readonly SqlValue[] = []): Promise<SqlResult> {
     const result = this.database.prepare(sql).run(...args);
@@ -31,18 +53,23 @@ export class LocalSqlDatabase implements SqlDatabase {
   }
 
   public async transaction<T>(operation: (database: SqlDatabase) => Promise<T>): Promise<T> {
-    if (this.transactionDepth > 0) return operation(this);
-    this.database.exec("BEGIN IMMEDIATE;");
-    this.transactionDepth += 1;
+    if (this.transactionContext.getStore()) return operation(this);
+    const previous = this.coordinator.tail;
+    let release: (() => void) | undefined;
+    this.coordinator.tail = new Promise<void>(resolve => { release = resolve; });
+    await previous;
+    let began = false;
     try {
-      const value = await operation(this);
+      this.database.exec("BEGIN IMMEDIATE;");
+      began = true;
+      const value = await this.transactionContext.run(true, () => operation(this));
       this.database.exec("COMMIT;");
       return value;
     } catch (error: unknown) {
-      this.database.exec("ROLLBACK;");
+      if (began) this.database.exec("ROLLBACK;");
       throw error;
     } finally {
-      this.transactionDepth -= 1;
+      release!();
     }
   }
 

@@ -40,4 +40,8 @@ export class AssistantCapabilityCatalog {
 
 export const productionAssistantCapabilityCatalog = new AssistantCapabilityCatalog([
   { key: assistantCapabilityKey("live_data.read"), kind: "tool" },
+  { key: assistantCapabilityKey("scheduling.create_booking"), kind: "tool" },
+  { key: assistantCapabilityKey("scheduling.reschedule_booking"), kind: "tool" },
+  { key: assistantCapabilityKey("scheduling.cancel_booking"), kind: "tool" },
+  { key: assistantCapabilityKey("scheduling.get_booking"), kind: "tool" },
 ]);
