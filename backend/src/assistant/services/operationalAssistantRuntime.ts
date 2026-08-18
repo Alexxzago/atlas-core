@@ -9,12 +9,16 @@ import { assistantExecutionRecordId, createProfileRuntimeSnapshot, createPublish
 import type { AssistantProfile } from "../domain/assistantProfile.js";
 import type { AssistantToolOrchestrator } from "./assistantToolOrchestrator.js";
 import { ToolExecutionError } from "./toolExecutionService.js";
+import type { RetrievalContext } from "../../knowledgeV2/domain/knowledgeRetrieval.js";
 
 export interface OperationalAssistantRuntimeContext {
   readonly purpose: AssistantRuntimePurpose;
   readonly provider: string;
   readonly fallbackOnUnavailable: boolean;
   readonly conversationMemory?: string;
+  readonly retrieval?: RetrievalContext;
+  /** Preview is provider-only and must not expose any capability or tool declaration. */
+  readonly allowTools?: boolean;
   readonly snapshotContext?: {
     readonly whatsAppConnectionId?: string;
     readonly whatsAppPhoneNumberId?: string;
@@ -57,8 +61,9 @@ export class OperationalAssistantRuntime {
         message,
         history,
         conversationMemory: context.conversationMemory ?? "",
+        ...(context.retrieval ? { retrieval: context.retrieval } : {}),
       });
-      const toolOutcome = this.tools
+      const toolOutcome = context.allowTools !== false && this.tools
         ? await this.tools.runOutcome(assistantModelPrompt(request), {
           workspaceId: company.workspaceId, companyId: company.id, assistantProfileId: profile.id,
           assistantExecutionRecordId: started.id, conversationId: context.snapshotContext?.conversationId ?? null,

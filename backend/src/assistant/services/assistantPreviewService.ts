@@ -6,6 +6,7 @@ import { AssistantProfileExecutionPolicy, AssistantProfilePolicyError } from "..
 import type { AssistantProfileRepositoryPort } from "../application/ports.js";
 import type { AssistantExecutionResult } from "../application/assistantExecution.js";
 import type { OperationalAssistantRuntime } from "./operationalAssistantRuntime.js";
+import type { LexicalKnowledgeRetrievalService } from "../../knowledgeV2/services/knowledgeRetrievalService.js";
 
 export class AssistantPreviewValidationError extends Error {}
 export class AssistantPreviewNotFoundError extends Error {}
@@ -22,6 +23,7 @@ export class AssistantPreviewService {
     private readonly profiles: AssistantProfileRepositoryPort,
     private readonly runtime: OperationalAssistantRuntime,
     private readonly provider: string,
+    private readonly retrieval?: LexicalKnowledgeRetrievalService,
   ) {}
 
   public async preview(
@@ -46,7 +48,8 @@ export class AssistantPreviewService {
     const knowledge = this.knowledge.loadCurrentVersion(context, companyId);
     if (!knowledge) throw new AssistantPreviewKnowledgeUnavailableError();
     return (await this.runtime.execute(company, profile, knowledge, message, [], {
-      purpose: "preview", provider: this.provider, fallbackOnUnavailable: false,
+      purpose: "preview", provider: this.provider, fallbackOnUnavailable: false, allowTools: false,
+      ...(this.retrieval ? { retrieval: this.retrieval.context(context, companyId, knowledge.sourceRevisionIds, message) } : {}),
     })).response;
   }
 }
