@@ -34,6 +34,8 @@ export interface ToolDefinition {
   readonly confirmationPolicy: ToolConfirmationPolicy; readonly auditPolicy: ToolAuditPolicy;
   readonly conversationMemoryPolicy?: ToolConversationMemoryPolicy;
   readonly conversationStatePolicy?: ToolConversationStatePolicy;
+  /** A code-owned readiness requirement; secret material is never available to tools. */
+  readonly integration?: { readonly provider: string; readonly kind: string };
   readonly executor: (context: ToolExecutionContext, input: unknown, signal: AbortSignal) => Promise<unknown>;
 }
 export class ToolSchemaError extends Error {}

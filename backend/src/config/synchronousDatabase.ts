@@ -55,7 +55,12 @@ export class SynchronousLibsqlDatabase implements SynchronousDatabase {
 
   public close(): void {
     if (this.closed) return;
-    try { this.request("close"); } finally { this.closed = true; void this.worker.terminate(); this.port.close(); }
+    void this.closeAsync();
+  }
+
+  public async closeAsync(): Promise<void> {
+    if (this.closed) return;
+    try { this.request("close"); } finally { this.closed = true; this.port.close(); await this.worker.terminate(); }
   }
 
   private request(action: "execute" | "query" | "exec" | "begin" | "commit" | "rollback" | "close", sql?: string, args?: SqlArgument[]): NonNullable<WorkerResponse["value"]> {
