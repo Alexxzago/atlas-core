@@ -133,6 +133,8 @@ import { AssistantCapabilityService } from "./assistant/services/assistantCapabi
 import { createListAssistantCapabilitiesController, createReplaceAssistantCapabilitiesController } from "./controllers/assistantCapabilityController.js";
 import { ToolRegistry } from "./assistant/application/toolRegistry.js";
 import { NoIntegrationToolAvailabilityPolicy } from "./assistant/application/toolContracts.js";
+import { IntegrationToolAvailabilityPolicy } from "./integrations/services/integrationToolAvailabilityPolicy.js";
+import { IntegrationConnectionRepository } from "./repositories/integrationConnectionRepository.js";
 import { AssistantToolOrchestrator } from "./assistant/services/assistantToolOrchestrator.js";
 import { ToolExecutionService } from "./assistant/services/toolExecutionService.js";
 import { AssistantToolExecutionTraceRepository } from "./repositories/assistantToolExecutionTraceRepository.js";
@@ -196,7 +198,8 @@ const assistantProfileService=new AssistantProfileService(new AssistantProfileRe
 const assistantCapabilityRepository=new AssistantCapabilityRepository(new SynchronousSqlDatabaseAdapter(database));
 const assistantCapabilityService=new AssistantCapabilityService(productionAssistantCapabilityCatalog,assistantCapabilityRepository,identityClock);
 configureProductionAssistantCapabilityControllers({list:context=>createListAssistantCapabilitiesController(assistantCapabilityService,context),replace:(context,actor)=>createReplaceAssistantCapabilitiesController(assistantCapabilityService,context,actor)});
-const productionAssistantTools=new AssistantToolOrchestrator(geminiProvider.toolModel(),new ToolRegistry(productionAssistantCapabilityCatalog,[]),assistantCapabilityRepository,new NoIntegrationToolAvailabilityPolicy(),new ToolExecutionService(new AssistantToolExecutionTraceRepository(new SynchronousSqlDatabaseAdapter(database)),identityClock),identityClock);
+const integrationConnections = new IntegrationConnectionRepository(new SynchronousSqlDatabaseAdapter(database));
+const productionAssistantTools=new AssistantToolOrchestrator(geminiProvider.toolModel(),new ToolRegistry(productionAssistantCapabilityCatalog,[]),assistantCapabilityRepository,new IntegrationToolAvailabilityPolicy(new NoIntegrationToolAvailabilityPolicy(),integrationConnections),new ToolExecutionService(new AssistantToolExecutionTraceRepository(new SynchronousSqlDatabaseAdapter(database)),identityClock),identityClock);
 const webChatConnectionService = new WebChatConnectionService(companyRepository, new AssistantProfileRepository(database), new WebChatConnectionRepository(database), identityClock);
 const whatsAppConnections = new WhatsAppConnectionRepository(database);
 const whatsAppCredentialCipher = new AesGcmWhatsAppCredentialCipher(whatsAppPlatformEncryptionKey(process.env.WHATSAPP_PLATFORM_ENCRYPTION_KEY));

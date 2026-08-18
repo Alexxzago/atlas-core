@@ -29,7 +29,7 @@ test("EPIC-014 local async adapter keeps createDatabase memory tests functional"
   await local.close();
 });
 
-test("EPIC-014 libSQL adapter preserves the repository SQL result contract without cloud access", () => {
+test("EPIC-014 libSQL adapter preserves the repository SQL result contract without cloud access", async () => {
   const directory = mkdtempSync(join(tmpdir(), "atlas-libsql-"));
   const database = new SynchronousLibsqlDatabase(pathToFileURL(join(directory, "atlas.sqlite")).href, "local-test-token");
   try {
@@ -37,5 +37,5 @@ test("EPIC-014 libSQL adapter preserves the repository SQL result contract witho
     const inserted = database.prepare("INSERT INTO probe (value) VALUES (?)").run("libsql");
     assert.equal(inserted.changes, 1);
     assert.deepEqual(database.prepare("SELECT id, value FROM probe").all(), [{ id: 1, value: "libsql" }]);
-  } finally { database.close(); rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+  } finally { await database.closeAsync(); rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });

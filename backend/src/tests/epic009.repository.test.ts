@@ -28,7 +28,7 @@ test("migration 7 creates the constrained indexed schema without bootstrap profi
     { id: 5, checksum: "17e9c535141a010e24e6a0368c271b4450a8d6d910c5f4993c3c83685f298892" },
     { id: 6, checksum: "a4106984a62fab22793896040603f215ae21e628689a68632bf009c65b6b4423" },
   ]);
-    assert.equal((db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 39);
+    assert.equal((db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 40);
   assert.equal((db.prepare("SELECT COUNT(*) AS count FROM assistant_profiles").get() as { count: number }).count, 0);
   const indexes = db.prepare("PRAGMA index_list(assistant_profiles)").all() as Array<{ name: string }>;
   assert.ok(indexes.some((index) => index.name === "idx_assistant_profiles_company_status_created"));
@@ -60,7 +60,7 @@ test("migration 7 upgrades schema 6 data, restarts safely, cascades, and rolls b
     upgraded.close();
 
     const restarted = createDatabase(path);
-    assert.equal((restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 39);
+    assert.equal((restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 40);
     restarted.exec("DROP TABLE conversation_intelligence_tool_memory; DROP TABLE conversation_intelligence_reference_options; DROP TABLE conversation_intelligence_reference_groups; DROP TABLE conversation_intelligence_pending_items; DROP TABLE conversation_intelligence_facts; DROP TABLE conversation_intelligence_applied_tool_traces; DROP TABLE conversation_intelligence_applied_messages; DROP TABLE conversation_intelligence_states; DROP TABLE tool_execution_traces; DROP TABLE assistant_capability_audit_events; DROP TABLE assistant_profile_capabilities; DROP INDEX ux_assistant_execution_records_scope; DROP INDEX ux_companies_workspace_id; DROP TABLE assistant_profiles; DELETE FROM schema_migrations WHERE id IN (7,38,39); CREATE TABLE migration_7_blocker(id INTEGER); CREATE INDEX idx_assistant_profiles_company_status_created ON migration_7_blocker(id);");
     restarted.close();
     assert.throws(() => createDatabase(path));

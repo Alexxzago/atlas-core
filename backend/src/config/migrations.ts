@@ -1145,6 +1145,40 @@ const migrations: Migration[] = [
     CREATE TRIGGER conversation_intelligence_group_message_scope_insert
     BEFORE INSERT ON conversation_intelligence_reference_groups WHEN NEW.source_message_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM conversation_messages m WHERE m.id=NEW.source_message_id AND m.conversation_id=NEW.conversation_id)
     BEGIN SELECT RAISE(ABORT,'Conversation intelligence group message scope is invalid'); END;
+   `);}},
+  { id:40,name:"0040_integration_connections_core",checksumSource:"generic-integration-connections-secrets-operational-state-audit-cas-v1",apply(database):void{database.exec(`
+    CREATE TABLE integration_connections(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,provider TEXT NOT NULL,kind TEXT NOT NULL,
+      configuration_json TEXT NOT NULL CHECK(json_valid(configuration_json)),status TEXT NOT NULL CHECK(status IN ('inactive','active')),version INTEGER NOT NULL CHECK(version>0),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      UNIQUE(workspace_id,company_id,provider,kind),
+      UNIQUE(workspace_id,company_id,id)
+    );
+    CREATE INDEX idx_integration_connections_scope ON integration_connections(workspace_id,company_id,provider,kind,status,updated_at DESC,id DESC);
+    CREATE TABLE integration_connection_secrets(
+      integration_connection_id TEXT PRIMARY KEY REFERENCES integration_connections(id) ON DELETE CASCADE,
+      encrypted_secret TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL
+    );
+    CREATE TABLE integration_connection_operational_states(
+      integration_connection_id TEXT PRIMARY KEY REFERENCES integration_connections(id) ON DELETE CASCADE,
+      validation_state TEXT NOT NULL CHECK(validation_state IN ('not_validated','valid','invalid')),validated_at TEXT,
+      validation_failure_code TEXT CHECK(validation_failure_code IN ('credentials_invalid','provider_identity_mismatch','provider_unavailable','provider_timeout','provider_rejected')),
+      health_state TEXT NOT NULL CHECK(health_state IN ('inactive','healthy','degraded')),
+      health_failure_code TEXT CHECK(health_failure_code IN ('credentials_invalid','provider_identity_mismatch','provider_unavailable','provider_timeout','provider_rejected')),
+      last_provider_activity_at TEXT,updated_at TEXT NOT NULL,
+      CHECK((validation_state='not_validated' AND validated_at IS NULL AND validation_failure_code IS NULL) OR (validation_state='valid' AND validated_at IS NOT NULL AND validation_failure_code IS NULL) OR (validation_state='invalid' AND validated_at IS NOT NULL AND validation_failure_code IS NOT NULL)),
+      CHECK((health_state='degraded' AND health_failure_code IS NOT NULL) OR (health_state IN ('inactive','healthy') AND health_failure_code IS NULL))
+    );
+    CREATE TABLE integration_connection_audit_events(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,integration_connection_id TEXT NOT NULL REFERENCES integration_connections(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL CHECK(event_type IN ('created','configured','secret_configured','validated','validation_failed','activated','deactivated')),payload_json TEXT NOT NULL CHECK(json_valid(payload_json)) CHECK(length(payload_json)<=1024),version INTEGER NOT NULL CHECK(version>0),occurred_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id,company_id,integration_connection_id) REFERENCES integration_connections(workspace_id,company_id,id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_integration_connection_audit_scope ON integration_connection_audit_events(workspace_id,company_id,integration_connection_id,occurred_at DESC,id DESC);
+    CREATE TRIGGER integration_connection_audit_no_update BEFORE UPDATE ON integration_connection_audit_events BEGIN SELECT RAISE(ABORT,'integration audit events are append-only'); END;
+    CREATE TRIGGER integration_connection_audit_no_delete BEFORE DELETE ON integration_connection_audit_events BEGIN SELECT RAISE(ABORT,'integration audit events are append-only'); END;
   `);}},
 ];
 
