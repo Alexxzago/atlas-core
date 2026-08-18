@@ -147,6 +147,10 @@ import { LiveDataService } from "./liveData/services/liveDataService.js";
 import { LiveDataToolAvailabilityPolicy } from "./liveData/services/liveDataToolAvailabilityPolicy.js";
 import { LiveDataObservationRepository } from "./repositories/liveDataObservationRepository.js";
 import { liveDataReadToolDefinition } from "./liveData/application/liveDataReadToolDefinition.js";
+import { BookingRepository } from "./repositories/bookingRepository.js";
+import { BookingCommandService } from "./scheduling/services/bookingCommandService.js";
+import { BookingQueryService } from "./scheduling/services/bookingQueryService.js";
+import { schedulingBookingToolDefinitions } from "./scheduling/application/bookingToolDefinitions.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -206,7 +210,10 @@ configureProductionAssistantCapabilityControllers({list:context=>createListAssis
 const integrationConnections = new IntegrationConnectionRepository(new SynchronousSqlDatabaseAdapter(database));
 const liveDataProvider = new FakeLiveDataProvider();
 const liveDataService = new LiveDataService(new LiveDataObservationRepository(new SynchronousSqlDatabaseAdapter(database)), integrationConnections, liveDataProvider, identityClock);
-const productionAssistantTools=new AssistantToolOrchestrator(geminiProvider.toolModel(),new ToolRegistry(productionAssistantCapabilityCatalog,[liveDataReadToolDefinition(liveDataService)]),assistantCapabilityRepository,new LiveDataToolAvailabilityPolicy(new IntegrationToolAvailabilityPolicy(new NoIntegrationToolAvailabilityPolicy(),integrationConnections),integrationConnections),new ToolExecutionService(new AssistantToolExecutionTraceRepository(new SynchronousSqlDatabaseAdapter(database)),identityClock),identityClock);
+const bookingRepository = new BookingRepository(new SynchronousSqlDatabaseAdapter(database));
+const bookingCommands = new BookingCommandService(bookingRepository, identityClock);
+const bookingQueries = new BookingQueryService(bookingRepository);
+const productionAssistantTools=new AssistantToolOrchestrator(geminiProvider.toolModel(),new ToolRegistry(productionAssistantCapabilityCatalog,[liveDataReadToolDefinition(liveDataService),...schedulingBookingToolDefinitions(bookingCommands,bookingQueries)]),assistantCapabilityRepository,new LiveDataToolAvailabilityPolicy(new IntegrationToolAvailabilityPolicy(new NoIntegrationToolAvailabilityPolicy(),integrationConnections),integrationConnections),new ToolExecutionService(new AssistantToolExecutionTraceRepository(new SynchronousSqlDatabaseAdapter(database)),identityClock),identityClock);
 const webChatConnectionService = new WebChatConnectionService(companyRepository, new AssistantProfileRepository(database), new WebChatConnectionRepository(database), identityClock);
 const whatsAppConnections = new WhatsAppConnectionRepository(database);
 const whatsAppCredentialCipher = new AesGcmWhatsAppCredentialCipher(whatsAppPlatformEncryptionKey(process.env.WHATSAPP_PLATFORM_ENCRYPTION_KEY));

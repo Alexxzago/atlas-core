@@ -1278,6 +1278,29 @@ const migrations: Migration[] = [
       (NEW.source='external_observed' AND NEW.external_reference IS NOT NULL AND length(NEW.external_reference) BETWEEN 1 AND 200)
     ) BEGIN SELECT RAISE(ABORT,'Scheduling busy interval source or reference is invalid'); END;
   `);}},
+  { id:46,name:"0046_scheduling_booking_mutations_audit_lineage",checksumSource:"scheduling-booking-command-idempotency-append-only-audit-reschedule-lineage-v1",apply(database):void{if(!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduling_bookings'").get())return;const columns=database.prepare("PRAGMA table_info(scheduling_bookings)").all() as Array<{name:string}>;if(!columns.some(column=>column.name==="rescheduled_from_booking_id"))database.exec("ALTER TABLE scheduling_bookings ADD COLUMN rescheduled_from_booking_id TEXT REFERENCES scheduling_bookings(id) ON DELETE RESTRICT;");database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_scheduling_bookings_lineage ON scheduling_bookings(workspace_id,company_id,rescheduled_from_booking_id);
+    CREATE TABLE scheduling_booking_mutations(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,idempotency_key TEXT NOT NULL,operation TEXT NOT NULL CHECK(operation IN ('create','reschedule','cancel')),request_fingerprint TEXT NOT NULL,booking_id TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(booking_id) REFERENCES scheduling_bookings(id) ON DELETE RESTRICT,UNIQUE(workspace_id,company_id,idempotency_key));
+    CREATE TABLE scheduling_booking_audit_events(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,booking_id TEXT NOT NULL,mutation_id TEXT NOT NULL,event_type TEXT NOT NULL CHECK(event_type IN ('created','rescheduled','cancelled')),occurred_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(booking_id) REFERENCES scheduling_bookings(id) ON DELETE RESTRICT,FOREIGN KEY(mutation_id) REFERENCES scheduling_booking_mutations(id) ON DELETE RESTRICT);
+    CREATE INDEX idx_scheduling_booking_audit_events_booking ON scheduling_booking_audit_events(workspace_id,company_id,booking_id,occurred_at,id);
+    CREATE TRIGGER scheduling_booking_audit_events_no_update BEFORE UPDATE ON scheduling_booking_audit_events BEGIN SELECT RAISE(ABORT,'Scheduling booking audit events are append-only'); END;
+    CREATE TRIGGER scheduling_booking_audit_events_no_delete BEFORE DELETE ON scheduling_booking_audit_events BEGIN SELECT RAISE(ABORT,'Scheduling booking audit events are append-only'); END;
+  `);}},
+  { id:47,name:"0047_scheduling_booking_mutation_operation_scope",checksumSource:"scheduling-booking-mutation-operation-scoped-idempotency|preserve-historical-mutations|already-cancelled-outcome-v1",disableForeignKeys:true,apply(database):void{if(!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduling_booking_mutations'").get())return;database.exec(`
+    CREATE TABLE scheduling_booking_mutations_v47(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,idempotency_key TEXT NOT NULL,
+      operation TEXT NOT NULL CHECK(operation IN ('create','reschedule','cancel')),request_fingerprint TEXT NOT NULL,
+      booking_id TEXT NOT NULL,outcome TEXT NOT NULL CHECK(outcome IN ('created','already_cancelled')) DEFAULT 'created',created_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(booking_id) REFERENCES scheduling_bookings(id) ON DELETE RESTRICT,
+      UNIQUE(workspace_id,company_id,operation,idempotency_key)
+    );
+    INSERT INTO scheduling_booking_mutations_v47(id,workspace_id,company_id,idempotency_key,operation,request_fingerprint,booking_id,outcome,created_at)
+    SELECT id,workspace_id,company_id,idempotency_key,operation,request_fingerprint,booking_id,'created',created_at FROM scheduling_booking_mutations;
+    DROP TABLE scheduling_booking_mutations;
+    ALTER TABLE scheduling_booking_mutations_v47 RENAME TO scheduling_booking_mutations;
+    CREATE INDEX idx_scheduling_booking_mutations_lookup ON scheduling_booking_mutations(workspace_id,company_id,operation,idempotency_key);
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {
