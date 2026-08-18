@@ -28,7 +28,7 @@ test("migration 7 creates the constrained indexed schema without bootstrap profi
     { id: 5, checksum: "17e9c535141a010e24e6a0368c271b4450a8d6d910c5f4993c3c83685f298892" },
     { id: 6, checksum: "a4106984a62fab22793896040603f215ae21e628689a68632bf009c65b6b4423" },
   ]);
-    assert.equal((db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 37);
+    assert.equal((db.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 38);
   assert.equal((db.prepare("SELECT COUNT(*) AS count FROM assistant_profiles").get() as { count: number }).count, 0);
   const indexes = db.prepare("PRAGMA index_list(assistant_profiles)").all() as Array<{ name: string }>;
   assert.ok(indexes.some((index) => index.name === "idx_assistant_profiles_company_status_created"));
@@ -46,7 +46,7 @@ test("migration 7 upgrades schema 6 data, restarts safely, cascades, and rolls b
     const initial = createDatabase(path), context = createWorkspaceContext(new WorkspaceRepository(initial).resolveDefault());
     const company = new CompanyRepository(initial).create(context, { name: "Preserved", website: "https://preserved.test" });
     const checksums = initial.prepare("SELECT id,checksum FROM schema_migrations WHERE id<=6 ORDER BY id").all();
-    initial.exec("DROP TABLE assistant_profiles; DELETE FROM schema_migrations WHERE id=7;");
+    initial.exec("DROP TABLE tool_execution_traces; DROP TABLE assistant_capability_audit_events; DROP TABLE assistant_profile_capabilities; DROP INDEX ux_assistant_execution_records_scope; DROP INDEX ux_companies_workspace_id; DROP TABLE assistant_profiles; DELETE FROM schema_migrations WHERE id IN (7,38);");
     initial.close();
 
     const upgraded = createDatabase(path);
@@ -60,8 +60,8 @@ test("migration 7 upgrades schema 6 data, restarts safely, cascades, and rolls b
     upgraded.close();
 
     const restarted = createDatabase(path);
-    assert.equal((restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 37);
-    restarted.exec("DROP TABLE assistant_profiles; DELETE FROM schema_migrations WHERE id=7; CREATE TABLE migration_7_blocker(id INTEGER); CREATE INDEX idx_assistant_profiles_company_status_created ON migration_7_blocker(id);");
+    assert.equal((restarted.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as { count: number }).count, 38);
+    restarted.exec("DROP TABLE tool_execution_traces; DROP TABLE assistant_capability_audit_events; DROP TABLE assistant_profile_capabilities; DROP INDEX ux_assistant_execution_records_scope; DROP INDEX ux_companies_workspace_id; DROP TABLE assistant_profiles; DELETE FROM schema_migrations WHERE id IN (7,38); CREATE TABLE migration_7_blocker(id INTEGER); CREATE INDEX idx_assistant_profiles_company_status_created ON migration_7_blocker(id);");
     restarted.close();
     assert.throws(() => createDatabase(path));
     const blocked = new DatabaseSync(path);

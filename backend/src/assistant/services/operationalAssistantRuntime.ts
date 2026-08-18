@@ -2,11 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Clock } from "../../identity/application/ports.js";
 import type { Company } from "../../types/company.js";
 import type { CompanyKnowledgeVersion } from "../../knowledge/domain/knowledge.js";
-import { AnswerGenerationUnavailableError, buildAssistantExecution, type AssistantConversationHistoryEntry, type AssistantExecutionResult } from "../application/assistantExecution.js";
+import { AnswerGenerationUnavailableError, assistantModelPrompt, buildAssistantExecution, type AssistantConversationHistoryEntry, type AssistantExecutionResult } from "../application/assistantExecution.js";
 import type { AssistantExecutionPort } from "../application/assistantExecutionPort.js";
 import type { AssistantExecutionRecordRepositoryPort } from "../application/operationalAssistantRuntime.js";
 import { assistantExecutionRecordId, createProfileRuntimeSnapshot, createPublishedKnowledgeSnapshotReference, type AssistantExecutionRecord, type AssistantRuntimePurpose, type ImmutableExecutionSnapshot } from "../domain/operationalAssistantRuntime.js";
 import type { AssistantProfile } from "../domain/assistantProfile.js";
+import type { AssistantToolOrchestrator } from "./assistantToolOrchestrator.js";
+import { ToolExecutionError } from "./toolExecutionService.js";
 
 export interface OperationalAssistantRuntimeContext {
   readonly purpose: AssistantRuntimePurpose;
@@ -30,6 +32,7 @@ export class OperationalAssistantRuntime {
     private readonly execution: AssistantExecutionPort,
     private readonly records: AssistantExecutionRecordRepositoryPort,
     private readonly clock: Clock,
+    private readonly tools?: AssistantToolOrchestrator,
   ) {}
 
   public async execute(
@@ -46,12 +49,20 @@ export class OperationalAssistantRuntime {
     const started = this.record(company, profile, knowledge, context, startedAt);
     this.records.create(started);
     try {
-      const result = await this.execution.execute(buildAssistantExecution(profile, {
+      const request = buildAssistantExecution(profile, {
         purpose: context.purpose,
         knowledge: knowledge.knowledge,
         message,
         history,
-      }));
+      });
+      const result = this.tools
+        ? Object.freeze({ outcome: "answered" as const, answer: await this.tools.run(assistantModelPrompt(request), {
+          workspaceId: company.workspaceId, companyId: company.id, assistantProfileId: profile.id,
+          assistantExecutionRecordId: started.id, conversationId: context.snapshotContext?.conversationId ?? null,
+          channel: context.snapshotContext?.channelProvider === "whatsapp" ? "whatsapp" : context.snapshotContext?.channelProvider === "web_chat" ? "web_chat" : "internal",
+          invocationId: "", idempotencyKey: null, confirmation: null,
+        }) })
+        : await this.execution.execute(request);
       const response = validResponse(result)
         ? context.fallbackOnUnavailable && result.outcome === "safe_fallback" ? fallback(profile.fallbackMessage) : result
         : fallback(profile.fallbackMessage);
@@ -59,7 +70,7 @@ export class OperationalAssistantRuntime {
       this.persistCompletion(completed);
       return { response, record: completed };
     } catch (error: unknown) {
-      if (context.fallbackOnUnavailable && error instanceof AnswerGenerationUnavailableError) {
+      if (context.fallbackOnUnavailable && (error instanceof AnswerGenerationUnavailableError || error instanceof ToolExecutionError)) {
         const response = fallback(profile.fallbackMessage);
         const completed = this.complete(started, response, null, this.clock.now());
         this.persistCompletion(completed);

@@ -124,8 +124,18 @@ import { PlatformAuthorizationService } from "./platformAdmin/services/platformA
 import { PlatformAdministrationService } from "./platformAdmin/services/platformAdministrationService.js";
 import { createPlatformAdminControllers } from "./controllers/platformAdminController.js";
 import { createPlatformAdminRouter } from "./routes/platformAdmin.js";
-import { configureProductionCommercialControls } from "./routes/authorizedCompanies.js";
+import { configureProductionAssistantCapabilityControllers, configureProductionCommercialControls } from "./routes/authorizedCompanies.js";
 import { CommercialControlsRepository } from "./repositories/commercialControlsRepository.js";
+import { SynchronousSqlDatabaseAdapter } from "./config/sqlDatabase.js";
+import { AssistantCapabilityRepository } from "./repositories/assistantCapabilityRepository.js";
+import { productionAssistantCapabilityCatalog } from "./assistant/domain/assistantCapability.js";
+import { AssistantCapabilityService } from "./assistant/services/assistantCapabilityService.js";
+import { createListAssistantCapabilitiesController, createReplaceAssistantCapabilitiesController } from "./controllers/assistantCapabilityController.js";
+import { ToolRegistry } from "./assistant/application/toolRegistry.js";
+import { NoIntegrationToolAvailabilityPolicy } from "./assistant/application/toolContracts.js";
+import { AssistantToolOrchestrator } from "./assistant/services/assistantToolOrchestrator.js";
+import { ToolExecutionService } from "./assistant/services/toolExecutionService.js";
+import { AssistantToolExecutionTraceRepository } from "./repositories/assistantToolExecutionTraceRepository.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
@@ -179,6 +189,10 @@ const platformBootstrapControllers = createPlatformBootstrapControllers(platform
 export const authorizationService=new AuthorizationService(new MembershipRepository(database),workspaceRepository);
 export const authenticatedWorkspaceResolver=new WorkspaceResolver(workspaceRepository);
 const assistantProfileService=new AssistantProfileService(new AssistantProfileRepository(database),identityClock);
+const assistantCapabilityRepository=new AssistantCapabilityRepository(new SynchronousSqlDatabaseAdapter(database));
+const assistantCapabilityService=new AssistantCapabilityService(productionAssistantCapabilityCatalog,assistantCapabilityRepository,identityClock);
+configureProductionAssistantCapabilityControllers({list:context=>createListAssistantCapabilitiesController(assistantCapabilityService,context),replace:(context,actor)=>createReplaceAssistantCapabilitiesController(assistantCapabilityService,context,actor)});
+const productionAssistantTools=new AssistantToolOrchestrator(geminiProvider.toolModel(),new ToolRegistry(productionAssistantCapabilityCatalog,[]),assistantCapabilityRepository,new NoIntegrationToolAvailabilityPolicy(),new ToolExecutionService(new AssistantToolExecutionTraceRepository(new SynchronousSqlDatabaseAdapter(database)),identityClock),identityClock);
 const webChatConnectionService = new WebChatConnectionService(companyRepository, new AssistantProfileRepository(database), new WebChatConnectionRepository(database), identityClock);
 const whatsAppConnections = new WhatsAppConnectionRepository(database);
 const whatsAppCredentialCipher = new AesGcmWhatsAppCredentialCipher(whatsAppPlatformEncryptionKey(process.env.WHATSAPP_PLATFORM_ENCRYPTION_KEY));
@@ -190,7 +204,7 @@ configureProductionAssistantReadinessControllers({ get: (context) => createGetAs
 const whatsAppConnectionService = new WhatsAppConnectionService(companyRepository, new AssistantProfileRepository(database), whatsAppConnections, identityClock, { credentials: whatsAppConnections, states: whatsAppConnections, cipher: whatsAppCredentialCipher, resolver: whatsAppCredentialResolver, validator: new WhatsAppCloudApiProvider("", process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0"), knowledge: new CompanyKnowledgeRepository(database) }, assistantReadinessService);
 export const conversationService = new ConversationService(new ConversationRepository(database), identityClock);
 const publicWebChatSessionService = new PublicWebChatSessionService(webChatConnectionService, conversationService, new WebChatSessionRepository(database), identityClock);
-export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock), new InMemoryConversationTurnLock(), "gemini", 20);
+export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock, productionAssistantTools), new InMemoryConversationTurnLock(), "gemini", 20);
 const publicWebChatConversationService = new PublicWebChatConversationService(publicWebChatSessionService, operationalConversationTurnService, conversationService);
 const companyKnowledgeService=new FrozenKnowledgeService(companyRepository,new CompanyKnowledgeRepository(database),new SecurePublicUrlProvider(),new WorkerPdfTextExtractor(),new ManualTextKnowledgeFactExtractor(new GeminiKnowledgeFactExtractor(geminiProvider)),identityClock);
 const companyKnowledgeControllers=createCompanyKnowledgeControllers(companyKnowledgeService);
@@ -229,7 +243,7 @@ const whatsAppWebhookRouter = createWhatsAppWebhookRouter(createWhatsAppWebhookC
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));
 export const platformAdminRouter=createPlatformAdminRouter(authenticationService,platformAuthorizationService,createPlatformAdminControllers(new PlatformAdministrationService(new PlatformAdministrationRepository(database),new CommercialControlsRepository(database))),requestOriginPolicy);
 function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
-  const runtime = new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), identityClock);
+  const runtime = new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), identityClock, execution===agent?productionAssistantTools:undefined);
   const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, "gemini");
   const operational = new OperationalAssistantExecutionService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, new InMemoryOperationalExecutionBudget(), "gemini");
   return createAuthorizedCompaniesRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,controllers:{list:context=>createListCompaniesController(companyService,context),create:context=>createCompanyController(companyService,context),get:context=>createGetCompanyController(companyService,context),update:context=>createUpdateCompanyController(companyService,context),delete:context=>createDeleteCompanyController(companyService,context),onboard:(context,actor)=>createOnboardingController(onboardingService,context,actor)},assistantControllers:{list:context=>createListAssistantProfilesController(assistantProfileService,context),create:context=>createAssistantProfileController(assistantProfileService,context),get:context=>createGetAssistantProfileController(assistantProfileService,context),update:context=>createUpdateAssistantProfileController(assistantProfileService,context),transition:context=>createTransitionAssistantProfileController(assistantProfileService,context),preview:context=>createAssistantPreviewController(preview,context),execution:context=>createOperationalAssistantExecutionController(operational,context)},webChatConnectionControllers:{list:context=>createListWebChatConnectionsController(webChatConnectionService,context),create:context=>createWebChatConnectionController(webChatConnectionService,context),get:context=>createGetWebChatConnectionController(webChatConnectionService,context),update:context=>createUpdateWebChatConnectionController(webChatConnectionService,context)},whatsAppConnectionControllers:{list:context=>createListWhatsAppConnectionsController(whatsAppConnectionService,context),create:context=>createWhatsAppConnectionController(whatsAppConnectionService,context),get:context=>createGetWhatsAppConnectionController(whatsAppConnectionService,context),update:context=>createUpdateWhatsAppConnectionController(whatsAppConnectionService,context),status:context=>createGetWhatsAppConnectionStatusController(whatsAppConnectionService,context),configureCredentials:context=>createConfigureWhatsAppCredentialsController(whatsAppConnectionService,context),validate:context=>createValidateWhatsAppConnectionController(whatsAppConnectionService,context),activate:context=>createActivateWhatsAppConnectionController(whatsAppConnectionService,context),deactivate:context=>createDeactivateWhatsAppConnectionController(whatsAppConnectionService,context)},knowledgeControllers:companyKnowledgeControllers});

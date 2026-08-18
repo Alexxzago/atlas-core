@@ -1038,6 +1038,45 @@ const migrations: Migration[] = [
     CREATE TRIGGER commercial_whatsapp_active_limit_insert BEFORE INSERT ON whatsapp_connections WHEN NEW.status='active' AND (NOT EXISTS(SELECT 1 FROM workspace_commercial_controls WHERE workspace_id=NEW.workspace_id AND status='active') OR (SELECT max_active_channels FROM workspace_commercial_controls WHERE workspace_id=NEW.workspace_id) IS NOT NULL AND ((SELECT COUNT(*) FROM web_chat_connections WHERE workspace_id=NEW.workspace_id AND status='active')+(SELECT COUNT(*) FROM whatsapp_connections WHERE workspace_id=NEW.workspace_id AND status='active'))>=(SELECT max_active_channels FROM workspace_commercial_controls WHERE workspace_id=NEW.workspace_id)) BEGIN SELECT RAISE(ABORT,'workspace active channel creation is unavailable'); END;
     CREATE TRIGGER commercial_whatsapp_active_limit_update BEFORE UPDATE OF status ON whatsapp_connections WHEN NEW.status='active' AND OLD.status!='active' AND (NOT EXISTS(SELECT 1 FROM workspace_commercial_controls WHERE workspace_id=NEW.workspace_id AND status='active') OR (SELECT max_active_channels FROM workspace_commercial_controls WHERE workspace_id=NEW.workspace_id) IS NOT NULL AND ((SELECT COUNT(*) FROM web_chat_connections WHERE workspace_id=NEW.workspace_id AND status='active')+(SELECT COUNT(*) FROM whatsapp_connections WHERE workspace_id=NEW.workspace_id AND status='active'))>=(SELECT max_active_channels FROM workspace_commercial_controls WHERE workspace_id=NEW.workspace_id)) BEGIN SELECT RAISE(ABORT,'workspace active channel creation is unavailable'); END;
   `);}},
+  { id:38,name:"0038_assistant_capability_foundation",checksumSource:"code-owned-capabilities|tenant-scoped-assignments|append-only-audit|sanitized-tool-traces",apply(database):void{database.exec(`
+    CREATE UNIQUE INDEX ux_companies_workspace_id ON companies(workspace_id,id);
+    CREATE UNIQUE INDEX ux_assistant_profiles_company_id ON assistant_profiles(company_id,id);
+    CREATE UNIQUE INDEX ux_assistant_execution_records_scope ON assistant_execution_records(id,company_id,assistant_profile_id);
+    CREATE TABLE assistant_profile_capabilities(
+      workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,assistant_profile_id TEXT NOT NULL,capability_key TEXT NOT NULL,
+      assigned_by_actor_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,assigned_at TEXT NOT NULL,
+      PRIMARY KEY(assistant_profile_id,capability_key),
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(company_id,assistant_profile_id) REFERENCES assistant_profiles(company_id,id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_assistant_profile_capabilities_scope ON assistant_profile_capabilities(workspace_id,company_id,assistant_profile_id,capability_key);
+    CREATE TABLE assistant_capability_audit_events(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,assistant_profile_id TEXT NOT NULL,capability_key TEXT NOT NULL,
+      actor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,event_type TEXT NOT NULL CHECK(event_type IN ('assigned','removed')),occurred_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(company_id,assistant_profile_id) REFERENCES assistant_profiles(company_id,id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_assistant_capability_audit_profile ON assistant_capability_audit_events(workspace_id,company_id,assistant_profile_id,occurred_at DESC,id DESC);
+    CREATE TRIGGER assistant_capability_audit_no_update BEFORE UPDATE ON assistant_capability_audit_events BEGIN SELECT RAISE(ABORT,'assistant capability audit events are append-only'); END;
+    CREATE TRIGGER assistant_capability_audit_no_delete BEFORE DELETE ON assistant_capability_audit_events BEGIN SELECT RAISE(ABORT,'assistant capability audit events are append-only'); END;
+    CREATE TABLE tool_execution_traces(
+      id TEXT PRIMARY KEY,assistant_execution_record_id TEXT NOT NULL,
+      workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,assistant_profile_id TEXT NOT NULL,model_tool_call_id TEXT NOT NULL,tool_name TEXT NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('requested','completed','failed')),audit_input_json TEXT,audit_output_json TEXT,output_reference TEXT,error_code TEXT,
+      requested_at TEXT NOT NULL,completed_at TEXT,duration_milliseconds INTEGER,
+      UNIQUE(assistant_execution_record_id,model_tool_call_id),
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(company_id,assistant_profile_id) REFERENCES assistant_profiles(company_id,id) ON DELETE RESTRICT,
+      FOREIGN KEY(assistant_execution_record_id,company_id,assistant_profile_id) REFERENCES assistant_execution_records(id,company_id,assistant_profile_id) ON DELETE CASCADE,
+      CHECK((state='requested' AND completed_at IS NULL AND duration_milliseconds IS NULL AND audit_output_json IS NULL AND output_reference IS NULL AND error_code IS NULL)
+        OR (state='completed' AND completed_at IS NOT NULL AND duration_milliseconds>=0 AND error_code IS NULL)
+        OR (state='failed' AND completed_at IS NOT NULL AND duration_milliseconds>=0 AND error_code IS NOT NULL))
+    );
+    CREATE INDEX idx_tool_execution_traces_profile_requested ON tool_execution_traces(workspace_id,company_id,assistant_profile_id,requested_at DESC,id DESC);
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

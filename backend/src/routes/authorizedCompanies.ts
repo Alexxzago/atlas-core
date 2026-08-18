@@ -28,6 +28,7 @@ interface ContextualAssistantControllers {
   preview: (context: WorkspaceContext) => RequestHandler;
   execution?: (context: WorkspaceContext) => RequestHandler;
 }
+interface ContextualAssistantCapabilityControllers { list:(context:WorkspaceContext)=>RequestHandler; replace:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler; }
 interface ContextualAssistantReadinessControllers { get: (context: WorkspaceContext) => RequestHandler; refresh: (context: WorkspaceContext) => RequestHandler; }
 interface ContextualDefaultAssistantControllers { get:(context:WorkspaceContext)=>RequestHandler; put:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler; }
 
@@ -62,6 +63,7 @@ interface AuthorizedCompanyDependencies {
   controllers: ContextualControllers;
   companyCoreControllers?: CompanyCoreControllers;
   assistantControllers: ContextualAssistantControllers;
+  assistantCapabilityControllers?: ContextualAssistantCapabilityControllers;
   assistantReadinessControllers?: ContextualAssistantReadinessControllers;
   defaultAssistantControllers?: ContextualDefaultAssistantControllers;
   webChatConnectionControllers?: ContextualWebChatConnectionControllers;
@@ -80,6 +82,7 @@ let productionConversationControlControllers: ContextualConversationControlContr
 let productionCompanyCoreControllers: CompanyCoreControllers | null = null;
 let productionAssistantReadinessControllers: ContextualAssistantReadinessControllers | null = null;
 let productionDefaultAssistantControllers: ContextualDefaultAssistantControllers | null = null;
+let productionAssistantCapabilityControllers: ContextualAssistantCapabilityControllers | null = null;
 let productionCommercialControls: CommercialControlsRepository | null = null;
 export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
 export function configureProductionConversationReadControllers(controllers: ContextualConversationReadControllers): void { productionConversationReadControllers = controllers; }
@@ -87,6 +90,7 @@ export function configureProductionConversationControlControllers(controllers: C
 export function configureProductionCompanyCoreControllers(controllers: CompanyCoreControllers): void { productionCompanyCoreControllers = controllers; }
 export function configureProductionAssistantReadinessControllers(controllers: ContextualAssistantReadinessControllers): void { productionAssistantReadinessControllers = controllers; }
 export function configureProductionDefaultAssistantControllers(controllers: ContextualDefaultAssistantControllers): void { productionDefaultAssistantControllers = controllers; }
+export function configureProductionAssistantCapabilityControllers(controllers: ContextualAssistantCapabilityControllers): void { productionAssistantCapabilityControllers = controllers; }
 export function configureProductionCommercialControls(controls: CommercialControlsRepository): void { productionCommercialControls = controls; }
 
 function rawCookie(req: Request, name: string): string | null {
@@ -171,6 +175,11 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   router.patch("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId", authorize("company:manage", true, dependencies.assistantControllers.update));
   router.post("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/transitions", authorize("company:manage", true, dependencies.assistantControllers.transition));
   router.post("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/preview", authorize("assistant:preview", true, dependencies.assistantControllers.preview));
+  const assistantCapabilities=dependencies.assistantCapabilityControllers??productionAssistantCapabilityControllers;
+  if(assistantCapabilities){
+    router.get("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/capabilities",authorize("assistant:capability:manage",false,(context)=>assistantCapabilities.list(context)));
+    router.put("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/capabilities",authorize("assistant:capability:manage",true,(context,actor)=>assistantCapabilities.replace(context,actor)));
+  }
   const readiness = dependencies.assistantReadinessControllers ?? productionAssistantReadinessControllers;
   if (readiness) {
     router.get("/:workspaceId/companies/:companyId/assistant/readiness", authorize("company:read", false, readiness.get));
