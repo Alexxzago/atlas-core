@@ -1310,6 +1310,27 @@ const migrations: Migration[] = [
     CREATE TABLE knowledge_v2_indexes(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,source_revision_id TEXT NOT NULL UNIQUE,document_id TEXT NOT NULL UNIQUE,kind TEXT NOT NULL CHECK(kind='lexical'),status TEXT NOT NULL CHECK(status IN ('building','ready','failed')),chunk_count INTEGER NOT NULL,created_at TEXT NOT NULL,completed_at TEXT,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(source_revision_id) REFERENCES knowledge_source_revisions(id) ON DELETE CASCADE,FOREIGN KEY(document_id) REFERENCES knowledge_v2_documents(id) ON DELETE CASCADE,CHECK(chunk_count>=0),CHECK((status='ready' AND completed_at IS NOT NULL) OR (status!='ready')));
     CREATE INDEX idx_knowledge_v2_indexes_ready ON knowledge_v2_indexes(workspace_id,company_id,status,source_revision_id);
   `);}},
+  { id:49,name:"0049_media_asset_core",checksumSource:"media-asset-blob-streaming-idempotency-tenant-safety-audit-v2",apply(database):void{database.exec(`
+    CREATE TABLE media_blobs(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,sha256_digest TEXT NOT NULL CHECK(length(sha256_digest)=64),size_bytes INTEGER NOT NULL CHECK(size_bytes BETWEEN 1 AND 26214400),media_type TEXT NOT NULL CHECK(media_type IN ('application/pdf','image/jpeg','image/png','image/gif','image/webp')),storage_reference TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','reclaim_pending','reclaimed')),created_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,UNIQUE(workspace_id,company_id,id),UNIQUE(storage_reference)
+    );
+    CREATE UNIQUE INDEX idx_media_blobs_active_identity ON media_blobs(workspace_id,company_id,sha256_digest,size_bytes,media_type) WHERE state='active';
+    CREATE TABLE media_assets(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,blob_id TEXT,kind TEXT NOT NULL CHECK(kind IN ('document','image')),media_type TEXT NOT NULL CHECK(media_type IN ('application/pdf','image/jpeg','image/png','image/gif','image/webp')),size_bytes INTEGER CHECK(size_bytes BETWEEN 1 AND 26214400),safe_filename TEXT CHECK(safe_filename IS NULL OR length(safe_filename) BETWEEN 1 AND 180),metadata_json TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('pending','ready','failed','archived','deleted')),created_at TEXT NOT NULL,archived_at TEXT,deleted_at TEXT,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(workspace_id,company_id,blob_id) REFERENCES media_blobs(workspace_id,company_id,id) ON DELETE RESTRICT,UNIQUE(workspace_id,company_id,id),
+      CHECK((status='pending' AND blob_id IS NULL AND size_bytes IS NULL) OR (status='failed' AND blob_id IS NULL) OR (status='ready' AND blob_id IS NOT NULL AND size_bytes IS NOT NULL AND archived_at IS NULL AND deleted_at IS NULL) OR (status='archived' AND blob_id IS NOT NULL AND archived_at IS NOT NULL AND deleted_at IS NULL) OR (status='deleted' AND deleted_at IS NOT NULL))
+    );
+    CREATE INDEX idx_media_assets_scope_status ON media_assets(workspace_id,company_id,status,created_at DESC,id DESC);
+    CREATE TABLE media_idempotency(workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,operation TEXT NOT NULL CHECK(operation='ingest'),idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 200),request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64),asset_id TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(workspace_id,company_id,operation,idempotency_key),FOREIGN KEY(workspace_id,company_id,asset_id) REFERENCES media_assets(workspace_id,company_id,id) ON DELETE RESTRICT);
+    CREATE TABLE media_asset_associations(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,asset_id TEXT NOT NULL,owner_type TEXT NOT NULL CHECK(owner_type IN ('conversation_message','knowledge_source','tool_result','outbound_message')),owner_id TEXT NOT NULL CHECK(length(owner_id) BETWEEN 1 AND 200),created_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id,asset_id) REFERENCES media_assets(workspace_id,company_id,id) ON DELETE RESTRICT,UNIQUE(workspace_id,company_id,asset_id,owner_type,owner_id));
+    CREATE TABLE media_asset_events(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,asset_id TEXT NOT NULL,event_type TEXT NOT NULL CHECK(length(event_type) BETWEEN 1 AND 100),occurred_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id,asset_id) REFERENCES media_assets(workspace_id,company_id,id) ON DELETE RESTRICT);
+    CREATE INDEX idx_media_asset_events_scope ON media_asset_events(workspace_id,company_id,asset_id,occurred_at,id);
+    CREATE TRIGGER media_asset_events_no_update BEFORE UPDATE ON media_asset_events BEGIN SELECT RAISE(ABORT,'Media events are append-only'); END;
+    CREATE TRIGGER media_asset_events_no_delete BEFORE DELETE ON media_asset_events BEGIN SELECT RAISE(ABORT,'Media events are append-only'); END;
+    CREATE TRIGGER media_asset_associations_no_update BEFORE UPDATE ON media_asset_associations BEGIN SELECT RAISE(ABORT,'Media associations are immutable'); END;
+    CREATE TRIGGER media_asset_associations_no_delete BEFORE DELETE ON media_asset_associations BEGIN SELECT RAISE(ABORT,'Media associations are immutable'); END;
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {
