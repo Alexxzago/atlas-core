@@ -10,6 +10,7 @@ import type { AssistantProfile } from "../domain/assistantProfile.js";
 import type { AssistantToolOrchestrator } from "./assistantToolOrchestrator.js";
 import { ToolExecutionError } from "./toolExecutionService.js";
 import type { RetrievalContext } from "../../knowledgeV2/domain/knowledgeRetrieval.js";
+import type { SafeConversationAttachment } from "../../media/application/safeConversationAttachment.js";
 
 export interface OperationalAssistantRuntimeContext {
   readonly purpose: AssistantRuntimePurpose;
@@ -17,6 +18,7 @@ export interface OperationalAssistantRuntimeContext {
   readonly fallbackOnUnavailable: boolean;
   readonly conversationMemory?: string;
   readonly retrieval?: RetrievalContext;
+  readonly attachments?: readonly SafeConversationAttachment[];
   /** Preview is provider-only and must not expose any capability or tool declaration. */
   readonly allowTools?: boolean;
   readonly snapshotContext?: {
@@ -61,7 +63,8 @@ export class OperationalAssistantRuntime {
         message,
         history,
         conversationMemory: context.conversationMemory ?? "",
-        ...(context.retrieval ? { retrieval: context.retrieval } : {}),
+         ...(context.retrieval ? { retrieval: context.retrieval } : {}),
+         ...(context.attachments?.length ? { attachments: context.attachments } : {}),
       });
       const toolOutcome = context.allowTools !== false && this.tools
         ? await this.tools.runOutcome(assistantModelPrompt(request), {
