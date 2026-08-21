@@ -12,6 +12,7 @@ import type { ConversationIntelligenceService } from "../../conversationIntellig
 import { conversationWorkingMemory } from "../../conversationIntelligence/services/conversationWorkingMemory.js";
 import type { ConversationToolMemoryCoordinator } from "../../conversationIntelligence/services/conversationToolMemoryCoordinator.js";
 import type { LexicalKnowledgeRetrievalService } from "../../knowledgeV2/services/knowledgeRetrievalService.js";
+import type { SafeConversationAttachmentService } from "../../media/services/safeConversationAttachmentService.js";
 
 export class OperationalConversationTurnValidationError extends Error {}
 export class OperationalConversationTurnNotFoundError extends Error {}
@@ -61,6 +62,7 @@ export class OperationalConversationTurnService {
     private readonly intelligence?: ConversationIntelligenceService,
     private readonly toolMemory?: ConversationToolMemoryCoordinator,
     private readonly retrieval?: LexicalKnowledgeRetrievalService,
+    private readonly attachments?: SafeConversationAttachmentService,
   ) {
     if (!Number.isSafeInteger(historyLimit) || historyLimit < 1) throw new Error("Conversation history limit is invalid.");
   }
@@ -131,6 +133,7 @@ export class OperationalConversationTurnService {
       if (await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
         const intelligenceResult = this.intelligence ? await this.intelligence.apply(context, scopedCompanyId, inbound) : null;
         const memory = intelligenceResult?.state ? conversationWorkingMemory(intelligenceResult.state) : "";
+       const safeAttachments = this.attachments?.getSafeConversationAttachments(context, scopedCompanyId, inbound.id) ?? [];
        const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit), {
         purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
         snapshotContext: {
@@ -138,7 +141,7 @@ export class OperationalConversationTurnService {
           channelProvider: conversation.channel,
           ...(input.whatsAppConnectionId ? { whatsAppConnectionId: input.whatsAppConnectionId } : {}),
           ...(input.whatsAppPhoneNumberId ? { whatsAppPhoneNumberId: input.whatsAppPhoneNumberId } : {}),
-          }, conversationMemory: memory, ...(this.retrieval ? { retrieval: this.retrieval.context(context, scopedCompanyId, knowledge.sourceRevisionIds, inbound.content) } : {}),
+           }, conversationMemory: memory, ...(this.retrieval ? { retrieval: this.retrieval.context(context, scopedCompanyId, knowledge.sourceRevisionIds, inbound.content) } : {}), ...(safeAttachments.length ? { attachments: safeAttachments } : {}),
       });
         await this.appendToolMemory(context, scopedCompanyId, conversation.id, executed.toolMemoryCandidates);
         const outbound = this.conversations.addMessage(context, scopedCompanyId, conversation.id, { senderParticipantId: outboundParticipantId, direction: "outbound", content: executed.response.answer, idempotencyKey: input.replyIdempotencyKey, executionRecordId: executed.record.id });

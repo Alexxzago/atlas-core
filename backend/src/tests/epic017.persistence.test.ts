@@ -15,9 +15,10 @@ import { ProviderMessageRecordRepository } from "../repositories/providerMessage
 import { WhatsAppConnectionRepository } from "../repositories/whatsappConnectionRepository.js";
 import { WhatsAppConversationRepository } from "../repositories/whatsappConversationRepository.js";
 import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
-import { reconstructOutboundDelivery, reconstructProviderMessageRecord, reconstructChannelProviderEvent } from "../transport/domain/providerDelivery.js";
+import { reconstructOutboundDelivery, reconstructProviderMessageRecord, reconstructChannelExecutionRequest, reconstructChannelProviderEvent } from "../transport/domain/providerDelivery.js";
 import { createWorkspaceContext } from "../types/workspaceContext.js";
 import { reconstructWhatsAppConnection, reconstructWhatsAppConversationBinding, whatsAppConnectionId, whatsAppConnectionStatus } from "../whatsapp/domain/whatsappConnection.js";
+import type { WhatsAppInboundMedia } from "../whatsapp/domain/whatsappInboundMedia.js";
 
 const at = "2026-07-27T12:00:00.000Z";
 const later = "2026-07-27T12:01:00.000Z";
@@ -115,5 +116,49 @@ test("EPIC-017 captures an inbound provider event and message atomically for res
     assert.equal(first.claimed, true); assert.equal(duplicate.claimed, false); assert.equal(first.inbound.id, duplicate.inbound.id);
     assert.equal(value.conversations.listMessages(value.primary, value.first.id, conversation.id).length, 1);
     assert.equal(events.listRecoverable("meta_whatsapp_cloud", 10)[0]?.conversationMessageId, inbound.id);
+  } finally { value.database.close(); }
+});
+
+function mediaCapture(value: ReturnType<typeof setup>, suffix: string, mime = "image/jpeg", ordinal = 0) {
+  const conversation = value.conversations.open(value.primary, value.first.id, "whatsapp"), customer = value.conversations.addParticipant(value.primary, value.first.id, conversation.id, { type: "whatsapp_contact", reference: `sender-${suffix}` });
+  const event = reconstructChannelProviderEvent({ id: `cpe_${suffix}` as never, communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: value.firstConnection.id, externalEventId: `wamid-${suffix}`, state: "claimed", conversationId: null, conversationMessageId: null, createdAt: at, updatedAt: at });
+  const inbound = reconstructConversationMessage({ id: conversationMessageId(`cmsg_${suffix}`), conversationId: conversation.id, senderParticipantId: customer.id, direction: "inbound", content: "[attachment received]", idempotencyKey: `whatsapp-inbound:${suffix}`, executionRecordId: null, createdAt: at });
+  const provider = reconstructProviderMessageRecord({ id: `pmr_${suffix}` as never, communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", direction: "inbound", transportConnectionId: value.firstConnection.id, conversationMessageId: inbound.id, externalMessageId: `wamid-${suffix}`, createdAt: at, updatedAt: at });
+  const request = reconstructChannelExecutionRequest({ id: `cex_${suffix}` as never, channelProviderEventId: event.id, state: "pending", snapshot: { version: "test" }, leaseOwner: null, leaseExpiresAt: null, outcome: null, createdAt: at, updatedAt: at });
+  const attachment: WhatsAppInboundMedia = { id: `wim_${suffix}`, workspaceId: value.primary.workspaceId, companyId: value.first.id, connectionId: value.firstConnection.id, eventId: event.id, conversationMessageId: inbound.id, descriptor: { wamid: `wamid-${suffix}`, providerMediaId: `media-${suffix}`, kind: "image", declaredMime: mime, filename: "image.jpg", caption: null, ordinal }, state: "pending_download", mediaAssetId: null, failureCode: null, attemptCount: 0, nextAttemptAt: null, createdAt: at, updatedAt: at, completedAt: null };
+  return { event, inbound, provider, request, attachment };
+}
+
+test("EPIC-040 captures media atomically and blocks its durable execution request", () => {
+  const value = setup(); try { const input = mediaCapture(value, "5123456789abcdef0123456789abcdef"), result = new ChannelProviderEventRepository(value.database).captureInboundExecution(input.event, input.inbound, input.provider, input.request, [input.attachment]);
+    assert.equal(result.request.mediaGateState, "blocked_by_media"); assert.equal(result.media[0]?.state, "pending_download");
+    for (const table of ["channel_provider_events", "conversation_messages", "provider_message_records", "channel_execution_requests", "whatsapp_inbound_media"]) assert.equal((value.database.prepare(`SELECT count(*) AS count FROM ${table}`).get() as { count:number }).count, 1);
+  } finally { value.database.close(); }
+});
+
+test("EPIC-040 rolls back capture when a later media ledger insert conflicts", () => {
+  const value = setup(); try { const input = mediaCapture(value, "6123456789abcdef0123456789abcdef"), divergent = { ...input.attachment, id: "wim_other", descriptor: { ...input.attachment.descriptor, declaredMime: "image/png" } };
+    assert.throws(() => new ChannelProviderEventRepository(value.database).captureInboundExecution(input.event, input.inbound, input.provider, input.request, [input.attachment, divergent]));
+    for (const table of ["channel_provider_events", "conversation_messages", "provider_message_records", "channel_execution_requests", "whatsapp_inbound_media"]) assert.equal((value.database.prepare(`SELECT count(*) AS count FROM ${table}`).get() as { count:number }).count, 0);
+  } finally { value.database.close(); }
+});
+
+test("EPIC-040 replays the same media capture without duplicate durable rows", () => {
+  const value = setup(); try { const input = mediaCapture(value, "7123456789abcdef0123456789abcdef"), events = new ChannelProviderEventRepository(value.database), first = events.captureInboundExecution(input.event, input.inbound, input.provider, input.request, [input.attachment]), replay = events.captureInboundExecution({ ...input.event, id: "cpe_8123456789abcdef0123456789abcdef" as never }, input.inbound, input.provider, input.request, [input.attachment]);
+    assert.equal(replay.claimed, false); assert.equal(replay.request.id, first.request.id); assert.equal(replay.media[0]?.id, first.media[0]?.id); assert.equal(replay.request.mediaGateState, "blocked_by_media");
+    for (const table of ["channel_provider_events", "conversation_messages", "provider_message_records", "channel_execution_requests", "whatsapp_inbound_media"]) assert.equal((value.database.prepare(`SELECT count(*) AS count FROM ${table}`).get() as { count:number }).count, 1);
+  } finally { value.database.close(); }
+});
+
+test("EPIC-040 rejects divergent media descriptor replay without mutating original", () => {
+  const value = setup(); try { const input = mediaCapture(value, "9123456789abcdef0123456789abcdef"), events = new ChannelProviderEventRepository(value.database); events.captureInboundExecution(input.event, input.inbound, input.provider, input.request, [input.attachment]);
+    assert.throws(() => events.captureInboundExecution(input.event, input.inbound, input.provider, input.request, [{ ...input.attachment, descriptor: { ...input.attachment.descriptor, declaredMime: "image/png" } }]));
+    assert.equal((value.database.prepare("SELECT declared_mime FROM whatsapp_inbound_media").get() as { declared_mime:string }).declared_mime, "image/jpeg"); assert.equal((value.database.prepare("SELECT media_gate_state FROM channel_execution_requests").get() as { media_gate_state:string }).media_gate_state, "blocked_by_media");
+  } finally { value.database.close(); }
+});
+
+test("EPIC-040 preserves text-only capture request semantics", () => {
+  const value = setup(); try { const input = mediaCapture(value, "a123456789abcdef0123456789abcdef"), result = new ChannelProviderEventRepository(value.database).captureInboundExecution(input.event, { ...input.inbound, content: "Hello" }, input.provider, input.request);
+    assert.equal(result.media.length, 0); assert.equal(result.request.mediaGateState, "open"); assert.equal((value.database.prepare("SELECT count(*) AS count FROM whatsapp_inbound_media").get() as { count:number }).count, 0);
   } finally { value.database.close(); }
 });

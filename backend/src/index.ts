@@ -1,5 +1,5 @@
 import { createApp } from "./app.js";
-import { createProductionAppRouters, whatsAppOutboundDeliveryService, whatsAppWebhookService } from "./composition.js";
+import { createProductionAppRouters, whatsAppInboundMediaRecoveryService, whatsAppOutboundDeliveryService, whatsAppWebhookService } from "./composition.js";
 import { database } from "./config/database.js";
 import { setShuttingDown } from "./routes/health.js";
 import { randomUUID } from "node:crypto";
@@ -11,7 +11,8 @@ const server = createApp(createProductionAppRouters(), { production: process.env
   console.log(`Atlas listening on port ${portValue}`);
 });
 const dispatchOwner = `whatsapp-dispatch-${randomUUID()}`;
-async function recoverWhatsApp(): Promise<void> { try { await whatsAppWebhookService.resumeIncomplete(); await whatsAppOutboundDeliveryService.dispatchReady(dispatchOwner); } catch { console.error("WhatsApp recovery cycle failed."); } }
+const mediaRecoveryOwner = `whatsapp-media-recovery-${randomUUID()}`;
+async function recoverWhatsApp(): Promise<void> { try { await whatsAppInboundMediaRecoveryService.recoverAvailable(mediaRecoveryOwner); await whatsAppWebhookService.resumeIncomplete(); await whatsAppOutboundDeliveryService.dispatchReady(dispatchOwner); } catch { console.error("WhatsApp recovery cycle failed."); } }
 void recoverWhatsApp();
 const recoveryTimer = setInterval(() => { void recoverWhatsApp(); }, 5_000);
 recoveryTimer.unref();

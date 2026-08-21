@@ -15,13 +15,16 @@ import type { WhatsAppConversationRepositoryPort, WhatsAppCredentialResolverPort
 import type { WhatsAppConnectionService } from "./WhatsAppConnectionService.js";
 import type { WhatsAppOutboundDeliveryService } from "./WhatsAppOutboundDeliveryService.js";
 import type { WhatsAppDeliveryStatusService } from "./WhatsAppDeliveryStatusService.js";
+import { neutralAttachmentMessage, type WhatsAppInboundMediaKind } from "../domain/whatsappInboundMedia.js";
 
 export interface WhatsAppWebhookConfiguration { readonly appSecret: string; readonly verifyToken: string; }
 export interface WhatsAppInboundTextMessage { readonly phoneNumberId: string; readonly waId: string; readonly wamid: string; readonly text: string; }
 export interface WhatsAppMessageStatusEvent { readonly kind: "message_status"; readonly phoneNumberId: string; readonly externalMessageId: string; readonly status: "sent" | "delivered" | "read" | "failed"; readonly providerTimestamp: string | null; readonly safeFailureCategory: "provider_unavailable" | null; }
 export interface WhatsAppInboundTextEvent extends WhatsAppInboundTextMessage { readonly kind: "inbound_text"; }
+export interface WhatsAppInboundMediaEvent { readonly kind: "inbound_media"; readonly phoneNumberId: string; readonly waId: string; readonly wamid: string; readonly text: string; readonly media: { readonly providerMediaId: string; readonly kind: WhatsAppInboundMediaKind; readonly declaredMime: string; readonly filename: string | null; }; }
 export interface WhatsAppUnsupportedInboundEvent { readonly kind: "inbound_unsupported"; readonly phoneNumberId: string; readonly waId: string; readonly wamid: string; }
-export type WhatsAppWebhookEvent = WhatsAppInboundTextEvent | WhatsAppUnsupportedInboundEvent | WhatsAppMessageStatusEvent;
+export interface WhatsAppInvalidInboundEvent { readonly kind: "inbound_invalid"; readonly phoneNumberId: string; readonly wamid: string; }
+export type WhatsAppWebhookEvent = WhatsAppInboundTextEvent | WhatsAppInboundMediaEvent | WhatsAppUnsupportedInboundEvent | WhatsAppInvalidInboundEvent | WhatsAppMessageStatusEvent;
 
 export class WhatsAppWebhookService {
   private readonly executionOwner = `whatsapp-execution-${randomUUID()}`;
@@ -45,9 +48,10 @@ export class WhatsAppWebhookService {
         const payload = record.value as { metadata?: { phone_number_id?: unknown }; messages?: unknown; statuses?: unknown };
         if (typeof payload.metadata?.phone_number_id !== "string") continue;
         if (Array.isArray(payload.messages)) for (const message of payload.messages) if (message && typeof message === "object") {
-          const input = message as { type?: unknown; from?: unknown; id?: unknown; text?: { body?: unknown } };
+          const input = message as { type?: unknown; from?: unknown; id?: unknown; text?: { body?: unknown }; image?: unknown; document?: unknown; audio?: unknown };
           if (typeof input.from !== "string" || typeof input.id !== "string" || typeof input.type !== "string") continue;
-          if (input.type === "text" && typeof input.text?.body === "string" && input.text.body.normalize("NFKC").trim()) messages.push({ kind: "inbound_text", phoneNumberId: payload.metadata.phone_number_id, waId: input.from, wamid: input.id, text: input.text.body.normalize("NFKC").trim() });
+           if (input.type === "text" && typeof input.text?.body === "string" && input.text.body.normalize("NFKC").trim()) messages.push({ kind: "inbound_text", phoneNumberId: payload.metadata.phone_number_id, waId: input.from, wamid: input.id, text: input.text.body.normalize("NFKC").trim() });
+          else if (input.type === "image" || input.type === "document" || input.type === "audio") { const media = parseMedia(input.type, input.type === "image" ? input.image : input.type === "document" ? input.document : input.audio); if (!media) messages.push({ kind: "inbound_invalid", phoneNumberId: payload.metadata.phone_number_id, wamid: input.id }); else messages.push({ kind: "inbound_media", phoneNumberId: payload.metadata.phone_number_id, waId: input.from, wamid: input.id, text: media.caption ?? neutralAttachmentMessage(), media: { providerMediaId: media.providerMediaId, kind: input.type, declaredMime: media.declaredMime, filename: media.filename } }); }
           else if (input.type !== "text") messages.push({ kind: "inbound_unsupported", phoneNumberId: payload.metadata.phone_number_id, waId: input.from, wamid: input.id });
         }
         if (Array.isArray(payload.statuses)) for (const status of payload.statuses) if (status && typeof status === "object") {
@@ -61,11 +65,11 @@ export class WhatsAppWebhookService {
     }
     return messages;
   }
-  public async receive(raw: Buffer): Promise<void> { for (const event of this.parseEvents(raw)) { if (this.connections && "recordWebhookActivity" in this.connections) this.connections.recordWebhookActivity(event.phoneNumberId); if (event.kind === "inbound_text") await this.process(event); else if (event.kind === "inbound_unsupported") await this.captureUnsupported(event); else this.statuses?.process(event); } }
+  public async receive(raw: Buffer): Promise<void> { for (const event of this.parseEvents(raw)) { if (this.connections && "recordWebhookActivity" in this.connections) this.connections.recordWebhookActivity(event.phoneNumberId); if (event.kind === "inbound_text") await this.process(event); else if (event.kind === "inbound_media") await this.capture(event); else if (event.kind === "inbound_unsupported") await this.captureUnsupported(event); else if (event.kind === "message_status") this.statuses?.process(event); } }
   public async acknowledge(raw: Buffer): Promise<void> {
     for (const event of this.parseEvents(raw)) {
       if (this.connections && "recordWebhookActivity" in this.connections) this.connections.recordWebhookActivity(event.phoneNumberId);
-      if (event.kind === "inbound_text") await this.capture(event); else if (event.kind === "inbound_unsupported") await this.captureUnsupported(event); else this.statuses?.process(event);
+      if (event.kind === "inbound_text" || event.kind === "inbound_media") await this.capture(event); else if (event.kind === "inbound_unsupported") await this.captureUnsupported(event); else if (event.kind === "message_status") this.statuses?.process(event);
     }
   }
   public async resumeIncomplete(limit = 25): Promise<void> {
@@ -99,7 +103,7 @@ export class WhatsAppWebhookService {
       return;
     }
   }
-  private async capture(message: WhatsAppInboundTextMessage): Promise<void> {
+  private async capture(message: WhatsAppInboundTextMessage | WhatsAppInboundMediaEvent): Promise<void> {
     if (!this.connections || !this.bindings || !this.events || !this.conversations) return;
     const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) { this.diagnostic("whatsapp_webhook_connection_unmatched", { phoneNumberId: message.phoneNumberId, messageId: message.wamid }); return; }
     const now = this.clock.now(), context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, existing = this.bindings.findBinding(connection.id, message.waId);
@@ -108,11 +112,13 @@ export class WhatsAppWebhookService {
     if (!binding) return;
     const externalEventId = message.wamid;
     this.diagnostic("whatsapp_webhook_inbound_enqueuing", { phoneNumberId: message.phoneNumberId, messageId: message.wamid, connectionId: connection.id });
+    const inboundMessageId = conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`), eventId = channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), attachments = "kind" in message && message.kind === "inbound_media" ? [{ id: `wim_${randomUUID().replaceAll("-", "")}`, workspaceId: connection.workspaceId, companyId: connection.companyId, connectionId: connection.id, eventId, conversationMessageId: inboundMessageId, descriptor: { wamid: message.wamid, providerMediaId: message.media.providerMediaId, kind: message.media.kind, declaredMime: message.media.declaredMime, filename: message.media.filename, caption: null, ordinal: 0 }, state: "pending_download" as const, mediaAssetId: null, failureCode: null, attemptCount: 0, nextAttemptAt: null, createdAt: now, updatedAt: now, completedAt: null }] : [];
     this.events.captureInboundExecution(
-      reconstructChannelProviderEvent({ id: channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: connection.id, externalEventId, state: "claimed", conversationId: null, conversationMessageId: null, createdAt: now, updatedAt: now }),
-      reconstructConversationMessage({ id: conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`), conversationId: binding.conversationId, senderParticipantId: binding.customerParticipantId, direction: "inbound", content: message.text, idempotencyKey: key("inbound", message.wamid), executionRecordId: null, createdAt: now }),
-      reconstructProviderMessageRecord({ id: providerMessageRecordId(`pmr_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", direction: "inbound", transportConnectionId: connection.id, conversationMessageId: conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`), externalMessageId: message.wamid, createdAt: now, updatedAt: now }),
-      reconstructChannelExecutionRequest({ id: channelExecutionRequestId(`cex_${randomUUID().replaceAll("-", "")}`), channelProviderEventId: channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), state: "pending", snapshot: { version: "whatsapp-execution-request-v1", externalEventId, conversationId: binding.conversationId, assistantProfileId: connection.assistantProfileId, assistantParticipantId: binding.assistantParticipantId, whatsAppConnectionId: connection.id, recipientWaId: binding.waId, replyIdempotencyKey: key("reply", message.wamid) }, leaseOwner: null, leaseExpiresAt: null, outcome: null, createdAt: now, updatedAt: now }),
+      reconstructChannelProviderEvent({ id: eventId, communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: connection.id, externalEventId, state: "claimed", conversationId: null, conversationMessageId: null, createdAt: now, updatedAt: now }),
+      reconstructConversationMessage({ id: inboundMessageId, conversationId: binding.conversationId, senderParticipantId: binding.customerParticipantId, direction: "inbound", content: message.text, idempotencyKey: key("inbound", message.wamid), executionRecordId: null, createdAt: now }),
+      reconstructProviderMessageRecord({ id: providerMessageRecordId(`pmr_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", direction: "inbound", transportConnectionId: connection.id, conversationMessageId: inboundMessageId, externalMessageId: message.wamid, createdAt: now, updatedAt: now }),
+      reconstructChannelExecutionRequest({ id: channelExecutionRequestId(`cex_${randomUUID().replaceAll("-", "")}`), channelProviderEventId: eventId, state: "pending", snapshot: { version: "whatsapp-execution-request-v1", externalEventId, conversationId: binding.conversationId, assistantProfileId: connection.assistantProfileId, assistantParticipantId: binding.assistantParticipantId, whatsAppConnectionId: connection.id, recipientWaId: binding.waId, replyIdempotencyKey: key("reply", message.wamid) }, leaseOwner: null, leaseExpiresAt: null, outcome: null, createdAt: now, updatedAt: now }),
+      attachments,
     );
   }
   private async captureUnsupported(message: WhatsAppUnsupportedInboundEvent): Promise<void> {
@@ -230,3 +236,6 @@ export class WhatsAppWebhookService {
 }
 
 function key(kind: "inbound" | "reply", wamid: string): string { return `whatsapp-${kind}:${createHash("sha256").update(wamid).digest("hex")}`; }
+function parseMedia(kind: WhatsAppInboundMediaKind, value: unknown): { readonly providerMediaId: string; readonly declaredMime: string; readonly filename: string | null; readonly caption: string | null } | null { if (!value || typeof value !== "object") return null; const input = value as { id?: unknown; mime_type?: unknown; filename?: unknown; caption?: unknown }; const providerMediaId = boundedText(input.id, 200); if (!providerMediaId) return null; const declaredMime = input.mime_type === undefined ? "" : boundedText(input.mime_type, 160); if (declaredMime === null) return null; const filename = kind === "document" && input.filename !== undefined ? boundedFilename(input.filename) : null; if (filename === undefined) return null; const caption = input.caption === undefined ? null : boundedText(input.caption, 4_000); if (caption === null && input.caption !== undefined) return null; return { providerMediaId, declaredMime, filename, caption }; }
+function boundedText(value: unknown, maximum: number): string | null { if (typeof value !== "string") return null; const normalized = value.normalize("NFKC").trim(); return normalized && normalized.length <= maximum && !/[\u0000-\u001f\u007f]/u.test(normalized) ? normalized : null; }
+function boundedFilename(value: unknown): string | null | undefined { const filename = boundedText(value, 180); return filename === null || /[\\/]/u.test(filename) ? undefined : filename; }

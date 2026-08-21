@@ -40,4 +40,4 @@ export class MediaService {
 function id(prefix:string):string{return `${prefix}_${randomUUID().replace(/-/gu,"")}`;}
 function key(value:string):string{const result=value.trim();if(!result||result.length>200)throw new MediaDomainError("media_idempotency_invalid");return result;}
 function normalizeType(value:string):string{const result=value.toLowerCase().split(";",1)[0]!.trim();if(!result||mediaKindSafe(result)===null)throw new MediaDomainError("media_type_unsupported");return result;}
-function mediaKindSafe(value:string):string|null{return ["application/pdf","image/jpeg","image/png","image/gif","image/webp"].includes(value)?value:null;}
+function mediaKindSafe(value:string):string|null{return ["application/pdf","image/jpeg","image/png","image/gif","image/webp","audio/mpeg","audio/ogg","audio/wav"].includes(value)?value:null;}

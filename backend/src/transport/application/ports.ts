@@ -1,5 +1,7 @@
-import type { ChannelExecutionRequest, ChannelExecutionRequestId, ChannelProviderEvent, ChannelProviderEventId, OutboundDelivery, OutboundDeliveryId, ProviderEventProcessingState, ProviderMessageRecord, ProviderMessageRecordId } from "../domain/providerDelivery.js";
+import type { ChannelExecutionRequest, ChannelExecutionRequestId, ChannelProviderEvent, ChannelProviderEventId, MediaGateRecomputeOutcome, OutboundDelivery, OutboundDeliveryId, ProviderEventProcessingState, ProviderMessageRecord, ProviderMessageRecordId } from "../domain/providerDelivery.js";
+import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import type { ConversationMessage } from "../../conversation/domain/conversation.js";
+import type { WhatsAppInboundMedia } from "../../whatsapp/domain/whatsappInboundMedia.js";
 
 export interface ChannelProviderEventRepositoryPort {
   claim(event: ChannelProviderEvent): { readonly event: ChannelProviderEvent; readonly claimed: boolean };
@@ -8,8 +10,9 @@ export interface ChannelProviderEventRepositoryPort {
   captureInbound(event: ChannelProviderEvent, inbound: ConversationMessage, providerMessage: ProviderMessageRecord): { readonly event: ChannelProviderEvent; readonly inbound: ConversationMessage; readonly claimed: boolean };
   listRecoverable(transportProvider: string, limit: number): ChannelProviderEvent[];
   acquireForRecovery(id: ChannelProviderEventId, staleBefore: string, updatedAt: string): ChannelProviderEvent | null;
-  captureInboundExecution(event: ChannelProviderEvent, inbound: ConversationMessage, providerMessage: ProviderMessageRecord, request: ChannelExecutionRequest): { readonly event: ChannelProviderEvent; readonly inbound: ConversationMessage; readonly request: ChannelExecutionRequest; readonly claimed: boolean };
+  captureInboundExecution(event: ChannelProviderEvent, inbound: ConversationMessage, providerMessage: ProviderMessageRecord, request: ChannelExecutionRequest, media?: readonly WhatsAppInboundMedia[]): { readonly event: ChannelProviderEvent; readonly inbound: ConversationMessage; readonly request: ChannelExecutionRequest; readonly media: readonly WhatsAppInboundMedia[]; readonly claimed: boolean };
   leaseExecutionRequests(owner: string, now: string, expiresAt: string, limit: number): ChannelExecutionRequest[];
+  recomputeExecutionMediaGate(context: WorkspaceContext, companyId: number, connectionId: string, executionRequestId: ChannelExecutionRequestId, updatedAt: string): MediaGateRecomputeOutcome;
   completeExecutionRequest(id: ChannelExecutionRequestId, owner: string, state: "completed" | "failed", outcome: string | null, updatedAt: string): ChannelExecutionRequest | null;
   releaseExecutionRequest(id: ChannelExecutionRequestId, owner: string, updatedAt: string): ChannelExecutionRequest | null;
   captureUnsupportedExecution(event: ChannelProviderEvent, request: ChannelExecutionRequest): { readonly event: ChannelProviderEvent; readonly request: ChannelExecutionRequest; readonly claimed: boolean };

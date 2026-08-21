@@ -16,7 +16,7 @@ test("EPIC-020 verifies subscription and exact raw HMAC bytes", () => {
 
 test("EPIC-020 normalizes ordered inbound text and safe message status events only", () => {
   const service = new WhatsAppWebhookService({ appSecret: "", verifyToken: "" });
-  const events = service.parseEvents(payload([{ type: "text", from: "wa", id: "in-1", text: { body: " Hello " } }, { type: "image", from: "wa", id: "ignored" }], [{ id: "out-1", status: "sent", timestamp: "1722168000" }, { id: "out-2", status: "delivered" }, { id: "out-3", status: "read" }, { id: "out-4", status: "failed", errors: [{ title: "secret" }] }, { id: "ignored", status: "unknown" }]));
+  const events = service.parseEvents(payload([{ type: "text", from: "wa", id: "in-1", text: { body: " Hello " } }, { type: "video", from: "wa", id: "ignored" }], [{ id: "out-1", status: "sent", timestamp: "1722168000" }, { id: "out-2", status: "delivered" }, { id: "out-3", status: "read" }, { id: "out-4", status: "failed", errors: [{ title: "secret" }] }, { id: "ignored", status: "unknown" }]));
    assert.deepEqual(events.map((event) => event.kind), ["inbound_text", "inbound_unsupported", "message_status", "message_status", "message_status", "message_status"]);
   assert.deepEqual(service.parse(payload([{ type: "text", from: "wa", id: "in-1", text: { body: " Hello " } }])).map((event) => event.text), ["Hello"]);
   assert.equal(JSON.stringify(events).includes("secret"), false);

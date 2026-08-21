@@ -1331,6 +1331,52 @@ const migrations: Migration[] = [
     CREATE TRIGGER media_asset_associations_no_update BEFORE UPDATE ON media_asset_associations BEGIN SELECT RAISE(ABORT,'Media associations are immutable'); END;
     CREATE TRIGGER media_asset_associations_no_delete BEFORE DELETE ON media_asset_associations BEGIN SELECT RAISE(ABORT,'Media associations are immutable'); END;
   `);}},
+  { id:50,name:"0050_whatsapp_inbound_media",checksumSource:"whatsapp-inbound-media-ledger-provider-neutral-recovery-v1",apply(database):void{database.exec(`
+    CREATE TABLE whatsapp_inbound_media(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,whatsapp_connection_id TEXT NOT NULL,
+      channel_provider_event_id TEXT NOT NULL,conversation_message_id TEXT NOT NULL,provider_media_id TEXT NOT NULL,
+      provider_kind TEXT NOT NULL CHECK(provider_kind IN ('image','document','audio')),declared_mime TEXT NOT NULL,
+      safe_filename TEXT,ordinal INTEGER NOT NULL CHECK(ordinal>=0),caption_present INTEGER NOT NULL CHECK(caption_present IN (0,1)),
+      state TEXT NOT NULL CHECK(state IN ('pending_download','ingesting','associated','failed','unsupported')),
+      media_asset_id TEXT,failure_code TEXT,attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count>=0),next_attempt_at TEXT,
+      created_at TEXT NOT NULL,updated_at TEXT NOT NULL,completed_at TEXT,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(whatsapp_connection_id) REFERENCES whatsapp_connections(id) ON DELETE CASCADE,
+      FOREIGN KEY(channel_provider_event_id) REFERENCES channel_provider_events(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_message_id) REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      FOREIGN KEY(media_asset_id) REFERENCES media_assets(id) ON DELETE RESTRICT,
+      UNIQUE(whatsapp_connection_id,channel_provider_event_id,provider_media_id,ordinal),
+      CHECK((state='associated' AND media_asset_id IS NOT NULL AND failure_code IS NULL AND completed_at IS NOT NULL)
+        OR (state='failed' AND failure_code IS NOT NULL AND completed_at IS NOT NULL)
+        OR (state='unsupported' AND failure_code IS NOT NULL AND completed_at IS NOT NULL)
+        OR (state IN ('pending_download','ingesting') AND media_asset_id IS NULL AND failure_code IS NULL AND completed_at IS NULL))
+    );
+    CREATE INDEX idx_whatsapp_inbound_media_recovery ON whatsapp_inbound_media(workspace_id,company_id,state,next_attempt_at,created_at,id);
+    CREATE INDEX idx_whatsapp_inbound_media_message ON whatsapp_inbound_media(workspace_id,company_id,conversation_message_id,ordinal);
+    ALTER TABLE channel_execution_requests ADD COLUMN media_gate_state TEXT NOT NULL DEFAULT 'open' CHECK(media_gate_state IN ('open','blocked_by_media'));
+  `);}},
+  { id:51,name:"0051_media_audio_support",checksumSource:"media-core-audio-check-widening-fk-family-rebuild-v1",disableForeignKeys:true,apply(database):void{database.exec(`
+    CREATE TABLE media_blobs_v2(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,sha256_digest TEXT NOT NULL CHECK(length(sha256_digest)=64),size_bytes INTEGER NOT NULL CHECK(size_bytes BETWEEN 1 AND 26214400),media_type TEXT NOT NULL CHECK(media_type IN ('application/pdf','image/jpeg','image/png','image/gif','image/webp','audio/mpeg','audio/ogg','audio/wav')),storage_reference TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','reclaim_pending','reclaimed')),created_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,UNIQUE(workspace_id,company_id,id),UNIQUE(storage_reference));
+    CREATE TABLE media_assets_v2(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,blob_id TEXT,kind TEXT NOT NULL CHECK(kind IN ('document','image','audio')),media_type TEXT NOT NULL CHECK(media_type IN ('application/pdf','image/jpeg','image/png','image/gif','image/webp','audio/mpeg','audio/ogg','audio/wav')),size_bytes INTEGER CHECK(size_bytes BETWEEN 1 AND 26214400),safe_filename TEXT CHECK(safe_filename IS NULL OR length(safe_filename) BETWEEN 1 AND 180),metadata_json TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('pending','ready','failed','archived','deleted')),created_at TEXT NOT NULL,archived_at TEXT,deleted_at TEXT,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(workspace_id,company_id,blob_id) REFERENCES media_blobs(workspace_id,company_id,id) ON DELETE RESTRICT,UNIQUE(workspace_id,company_id,id),CHECK((status='pending' AND blob_id IS NULL AND size_bytes IS NULL) OR (status='failed' AND blob_id IS NULL) OR (status='ready' AND blob_id IS NOT NULL AND size_bytes IS NOT NULL AND archived_at IS NULL AND deleted_at IS NULL) OR (status='archived' AND blob_id IS NOT NULL AND archived_at IS NOT NULL AND deleted_at IS NULL) OR (status='deleted' AND deleted_at IS NOT NULL)));
+    CREATE TABLE media_idempotency_v2(workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,operation TEXT NOT NULL CHECK(operation='ingest'),idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 200),request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64),asset_id TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(workspace_id,company_id,operation,idempotency_key),FOREIGN KEY(workspace_id,company_id,asset_id) REFERENCES media_assets(workspace_id,company_id,id) ON DELETE RESTRICT);
+    CREATE TABLE media_asset_associations_v2(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,asset_id TEXT NOT NULL,owner_type TEXT NOT NULL CHECK(owner_type IN ('conversation_message','knowledge_source','tool_result','outbound_message')),owner_id TEXT NOT NULL CHECK(length(owner_id) BETWEEN 1 AND 200),created_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id,asset_id) REFERENCES media_assets(workspace_id,company_id,id) ON DELETE RESTRICT,UNIQUE(workspace_id,company_id,asset_id,owner_type,owner_id));
+    CREATE TABLE media_asset_events_v2(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,asset_id TEXT NOT NULL,event_type TEXT NOT NULL CHECK(length(event_type) BETWEEN 1 AND 100),occurred_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id,asset_id) REFERENCES media_assets(workspace_id,company_id,id) ON DELETE RESTRICT);
+    INSERT INTO media_blobs_v2 SELECT * FROM media_blobs; INSERT INTO media_assets_v2 SELECT * FROM media_assets; INSERT INTO media_idempotency_v2 SELECT * FROM media_idempotency; INSERT INTO media_asset_associations_v2 SELECT * FROM media_asset_associations; INSERT INTO media_asset_events_v2 SELECT * FROM media_asset_events;
+    DROP TABLE media_asset_events; DROP TABLE media_asset_associations; DROP TABLE media_idempotency; DROP TABLE media_assets; DROP TABLE media_blobs;
+    ALTER TABLE media_blobs_v2 RENAME TO media_blobs; ALTER TABLE media_assets_v2 RENAME TO media_assets; ALTER TABLE media_idempotency_v2 RENAME TO media_idempotency; ALTER TABLE media_asset_associations_v2 RENAME TO media_asset_associations; ALTER TABLE media_asset_events_v2 RENAME TO media_asset_events;
+    CREATE UNIQUE INDEX idx_media_blobs_active_identity ON media_blobs(workspace_id,company_id,sha256_digest,size_bytes,media_type) WHERE state='active'; CREATE INDEX idx_media_assets_scope_status ON media_assets(workspace_id,company_id,status,created_at DESC,id DESC); CREATE INDEX idx_media_asset_events_scope ON media_asset_events(workspace_id,company_id,asset_id,occurred_at,id); CREATE TRIGGER media_asset_events_no_update BEFORE UPDATE ON media_asset_events BEGIN SELECT RAISE(ABORT,'Media events are append-only'); END; CREATE TRIGGER media_asset_events_no_delete BEFORE DELETE ON media_asset_events BEGIN SELECT RAISE(ABORT,'Media events are append-only'); END; CREATE TRIGGER media_asset_associations_no_update BEFORE UPDATE ON media_asset_associations BEGIN SELECT RAISE(ABORT,'Media associations are immutable'); END; CREATE TRIGGER media_asset_associations_no_delete BEFORE DELETE ON media_asset_associations BEGIN SELECT RAISE(ABORT,'Media associations are immutable'); END;
+  `);}},
+  { id:52,name:"0052_whatsapp_inbound_media_recovery_lease",checksumSource:"whatsapp-inbound-media-durable-recovery-lease-v1",apply(database):void{database.exec(`
+    ALTER TABLE whatsapp_inbound_media ADD COLUMN lease_token TEXT;
+    ALTER TABLE whatsapp_inbound_media ADD COLUMN lease_owner TEXT;
+    ALTER TABLE whatsapp_inbound_media ADD COLUMN lease_acquired_at TEXT;
+    ALTER TABLE whatsapp_inbound_media ADD COLUMN lease_expires_at TEXT;
+    CREATE INDEX idx_whatsapp_inbound_media_lease_recovery ON whatsapp_inbound_media(workspace_id,company_id,whatsapp_connection_id,state,next_attempt_at,lease_expires_at,id);
+  `);}},
+  { id:53,name:"0053_whatsapp_inbound_media_retry_diagnostics",checksumSource:"whatsapp-inbound-media-retry-diagnostics-v1",apply(database):void{database.exec(`
+    ALTER TABLE whatsapp_inbound_media ADD COLUMN last_retry_failure_code TEXT;
+    ALTER TABLE whatsapp_inbound_media ADD COLUMN last_retry_failure_at TEXT;
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {
