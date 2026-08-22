@@ -10,7 +10,7 @@ import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
 import { IntegrationConnectionRepository } from "../repositories/integrationConnectionRepository.js";
 import { createWorkspaceContext } from "../types/workspaceContext.js";
-import { AesGcmIntegrationSecretCipher } from "../integrations/infrastructure/aesGcmIntegrationSecretCipher.js";
+import { AesGcmIntegrationSecretCipher, IntegrationSecretCipherConfigurationError, integrationSecretCipherFromEnvironment } from "../integrations/infrastructure/aesGcmIntegrationSecretCipher.js";
 import { IntegrationConnectionConflictError, IntegrationConnectionService } from "../integrations/services/integrationConnectionService.js";
 import { IntegrationToolAvailabilityPolicy } from "../integrations/services/integrationToolAvailabilityPolicy.js";
 import { AssistantToolOrchestrator } from "../assistant/services/assistantToolOrchestrator.js";
@@ -28,6 +28,8 @@ test("EPIC034 migrates normalized generic connections, secrets, state, and appen
     assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
   } finally { database.close(); }
 });
+
+test("EPIC034 configures a dedicated optional integration cipher without WhatsApp fallback", () => { const key = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", cipher = integrationSecretCipherFromEnvironment(key); assert.ok(cipher); const encrypted = cipher!.encrypt("integration-secret"); assert.match(encrypted, /^v1\./); assert.equal(cipher!.decrypt(encrypted), "integration-secret"); assert.throws(() => new AesGcmIntegrationSecretCipher(Buffer.alloc(32, 2)).decrypt(encrypted)); assert.equal(integrationSecretCipherFromEnvironment(undefined), null); assert.throws(() => integrationSecretCipherFromEnvironment("malformed-key"), error => error instanceof IntegrationSecretCipherConfigurationError && !error.message.includes("malformed-key") && error.message.includes("ATLAS_INTEGRATION_SECRET_KEY")); });
 
 test("EPIC034 lifecycle encrypts secrets, validates before activation, and uses version CAS", async () => {
   const database = createDatabase(":memory:"), context = createWorkspaceContext(new WorkspaceRepository(database).resolveDefault()), company = new CompanyRepository(database).create(context, { name: "Integration Test", website: "https://integration.test" }), repository = new IntegrationConnectionRepository(new LocalSqlDatabase(database)), clock = new Clock();

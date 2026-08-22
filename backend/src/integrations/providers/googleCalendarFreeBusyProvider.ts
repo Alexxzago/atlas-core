@@ -1,0 +1,28 @@
+import type { ExternalProviderCredentialMaterial, ExternalProviderCredentialResolverPort } from "../application/externalProviderCredentials.js";
+import type { ExternalBusyProviderPort, ExternalBusyReadResult } from "../../scheduling/application/externalCalendarPorts.js";
+import { validateInstant } from "../../scheduling/domain/scheduling.js";
+import { externalBusyObservationKey } from "../../scheduling/domain/externalCalendar.js";
+import { GoogleCalendarTransportError, type GoogleCalendarHttpTransportPort } from "./googleCalendarTransport.js";
+
+export interface GoogleCalendarAccessTokenProviderPort { acquire(material: ExternalProviderCredentialMaterial, signal: AbortSignal): Promise<{ readonly kind: "success"; readonly accessToken: string } | { readonly kind: "unauthorized" | "forbidden" | "rate_limited" | "unavailable" | "timeout" | "invalid_response" | "validation_error" }>; }
+
+export class GoogleCalendarFreeBusyProvider implements ExternalBusyProviderPort {
+  public constructor(private readonly credentials: ExternalProviderCredentialResolverPort, private readonly tokens: GoogleCalendarAccessTokenProviderPort, private readonly transport: GoogleCalendarHttpTransportPort) {}
+  public async listBusyIntervals(request: Parameters<ExternalBusyProviderPort["listBusyIntervals"]>[0]): Promise<ExternalBusyReadResult> {
+    if (request.binding.workspaceId !== request.context.workspaceId || request.binding.companyId !== request.companyId || request.binding.integrationConnectionId !== request.connectionId) return { kind: "validation_error" };
+    let startAt: string; let endAt: string;
+    try { startAt = validateInstant(request.startAt); endAt = validateInstant(request.endAt); if (endAt <= startAt) throw new Error("invalid"); } catch { return { kind: "validation_error" }; }
+    const credentials = await this.credentials.resolve(request.context, request.companyId, request.connectionId);
+    if (credentials.kind === "not_found") return { kind: "validation_error" };
+    if (credentials.kind !== "resolved") return { kind: credentials.kind };
+    if (credentials.provider !== "google_calendar" || credentials.integrationKind !== "calendar") return { kind: "validation_error" };
+    const token = await this.tokens.acquire(credentials.material, request.signal); if (token.kind !== "success") return token;
+    try { const response = await this.transport.postFreeBusy({ accessToken: token.accessToken, signal: request.signal, body: JSON.stringify({ timeMin: startAt, timeMax: endAt, timeZone: "UTC", items: [{ id: request.binding.externalCalendarId }] }) }); return map(response.status, response.body, request.binding.id, request.binding.externalCalendarId, startAt, endAt); }
+    catch (error: unknown) { if (error instanceof GoogleCalendarTransportError) return { kind: "invalid_response" }; return error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError") || (typeof error === "object" && error !== null && (error as { name?: unknown }).name === "AbortError") ? { kind: "timeout" } : { kind: "unavailable" }; }
+  }
+}
+
+function map(status: number, body: string, bindingId: string, externalCalendarId: string, startAt: string, endAt: string): ExternalBusyReadResult { if (status === 401) return { kind: "unauthorized" }; if (status === 403) return { kind: "forbidden" }; if (status === 429) return { kind: "rate_limited" }; if (status === 408 || status === 504) return { kind: "timeout" }; if (status >= 500) return { kind: "unavailable" }; if (status < 200 || status >= 300) return { kind: "invalid_response" }; try { const parsed: unknown = JSON.parse(body); const calendar = calendarEntry(parsed, externalCalendarId); const busy = calendar.busy; if (!Array.isArray(busy)) throw new Error("invalid"); const intervals = busy.map((entry) => interval(entry, bindingId, startAt, endAt)); return { kind: "success", intervals: Object.freeze(intervals) }; } catch { return { kind: "invalid_response" }; } }
+function calendarEntry(value: unknown, externalCalendarId: string): { readonly busy: unknown } { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid"); const calendars = (value as Record<string, unknown>).calendars; if (!calendars || typeof calendars !== "object" || Array.isArray(calendars)) throw new Error("invalid"); const entry = (calendars as Record<string, unknown>)[externalCalendarId]; if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("invalid"); return entry as { readonly busy: unknown }; }
+function interval(value: unknown, bindingId: string, minimum: string, maximum: string): { readonly startAt: string; readonly endAt: string; readonly units: number; readonly observationKey: string } { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid"); const entry = value as Record<string, unknown>; if (Object.keys(entry).some((key) => key !== "start" && key !== "end") || typeof entry.start !== "string" || typeof entry.end !== "string") throw new Error("invalid"); const startAt = providerInstant(entry.start), endAt = providerInstant(entry.end); if (startAt >= endAt || startAt < minimum || endAt > maximum) throw new Error("invalid"); return Object.freeze({ startAt, endAt, units: 1, observationKey: externalBusyObservationKey(bindingId as never, startAt, endAt) }); }
+function providerInstant(value: string): string { if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) throw new Error("invalid"); const date = new Date(value); if (Number.isNaN(date.valueOf())) throw new Error("invalid"); return date.toISOString(); }
