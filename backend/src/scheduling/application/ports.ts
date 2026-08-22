@@ -8,6 +8,7 @@ export interface SchedulingRepositoryPort {
   addWorkingWindow(context: WorkspaceContext, value: SchedulingWorkingWindow): Promise<SchedulingWorkingWindow | null>;
   addException(context: WorkspaceContext, value: SchedulingAvailabilityException): Promise<SchedulingAvailabilityException | null>;
   upsertBusyInterval(context: WorkspaceContext, value: SchedulingBusyInterval): Promise<void>;
+  replaceExternalBusyIntervals(context: WorkspaceContext, companyId: number, resourceId: string, externalReferencePrefix: string, values: readonly SchedulingBusyInterval[]): Promise<void>;
   findService(context: WorkspaceContext, companyId: number, id: string): Promise<SchedulingService | null>;
   findResource(context: WorkspaceContext, companyId: number, id: string): Promise<SchedulingResource | null>;
   findHold(context: WorkspaceContext, companyId: number, id: string): Promise<SchedulingHold | null>;

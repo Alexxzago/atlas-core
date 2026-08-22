@@ -1377,6 +1377,68 @@ const migrations: Migration[] = [
     ALTER TABLE whatsapp_inbound_media ADD COLUMN last_retry_failure_code TEXT;
     ALTER TABLE whatsapp_inbound_media ADD COLUMN last_retry_failure_at TEXT;
   `);}},
+  { id:54,name:"0054_scheduling_external_calendar_operations",checksumSource:"external-calendar-bindings-events-write-operations-leases-v1",apply(database):void{database.exec(`
+    CREATE TABLE scheduling_external_resource_bindings(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,resource_id TEXT NOT NULL,integration_connection_id TEXT NOT NULL,external_calendar_id TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(resource_id) REFERENCES scheduling_resources(id) ON DELETE CASCADE,
+      FOREIGN KEY(integration_connection_id) REFERENCES integration_connections(id) ON DELETE CASCADE,
+      UNIQUE(workspace_id,company_id,resource_id),UNIQUE(integration_connection_id,external_calendar_id),CHECK(length(external_calendar_id) BETWEEN 1 AND 200)
+    );
+    CREATE TABLE scheduling_external_booking_events(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,booking_id TEXT NOT NULL,binding_id TEXT NOT NULL,external_event_id TEXT NOT NULL,remote_version TEXT,remote_state TEXT NOT NULL CHECK(remote_state IN ('active','cancelled')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(booking_id) REFERENCES scheduling_bookings(id) ON DELETE CASCADE,
+      FOREIGN KEY(binding_id) REFERENCES scheduling_external_resource_bindings(id) ON DELETE CASCADE,
+      UNIQUE(workspace_id,company_id,booking_id,binding_id),UNIQUE(binding_id,external_event_id),CHECK(length(external_event_id) BETWEEN 1 AND 200),CHECK(remote_version IS NULL OR length(remote_version) BETWEEN 1 AND 200)
+    );
+    CREATE TABLE scheduling_external_write_operations(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,binding_id TEXT NOT NULL,operation TEXT NOT NULL CHECK(operation IN ('create','reschedule','cancel')),idempotency_key TEXT NOT NULL,request_fingerprint TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('pending','in_flight','reconciling','succeeded','uncertain','conflict','failed')),provider_request_correlation_id TEXT NOT NULL,booking_id TEXT,source_booking_id TEXT,hold_id TEXT,reservation_expires_at TEXT,external_event_id TEXT NOT NULL,expected_remote_version TEXT,lease_token TEXT,lease_owner TEXT,lease_acquired_at TEXT,lease_expires_at TEXT,attempt_count INTEGER NOT NULL CHECK(attempt_count>=0),last_attempt_at TEXT,safe_failure_code TEXT CHECK(safe_failure_code IS NULL OR safe_failure_code IN ('unauthorized','forbidden','conflict','rate_limited','unavailable','timeout','invalid_response','validation_error','recovery_expired')),completed_at TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(binding_id) REFERENCES scheduling_external_resource_bindings(id) ON DELETE CASCADE,
+      FOREIGN KEY(booking_id) REFERENCES scheduling_bookings(id) ON DELETE RESTRICT,
+      FOREIGN KEY(source_booking_id) REFERENCES scheduling_bookings(id) ON DELETE RESTRICT,
+      FOREIGN KEY(hold_id) REFERENCES scheduling_holds(id) ON DELETE RESTRICT,
+      UNIQUE(workspace_id,company_id,binding_id,operation,idempotency_key),
+      CHECK(length(idempotency_key) BETWEEN 1 AND 200),CHECK(length(request_fingerprint)=64),CHECK(length(provider_request_correlation_id) BETWEEN 1 AND 200),CHECK(length(external_event_id) BETWEEN 1 AND 200),CHECK(expected_remote_version IS NULL OR length(expected_remote_version) BETWEEN 1 AND 200),
+      CHECK((lease_token IS NULL AND lease_owner IS NULL AND lease_acquired_at IS NULL AND lease_expires_at IS NULL) OR (lease_token IS NOT NULL AND lease_owner IS NOT NULL AND lease_acquired_at IS NOT NULL AND lease_expires_at IS NOT NULL)),
+      CHECK((hold_id IS NULL AND reservation_expires_at IS NULL) OR (hold_id IS NOT NULL AND reservation_expires_at IS NOT NULL)),
+      CHECK((operation='create' AND source_booking_id IS NULL AND hold_id IS NOT NULL) OR (operation='reschedule' AND source_booking_id IS NOT NULL AND hold_id IS NOT NULL) OR (operation='cancel' AND source_booking_id IS NOT NULL AND hold_id IS NULL)),
+      CHECK((state IN ('pending','in_flight','reconciling','uncertain') AND completed_at IS NULL) OR (state IN ('succeeded','conflict','failed') AND completed_at IS NOT NULL))
+    );
+    CREATE INDEX idx_scheduling_external_write_operations_recovery ON scheduling_external_write_operations(workspace_id,company_id,state,lease_expires_at,reservation_expires_at,created_at,id);
+    CREATE TRIGGER scheduling_external_resource_bindings_scope_insert BEFORE INSERT ON scheduling_external_resource_bindings
+    WHEN NOT EXISTS(SELECT 1 FROM scheduling_resources r WHERE r.id=NEW.resource_id AND r.workspace_id=NEW.workspace_id AND r.company_id=NEW.company_id)
+      OR NOT EXISTS(SELECT 1 FROM integration_connections i WHERE i.id=NEW.integration_connection_id AND i.workspace_id=NEW.workspace_id AND i.company_id=NEW.company_id)
+    BEGIN SELECT RAISE(ABORT,'Scheduling external resource binding scope is invalid'); END;
+    CREATE TRIGGER scheduling_external_resource_bindings_scope_update BEFORE UPDATE OF workspace_id,company_id,resource_id,integration_connection_id ON scheduling_external_resource_bindings
+    WHEN NOT EXISTS(SELECT 1 FROM scheduling_resources r WHERE r.id=NEW.resource_id AND r.workspace_id=NEW.workspace_id AND r.company_id=NEW.company_id)
+      OR NOT EXISTS(SELECT 1 FROM integration_connections i WHERE i.id=NEW.integration_connection_id AND i.workspace_id=NEW.workspace_id AND i.company_id=NEW.company_id)
+    BEGIN SELECT RAISE(ABORT,'Scheduling external resource binding scope is invalid'); END;
+    CREATE TRIGGER scheduling_external_booking_events_scope_insert BEFORE INSERT ON scheduling_external_booking_events
+    WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id)
+      OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings r WHERE r.id=NEW.binding_id AND r.workspace_id=NEW.workspace_id AND r.company_id=NEW.company_id)
+    BEGIN SELECT RAISE(ABORT,'Scheduling external booking event scope is invalid'); END;
+    CREATE TRIGGER scheduling_external_booking_events_scope_update BEFORE UPDATE OF workspace_id,company_id,booking_id,binding_id ON scheduling_external_booking_events
+    WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id)
+      OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings r WHERE r.id=NEW.binding_id AND r.workspace_id=NEW.workspace_id AND r.company_id=NEW.company_id)
+    BEGIN SELECT RAISE(ABORT,'Scheduling external booking event scope is invalid'); END;
+    CREATE TRIGGER scheduling_external_write_operations_scope_insert BEFORE INSERT ON scheduling_external_write_operations
+    WHEN NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings r WHERE r.id=NEW.binding_id AND r.workspace_id=NEW.workspace_id AND r.company_id=NEW.company_id)
+      OR (NEW.booking_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id))
+      OR (NEW.source_booking_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.source_booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id))
+      OR (NEW.hold_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM scheduling_holds h WHERE h.id=NEW.hold_id AND h.workspace_id=NEW.workspace_id AND h.company_id=NEW.company_id))
+    BEGIN SELECT RAISE(ABORT,'Scheduling external write operation scope is invalid'); END;
+    CREATE TRIGGER scheduling_external_write_operations_scope_update BEFORE UPDATE OF workspace_id,company_id,binding_id,booking_id,source_booking_id,hold_id ON scheduling_external_write_operations
+    WHEN NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings r WHERE r.id=NEW.binding_id AND r.workspace_id=NEW.workspace_id AND r.company_id=NEW.company_id)
+      OR (NEW.booking_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id))
+      OR (NEW.source_booking_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.source_booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id))
+      OR (NEW.hold_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM scheduling_holds h WHERE h.id=NEW.hold_id AND h.workspace_id=NEW.workspace_id AND h.company_id=NEW.company_id))
+    BEGIN SELECT RAISE(ABORT,'Scheduling external write operation scope is invalid'); END;
+  `);}},
+  { id:55,name:"0055_external_write_operation_booking_reference",checksumSource:"external-write-operation-booking-reference-v1",apply(database):void{database.exec(`
+    ALTER TABLE scheduling_external_write_operations ADD COLUMN requested_booking_reference TEXT;
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

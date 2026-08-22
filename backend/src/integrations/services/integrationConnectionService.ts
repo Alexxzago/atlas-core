@@ -40,7 +40,7 @@ export class IntegrationConnectionService {
   public async validate(context: WorkspaceContext, companyId: number, id: IntegrationConnectionId): Promise<IntegrationConnection> {
     const current = await this.require(context, companyId, id), encrypted = await this.repository.findSecret(context, companyId, id);
     if (!encrypted) throw new IntegrationConnectionValidationError("Integration secret is not configured.");
-    const now = this.clock.now(), result = await this.validator.validate({ provider: current.provider, kind: current.kind, configuration: current.configuration, secret: this.cipher.decrypt(encrypted) });
+    const now = this.clock.now(), result = await this.validator.validate({ workspaceId: context.workspaceId, companyId: current.companyId, connectionId: current.id, provider: current.provider, kind: current.kind, configuration: current.configuration, plaintextSecret: this.cipher.decrypt(encrypted) });
     return this.save(context, current, { ...current, status: result.status === "valid" ? current.status : "inactive", version: current.version + 1, updatedAt: later(current.updatedAt, now) }, result.status === "valid" ? { connectionId: id, validationState: "valid", validatedAt: now, validationFailureCode: null, healthState: "healthy", healthFailureCode: null, lastProviderActivityAt: now, updatedAt: now } : { connectionId: id, validationState: "invalid", validatedAt: now, validationFailureCode: result.failureCode, healthState: "degraded", healthFailureCode: result.failureCode, lastProviderActivityAt: null, updatedAt: now }, result.status === "valid" ? "validated" : "validation_failed");
   }
   public async activate(context: WorkspaceContext, companyId: number, id: IntegrationConnectionId): Promise<IntegrationConnection> {

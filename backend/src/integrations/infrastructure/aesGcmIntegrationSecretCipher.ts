@@ -16,3 +16,6 @@ export class AesGcmIntegrationSecretCipher implements IntegrationSecretCipherPor
     catch { throw new IntegrationSecretCipherError("Encrypted Integration secret is invalid."); }
   }
 }
+
+export class IntegrationSecretCipherConfigurationError extends Error {}
+export function integrationSecretCipherFromEnvironment(value: string | undefined): AesGcmIntegrationSecretCipher | null { const normalized = value?.trim() ?? ""; if (!normalized) return null; if (!/^[a-f0-9]{64}$/i.test(normalized)) throw new IntegrationSecretCipherConfigurationError("ATLAS_INTEGRATION_SECRET_KEY must be 64 hexadecimal characters."); return new AesGcmIntegrationSecretCipher(Buffer.from(normalized, "hex")); }

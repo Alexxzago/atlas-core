@@ -15,8 +15,18 @@ export interface IntegrationConnectionRepositoryPort {
 }
 
 export interface IntegrationSecretCipherPort { encrypt(value: string): string; decrypt(value: string): string; }
+/** Internal-only validation authority supplied from the durable connection being validated. */
+export interface IntegrationProviderValidationInput {
+  readonly workspaceId: number;
+  readonly companyId: number;
+  readonly connectionId: IntegrationConnectionId;
+  readonly provider: string;
+  readonly kind: string;
+  readonly configuration: Readonly<Record<string, unknown>>;
+  readonly plaintextSecret: string;
+}
 export interface IntegrationProviderValidationPort {
-  validate(input: { readonly provider: string; readonly kind: string; readonly configuration: Readonly<Record<string, unknown>>; readonly secret: string }): Promise<{ readonly status: "valid" } | { readonly status: "invalid"; readonly failureCode: IntegrationFailureCode }>;
+  validate(input: IntegrationProviderValidationInput): Promise<{ readonly status: "valid" } | { readonly status: "invalid"; readonly failureCode: IntegrationFailureCode }>;
 }
 export interface IntegrationReadinessPort { isReadyForTool(context: { readonly workspaceId: number }, companyId: number, provider: string, kind: string): Promise<boolean>; }
 export interface IntegrationToolAvailabilityPolicyPort extends ToolAvailabilityPolicy { isAvailable(definition: ToolDefinition, context: { readonly workspaceId: number; readonly companyId: number; readonly assistantProfileId: string }): Promise<boolean>; }
