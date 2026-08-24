@@ -30,7 +30,7 @@ test("submits a valid URL, exposes processing accessibly, and shows real complet
   resolve(json(response(), 201));
   await screen.findByRole("heading", { name: "Website imported successfully" });
   expect(screen.getByText("Website: atlas.test")).toBeTruthy();
-  expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Website imported successfully" }));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Website imported successfully" })));
 });
 
 test("maps duplicate and unreachable website responses safely", async () => {

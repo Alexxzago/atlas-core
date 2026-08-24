@@ -209,3 +209,8 @@ export interface AssistantReadinessAssessment {
   configurationDigest: string;
 }
 export interface DefaultAssistantAssignment { companyId:number; assistantProfileId:string; version:number; assignedAt:string; updatedAt:string; assignedByActorId:string|null; source:string|null; }
+
+export type EmbeddedSignupUiStatus="awaiting_meta"|"verifying"|"connected"|"needs_attention"|"reconnect_required"|"failed"|"expired";
+export interface EmbeddedSignupPublicConfig{available:boolean;appId?:string;configId?:string;graphApiVersion?:string;}
+export interface EmbeddedSignupAttemptResponse{attemptId?:string;state?:string;expiresAt?:string;status:EmbeddedSignupUiStatus|"starting";embeddedSignup:EmbeddedSignupPublicConfig;}
+export interface EmbeddedSignupStatusResponse{attemptId:string;status:EmbeddedSignupUiStatus;expiresAt:string;safeFailureCode:string|null;retryable:boolean;reconnectRequired:boolean;whatsAppConnectionId?:string;kind?:string;}

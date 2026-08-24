@@ -1,7 +1,7 @@
 import { assistantProfileId } from "../assistant/domain/assistantProfile.js";
 import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
-import type { WhatsAppConnectionCredentialRepositoryPort, WhatsAppConnectionOperationalStateRepositoryPort, WhatsAppConnectionRepositoryPort } from "../whatsapp/application/ports.js";
+import type { WhatsAppConnectionCredentialRepositoryPort, WhatsAppConnectionOperationalStateRepositoryPort, WhatsAppConnectionRepositoryPort, WhatsAppLinkedIntegrationCredentialRepositoryPort } from "../whatsapp/application/ports.js";
 import { reconstructWhatsAppConnection, whatsAppConnectionId, type WhatsAppConnection, type WhatsAppConnectionId, type WhatsAppConnectionStatus } from "../whatsapp/domain/whatsappConnection.js";
 import { reconstructEncryptedWhatsAppConnectionCredentials, reconstructWhatsAppConnectionOperationalState, type EncryptedWhatsAppConnectionCredentials, type WhatsAppConnectionOperationalState } from "../whatsapp/domain/whatsappConnectionOnboarding.js";
 
@@ -12,7 +12,7 @@ function connection(row: Row): WhatsAppConnection { return reconstructWhatsAppCo
 function credentials(row: CredentialRow): EncryptedWhatsAppConnectionCredentials { return reconstructEncryptedWhatsAppConnectionCredentials({ whatsAppConnectionId: whatsAppConnectionId(row.whatsapp_connection_id), encryptedAccessToken: row.encrypted_access_token, createdAt: row.created_at, updatedAt: row.updated_at }); }
 function operationalState(row: OperationalStateRow): WhatsAppConnectionOperationalState { return reconstructWhatsAppConnectionOperationalState({ whatsAppConnectionId: whatsAppConnectionId(row.whatsapp_connection_id), validationState: row.validation_state, validatedAt: row.validated_at, validationFailureCode: row.validation_failure_code, healthState: row.health_state, lastProviderActivityAt: row.last_provider_activity_at, lastWebhookActivityAt: row.last_webhook_activity_at, healthFailureCode: row.health_failure_code, updatedAt: row.updated_at }); }
 
-export class WhatsAppConnectionRepository implements WhatsAppConnectionRepositoryPort, WhatsAppConnectionCredentialRepositoryPort, WhatsAppConnectionOperationalStateRepositoryPort {
+export class WhatsAppConnectionRepository implements WhatsAppConnectionRepositoryPort, WhatsAppConnectionCredentialRepositoryPort, WhatsAppConnectionOperationalStateRepositoryPort, WhatsAppLinkedIntegrationCredentialRepositoryPort {
   public constructor(private readonly db: SynchronousDatabase) {}
 
   public create(context: WorkspaceContext, value: WhatsAppConnection): WhatsAppConnection | null {
@@ -77,6 +77,18 @@ export class WhatsAppConnectionRepository implements WhatsAppConnectionRepositor
   public findCredentials(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId): EncryptedWhatsAppConnectionCredentials | null {
     const row = this.db.prepare("SELECT credentials.* FROM whatsapp_connection_credentials credentials JOIN whatsapp_connections connection ON connection.id=credentials.whatsapp_connection_id JOIN companies company ON company.id=connection.company_id WHERE credentials.whatsapp_connection_id=? AND connection.company_id=? AND connection.workspace_id=? AND company.workspace_id=?").get(connectionId, companyId, context.workspaceId, context.workspaceId) as CredentialRow | undefined;
     return row ? credentials(row) : null;
+  }
+  public findIntegrationConnectionId(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId): string | null {
+    const row = this.db.prepare("SELECT connection.integration_connection_id FROM whatsapp_connections connection JOIN companies company ON company.id=connection.company_id WHERE connection.id=? AND connection.company_id=? AND connection.workspace_id=? AND company.workspace_id=?").get(connectionId, companyId, context.workspaceId, context.workspaceId) as { integration_connection_id: string | null } | undefined;
+    return row?.integration_connection_id ?? null;
+  }
+  public findWhatsAppConnectionIdByIntegrationConnectionId(context: WorkspaceContext, companyId: number, integrationConnectionId: string): string | null {
+    const row=this.db.prepare("SELECT connection.id FROM whatsapp_connections connection JOIN companies company ON company.id=connection.company_id WHERE connection.integration_connection_id=? AND connection.company_id=? AND connection.workspace_id=? AND company.workspace_id=?").get(integrationConnectionId,companyId,context.workspaceId,context.workspaceId) as {id:string}|undefined;
+    return row?.id??null;
+  }
+  public findReadyLinkedIntegrationSecret(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId): string | null {
+    const row = this.db.prepare("SELECT secret.encrypted_secret FROM whatsapp_connections connection JOIN companies company ON company.id=connection.company_id JOIN integration_connections integration ON integration.id=connection.integration_connection_id AND integration.workspace_id=connection.workspace_id AND integration.company_id=connection.company_id JOIN integration_connection_operational_states state ON state.integration_connection_id=integration.id JOIN integration_connection_secrets secret ON secret.integration_connection_id=integration.id WHERE connection.id=? AND connection.company_id=? AND connection.workspace_id=? AND company.workspace_id=? AND integration.provider='meta_whatsapp' AND integration.kind='cloud_api' AND integration.status='active' AND state.validation_state='valid' AND state.health_state='healthy'").get(connectionId, companyId, context.workspaceId, context.workspaceId) as { encrypted_secret: string } | undefined;
+    return row?.encrypted_secret ?? null;
   }
 
   public replaceCredentials(context: WorkspaceContext, companyId: number, value: EncryptedWhatsAppConnectionCredentials): EncryptedWhatsAppConnectionCredentials | null {
