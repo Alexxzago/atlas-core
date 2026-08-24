@@ -4,6 +4,7 @@ import { useI18n } from "../i18n/I18nContext";
 import type { AssistantProfile, CompanyStatus, Permission, WhatsAppConnection, WhatsAppConnectionOperationalStatus } from "../types/api";
 import { ContextBackLink } from "./ContextBackLink";
 import { ProductHero } from "../design-system/product";
+import { MetaEmbeddedSignupCard } from "./MetaEmbeddedSignupCard";
 import { buildWhatsAppOnboardingViewModel, type WhatsAppFailureKind, type WhatsAppStageId } from "./whatsAppOnboardingPresentation";
 
 interface Props { readonly csrf:string; readonly workspaceId:string|null; readonly companyId:number|null; readonly companyStatus?:CompanyStatus|null; readonly profiles:readonly AssistantProfile[]; readonly capabilities:readonly Permission[]; }
@@ -40,6 +41,7 @@ export function WhatsAppOnboardingPanel({csrf,workspaceId,companyId,profiles,cap
   const back=<ContextBackLink href={`/companies/${companyId}/channels`} label={t("channels.back")}/>;
   if(error&&connections.length===0&&view==="overview"&&!loading)return <section className="authenticated-section whatsapp-guide">{back}<ProductHero eyebrow={t("waGuide.channel")} title={t("waGuide.title")} description={t("waGuide.lead")}/><div className="inline-message inline-message--error" role="alert"><strong>{t("waGuide.error.generic")}</strong><p>{t("waGuide.error.next")}</p><button className="button button--secondary" type="button" onClick={()=>void load()}>{t("common.retry")}</button></div></section>;
   return <section className="authenticated-section whatsapp-guide" aria-busy={loading||pending}>{view==="overview"&&back}<ProductHero eyebrow={t("waGuide.channel")} title={t("waGuide.title")} description={t("waGuide.lead")}/>
+    {workspaceId&&companyId&&manageable&&<MetaEmbeddedSignupCard csrf={csrf} workspaceId={workspaceId} companyId={companyId} profiles={profiles} connectionId={connections[0]?.id} onConnected={()=>void load()}/>}
     {error&&<div className="inline-message inline-message--error" role="alert"><strong>{t(status?.validationFailureCode?failureKey(model?.failure??"unknown"):"waGuide.error.generic")}</strong><p>{t("waGuide.error.next")}</p><button className="button button--secondary" type="button" onClick={()=>void load()}>{t("common.retry")}</button></div>}{notice&&<p className="inline-message inline-message--success" role="status">{notice}</p>}
     {loading?<p role="status">{t("waGuide.loading")}</p>:
       view==="overview"?<Overview connections={connections} statuses={statuses} profiles={profiles} manageable={manageable} onOpen={openConnection} onStart={()=>go("situation")} t={t} formatDate={formatDate}/>:

@@ -18,6 +18,7 @@
     "test:epic039": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic039.media.test.ts",
     "test:epic040": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic040.whatsapp-multimodal.test.ts",
     "test:epic041": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic041.real-provider-adapters.test.ts src/tests/epic041.scheduling-booking-router.test.ts",
+    "test:epic042": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic042.meta-embedded-signup-contracts.test.ts src/tests/epic042.meta-embedded-signup-attempts.test.ts src/tests/epic042.meta-embedded-signup-provider.test.ts src/tests/epic042.meta-embedded-signup-completion.test.ts src/tests/epic042.meta-embedded-signup-http.test.ts src/tests/epic042.meta-embedded-signup-audit.test.ts",
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",

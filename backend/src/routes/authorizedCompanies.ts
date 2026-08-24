@@ -49,6 +49,7 @@ interface ContextualWhatsAppConnectionControllers {
   activate?: (context: WorkspaceContext) => RequestHandler;
   deactivate?: (context: WorkspaceContext) => RequestHandler;
 }
+interface ContextualMetaEmbeddedSignupControllers { start:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; status:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; complete:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; reconnect:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; }
 interface ContextualConversationReadControllers {
   list: (context: WorkspaceContext) => RequestHandler;
   get: (context: WorkspaceContext) => RequestHandler;
@@ -68,6 +69,7 @@ interface AuthorizedCompanyDependencies {
   defaultAssistantControllers?: ContextualDefaultAssistantControllers;
   webChatConnectionControllers?: ContextualWebChatConnectionControllers;
   whatsAppConnectionControllers?: ContextualWhatsAppConnectionControllers;
+  metaEmbeddedSignupControllers?: ContextualMetaEmbeddedSignupControllers;
   knowledgeControllers?: Record<string, (context: WorkspaceContext, actor: ActorContext) => RequestHandler>;
   conversationMessageController?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
   conversationReadControllers?: ContextualConversationReadControllers;
@@ -235,6 +237,13 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     if (whatsApp.validate) router.post("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/validation", authorize("company:manage", true, whatsApp.validate));
     if (whatsApp.activate) router.post("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/activation", authorize("company:manage", true, whatsApp.activate));
     if (whatsApp.deactivate) router.post("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/deactivation", authorize("company:manage", true, whatsApp.deactivate));
+  }
+  const embedded=dependencies.metaEmbeddedSignupControllers;
+  if(embedded){
+    router.post("/:workspaceId/companies/:companyId/whatsapp/embedded-signup/attempts",authorize("company:manage",true,(context,actor)=>embedded.start(context,actor.userId)));
+    router.get("/:workspaceId/companies/:companyId/whatsapp/embedded-signup/attempts/:attemptId",authorize("company:read",false,(context,actor)=>embedded.status(context,actor.userId)));
+    router.post("/:workspaceId/companies/:companyId/whatsapp/embedded-signup/attempts/:attemptId/complete",authorize("company:manage",true,(context,actor)=>embedded.complete(context,actor.userId)));
+    router.post("/:workspaceId/companies/:companyId/whatsapp/embedded-signup/reconnect",authorize("company:manage",true,(context,actor)=>embedded.reconnect(context,actor.userId)));
   }
   const k=dependencies.knowledgeControllers;
   if(k){

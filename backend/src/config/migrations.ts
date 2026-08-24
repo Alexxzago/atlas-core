@@ -1439,6 +1439,76 @@ const migrations: Migration[] = [
   { id:55,name:"0055_external_write_operation_booking_reference",checksumSource:"external-write-operation-booking-reference-v1",apply(database):void{database.exec(`
     ALTER TABLE scheduling_external_write_operations ADD COLUMN requested_booking_reference TEXT;
   `);}},
+  { id:56,name:"0056_meta_embedded_signup_attempts",checksumSource:"meta-embedded-signup-attempts-v2|assistant-pk-fk|tenant-scope-triggers|hmac-digests|cas-lifecycle",apply(database):void{database.exec(`
+    CREATE TABLE meta_embedded_signup_attempts(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,initiating_user_id TEXT NOT NULL,assistant_profile_id TEXT NOT NULL,
+      target_whatsapp_connection_id TEXT,target_integration_connection_id TEXT,
+      provider TEXT NOT NULL CHECK(provider='meta_whatsapp'),kind TEXT NOT NULL CHECK(kind='cloud_api'),
+      status TEXT NOT NULL CHECK(status IN ('started','completing','completed','failed','expired')),
+      state_digest TEXT NOT NULL CHECK(length(state_digest)=64),completion_code_digest TEXT CHECK(completion_code_digest IS NULL OR length(completion_code_digest)=64),
+      created_at TEXT NOT NULL,expires_at TEXT NOT NULL,claimed_at TEXT,completed_at TEXT,failed_at TEXT,expired_at TEXT,
+      safe_failure_code TEXT CHECK(safe_failure_code IS NULL OR safe_failure_code IN ('cancelled','expired','verification_failed','provider_rejected','provider_unavailable')),
+      version INTEGER NOT NULL CHECK(version>0),updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(initiating_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+      FOREIGN KEY(assistant_profile_id) REFERENCES assistant_profiles(id) ON DELETE RESTRICT,
+      CHECK(expires_at>created_at),
+      CHECK((claimed_at IS NULL)=(completion_code_digest IS NULL)),
+      CHECK((status='started' AND claimed_at IS NULL AND completed_at IS NULL AND failed_at IS NULL AND expired_at IS NULL AND safe_failure_code IS NULL)
+        OR (status='completing' AND claimed_at IS NOT NULL AND completed_at IS NULL AND failed_at IS NULL AND expired_at IS NULL AND safe_failure_code IS NULL)
+        OR (status='completed' AND claimed_at IS NOT NULL AND completed_at IS NOT NULL AND failed_at IS NULL AND expired_at IS NULL AND safe_failure_code IS NULL)
+        OR (status='failed' AND completed_at IS NULL AND failed_at IS NOT NULL AND expired_at IS NULL AND safe_failure_code IS NOT NULL)
+        OR (status='expired' AND completed_at IS NULL AND failed_at IS NULL AND expired_at IS NOT NULL AND safe_failure_code='expired'))
+    );
+    CREATE INDEX idx_meta_embedded_signup_attempts_scope ON meta_embedded_signup_attempts(workspace_id,company_id,initiating_user_id,created_at DESC,id DESC);
+    CREATE INDEX idx_meta_embedded_signup_attempts_expiry ON meta_embedded_signup_attempts(status,expires_at,id);
+
+    CREATE TRIGGER meta_embedded_signup_attempts_assistant_scope_insert
+    BEFORE INSERT ON meta_embedded_signup_attempts
+    WHEN NOT EXISTS(
+      SELECT 1 FROM assistant_profiles a
+      WHERE a.id=NEW.assistant_profile_id AND a.company_id=NEW.company_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT,'Meta Embedded Signup assistant profile scope is invalid');
+    END;
+
+    CREATE TRIGGER meta_embedded_signup_attempts_assistant_scope_update
+    BEFORE UPDATE OF assistant_profile_id,company_id ON meta_embedded_signup_attempts
+    WHEN NOT EXISTS(
+      SELECT 1 FROM assistant_profiles a
+      WHERE a.id=NEW.assistant_profile_id AND a.company_id=NEW.company_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT,'Meta Embedded Signup assistant profile scope is invalid');
+    END;
+  `);}},
+  { id:57,name:"0057_whatsapp_integration_connection_link",checksumSource:"whatsapp-integration-connection-link-v1|nullable-legacy|tenant-scoped-unique",apply(database):void{database.exec(`
+    ALTER TABLE whatsapp_connections ADD COLUMN integration_connection_id TEXT;
+    CREATE UNIQUE INDEX uq_whatsapp_connections_integration_connection_id ON whatsapp_connections(integration_connection_id) WHERE integration_connection_id IS NOT NULL;
+    CREATE TRIGGER whatsapp_connections_integration_connection_scope_insert BEFORE INSERT ON whatsapp_connections
+    WHEN NEW.integration_connection_id IS NOT NULL AND NOT EXISTS(
+      SELECT 1 FROM integration_connections i WHERE i.id=NEW.integration_connection_id AND i.workspace_id=NEW.workspace_id AND i.company_id=NEW.company_id
+    ) BEGIN SELECT RAISE(ABORT,'WhatsApp Integration Connection scope is invalid'); END;
+    CREATE TRIGGER whatsapp_connections_integration_connection_scope_update BEFORE UPDATE OF integration_connection_id,workspace_id,company_id ON whatsapp_connections
+    WHEN NEW.integration_connection_id IS NOT NULL AND NOT EXISTS(
+      SELECT 1 FROM integration_connections i WHERE i.id=NEW.integration_connection_id AND i.workspace_id=NEW.workspace_id AND i.company_id=NEW.company_id
+    ) BEGIN SELECT RAISE(ABORT,'WhatsApp Integration Connection scope is invalid'); END;
+  `);}},
+  { id:58,name:"0058_meta_embedded_signup_resolved_connection",checksumSource:"meta-embedded-signup-resolved-connection-v1|durable-crash-recovery-correlation",apply(database):void{database.exec(`
+    ALTER TABLE meta_embedded_signup_attempts ADD COLUMN resolved_integration_connection_id TEXT;
+    CREATE UNIQUE INDEX uq_meta_embedded_signup_attempts_resolved_connection ON meta_embedded_signup_attempts(resolved_integration_connection_id) WHERE resolved_integration_connection_id IS NOT NULL;
+    CREATE TRIGGER meta_embedded_signup_attempts_resolved_connection_scope_insert BEFORE INSERT ON meta_embedded_signup_attempts
+    WHEN NEW.resolved_integration_connection_id IS NOT NULL AND (length(NEW.resolved_integration_connection_id)!=36 OR substr(NEW.resolved_integration_connection_id,1,4)!='inc_' OR substr(NEW.resolved_integration_connection_id,5) GLOB '*[^0-9a-f]*' OR EXISTS(SELECT 1 FROM integration_connections i WHERE i.id=NEW.resolved_integration_connection_id AND (i.workspace_id!=NEW.workspace_id OR i.company_id!=NEW.company_id OR i.provider!='meta_whatsapp' OR i.kind!='cloud_api')))
+    BEGIN SELECT RAISE(ABORT,'Meta Embedded Signup resolved Integration Connection scope is invalid'); END;
+    CREATE TRIGGER meta_embedded_signup_attempts_resolved_connection_immutable BEFORE UPDATE OF resolved_integration_connection_id ON meta_embedded_signup_attempts
+    WHEN OLD.resolved_integration_connection_id IS NOT NULL AND NEW.resolved_integration_connection_id IS NOT OLD.resolved_integration_connection_id
+    BEGIN SELECT RAISE(ABORT,'Meta Embedded Signup resolved Integration Connection is immutable'); END;
+    CREATE TRIGGER meta_embedded_signup_attempts_resolved_connection_scope_update BEFORE UPDATE OF resolved_integration_connection_id,workspace_id,company_id ON meta_embedded_signup_attempts
+    WHEN NEW.resolved_integration_connection_id IS NOT NULL AND (length(NEW.resolved_integration_connection_id)!=36 OR substr(NEW.resolved_integration_connection_id,1,4)!='inc_' OR substr(NEW.resolved_integration_connection_id,5) GLOB '*[^0-9a-f]*' OR EXISTS(SELECT 1 FROM integration_connections i WHERE i.id=NEW.resolved_integration_connection_id AND (i.workspace_id!=NEW.workspace_id OR i.company_id!=NEW.company_id OR i.provider!='meta_whatsapp' OR i.kind!='cloud_api')))
+    BEGIN SELECT RAISE(ABORT,'Meta Embedded Signup resolved Integration Connection scope is invalid'); END;
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

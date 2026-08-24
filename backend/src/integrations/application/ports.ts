@@ -5,6 +5,7 @@ import type { IntegrationConnection, IntegrationConnectionAuditEventType, Integr
 
 export interface IntegrationConnectionRepositoryPort {
   create(context: WorkspaceContext, value: IntegrationConnection, state: IntegrationOperationalState): Promise<IntegrationConnection | null>;
+  createWithSecret(context: WorkspaceContext, value: IntegrationConnection, state: IntegrationOperationalState, encryptedSecret: string): Promise<IntegrationConnection | null>;
   findById(context: WorkspaceContext, companyId: number, id: IntegrationConnectionId): Promise<IntegrationConnection | null>;
   listByCompany(context: WorkspaceContext, companyId: number): Promise<readonly IntegrationConnection[]>;
   compareAndSet(context: WorkspaceContext, companyId: number, id: IntegrationConnectionId, expectedVersion: number, value: IntegrationConnection, state: IntegrationOperationalState, eventType: Exclude<IntegrationConnectionAuditEventType, "created">): Promise<IntegrationConnection | null>;

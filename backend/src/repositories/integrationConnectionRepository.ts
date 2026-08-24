@@ -18,6 +18,16 @@ export class IntegrationConnectionRepository implements IntegrationConnectionRep
        return this.findByIdOn(database, context, value.companyId, value.id);
     });
   }
+  public async createWithSecret(context: WorkspaceContext, value: IntegrationConnection, state: IntegrationOperationalState, encryptedSecret: string): Promise<IntegrationConnection | null> {
+    return this.database.transaction(async (database) => {
+      const inserted = await database.execute(`INSERT INTO integration_connections(id,workspace_id,company_id,provider,kind,configuration_json,status,version,created_at,updated_at) SELECT ?,c.workspace_id,c.id,?,?,?,?,?,?,? FROM companies c WHERE c.id=? AND c.workspace_id=?`, [value.id, value.provider, value.kind, JSON.stringify(value.configuration), value.status, value.version, value.createdAt, value.updatedAt, value.companyId, context.workspaceId]);
+      if (Number(inserted.rowsAffected) !== 1) return null;
+      await database.execute(`INSERT INTO integration_connection_secrets(integration_connection_id,encrypted_secret,created_at,updated_at) VALUES(?,?,?,?)`, [value.id, encryptedSecret, value.createdAt, value.updatedAt]);
+      await this.insertState(database, state);
+      await this.insertAuditEvent(database, context, value, "created");
+      return this.findByIdOn(database, context, value.companyId, value.id);
+    });
+  }
   public async findById(context: WorkspaceContext, companyId: number, id: IntegrationConnectionId): Promise<IntegrationConnection | null> {
     return this.findByIdOn(this.database, context, companyId, id);
   }
