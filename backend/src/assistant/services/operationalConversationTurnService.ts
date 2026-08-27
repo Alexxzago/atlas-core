@@ -13,6 +13,7 @@ import { conversationWorkingMemory } from "../../conversationIntelligence/servic
 import type { ConversationToolMemoryCoordinator } from "../../conversationIntelligence/services/conversationToolMemoryCoordinator.js";
 import type { LexicalKnowledgeRetrievalService } from "../../knowledgeV2/services/knowledgeRetrievalService.js";
 import type { SafeConversationAttachmentService } from "../../media/services/safeConversationAttachmentService.js";
+import type { ConversationRepositoryPort } from "../../conversation/application/ports.js";
 
 export class OperationalConversationTurnValidationError extends Error {}
 export class OperationalConversationTurnNotFoundError extends Error {}
@@ -63,6 +64,7 @@ export class OperationalConversationTurnService {
     private readonly toolMemory?: ConversationToolMemoryCoordinator,
     private readonly retrieval?: LexicalKnowledgeRetrievalService,
     private readonly attachments?: SafeConversationAttachmentService,
+    private readonly controls?: ConversationRepositoryPort,
   ) {
     if (!Number.isSafeInteger(historyLimit) || historyLimit < 1) throw new Error("Conversation history limit is invalid.");
   }
@@ -90,20 +92,22 @@ export class OperationalConversationTurnService {
       if (company.status !== "ready") throw new OperationalConversationTurnNotFoundError("Company is not ready.");
       const knowledge = this.knowledge.loadCurrentVersion(context, scopedCompanyId);
       if (!knowledge) throw new OperationalConversationTurnKnowledgeUnavailableError("Published knowledge is unavailable.");
-      const history = historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit);
+       const authority = this.controls?.ensureConversationControl(context, scopedCompanyId, conversation.id);
+       if (authority && authority.state !== "automated") throw new OperationalConversationTurnSuppressedError(inbound);
+       const history = historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit);
       if (await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
         const intelligenceResult = this.intelligence ? await this.intelligence.apply(context, scopedCompanyId, inbound) : null;
         const memory = intelligenceResult?.state ? conversationWorkingMemory(intelligenceResult.state) : "";
        const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, history, {
           purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
-          snapshotContext: { conversationId: conversation.id, channelProvider: conversation.channel }, conversationMemory: memory,
+           snapshotContext: { conversationId: conversation.id, channelProvider: conversation.channel, authorityGeneration: authority?.authorityGeneration ?? 1 }, conversationMemory: memory,
           ...(this.retrieval ? { retrieval: this.retrieval.context(context, scopedCompanyId, knowledge.sourceRevisionIds, inbound.content) } : {}),
       });
        await this.appendToolMemory(context, scopedCompanyId, conversation.id, executed.toolMemoryCandidates);
-       const outbound = this.conversations.addMessage(context, scopedCompanyId, conversation.id, {
-         senderParticipantId: parsed.outboundParticipantId, direction: "outbound", content: executed.response.answer,
-         executionRecordId: executed.record.id,
-       });
+        const finalized = this.finalize(context, scopedCompanyId, conversation.id, inbound, parsed.outboundParticipantId, executed.record.id, authority?.authorityGeneration ?? 1, executed.response.answer, `assistant:${inbound.id}`, executed.record.completedAt ?? inbound.createdAt);
+        if (finalized.kind === "authority_lost") throw new OperationalConversationTurnSuppressedError(inbound);
+        if (finalized.kind === "not_found" || finalized.kind === "execution_not_owned") throw new OperationalConversationTurnNotFoundError("Conversation was not found.");
+        const outbound = finalized.message;
         if (this.intelligence) await this.intelligence.apply(context, scopedCompanyId, outbound);
         return Object.freeze({ inbound, outbound, response: executed.response, executionRecordId: executed.record.id });
     } finally { release(); }
@@ -130,7 +134,8 @@ export class OperationalConversationTurnService {
       if (company.status !== "ready") throw new OperationalConversationTurnNotFoundError("Company is not ready.");
       const knowledge = this.knowledge.loadCurrentVersion(context, scopedCompanyId);
       if (!knowledge) throw new OperationalConversationTurnKnowledgeUnavailableError("Published knowledge is unavailable.");
-      if (await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
+       const authority = this.controls?.ensureConversationControl(context, scopedCompanyId, conversation.id);
+       if ((authority && authority.state !== "automated") || await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
         const intelligenceResult = this.intelligence ? await this.intelligence.apply(context, scopedCompanyId, inbound) : null;
         const memory = intelligenceResult?.state ? conversationWorkingMemory(intelligenceResult.state) : "";
        const safeAttachments = this.attachments?.getSafeConversationAttachments(context, scopedCompanyId, inbound.id) ?? [];
@@ -140,11 +145,14 @@ export class OperationalConversationTurnService {
           conversationId: conversation.id,
           channelProvider: conversation.channel,
           ...(input.whatsAppConnectionId ? { whatsAppConnectionId: input.whatsAppConnectionId } : {}),
-          ...(input.whatsAppPhoneNumberId ? { whatsAppPhoneNumberId: input.whatsAppPhoneNumberId } : {}),
+           ...(input.whatsAppPhoneNumberId ? { whatsAppPhoneNumberId: input.whatsAppPhoneNumberId } : {}), authorityGeneration: authority?.authorityGeneration ?? 1,
            }, conversationMemory: memory, ...(this.retrieval ? { retrieval: this.retrieval.context(context, scopedCompanyId, knowledge.sourceRevisionIds, inbound.content) } : {}), ...(safeAttachments.length ? { attachments: safeAttachments } : {}),
       });
         await this.appendToolMemory(context, scopedCompanyId, conversation.id, executed.toolMemoryCandidates);
-        const outbound = this.conversations.addMessage(context, scopedCompanyId, conversation.id, { senderParticipantId: outboundParticipantId, direction: "outbound", content: executed.response.answer, idempotencyKey: input.replyIdempotencyKey, executionRecordId: executed.record.id });
+        const finalized = this.finalize(context, scopedCompanyId, conversation.id, inbound, outboundParticipantId, executed.record.id, authority?.authorityGeneration ?? 1, executed.response.answer, input.replyIdempotencyKey, executed.record.completedAt ?? inbound.createdAt, input.whatsAppConnectionId);
+        if (finalized.kind === "authority_lost") throw new OperationalConversationTurnSuppressedError(inbound);
+        if (finalized.kind === "not_found" || finalized.kind === "execution_not_owned") throw new OperationalConversationTurnNotFoundError("Conversation was not found.");
+        const outbound = finalized.message;
         if (this.intelligence) await this.intelligence.apply(context, scopedCompanyId, outbound);
         return Object.freeze({ inbound, outbound, response: executed.response, executionRecordId: executed.record.id });
     } finally { release(); }
@@ -153,6 +161,10 @@ export class OperationalConversationTurnService {
   private async appendToolMemory(context: WorkspaceContext, companyId: number, conversationIdValue: ConversationMessage["conversationId"], candidates: readonly { readonly traceId: string; readonly value: unknown; readonly facts: readonly { readonly key: string; readonly value: unknown }[]; readonly referenceGroups: readonly { readonly groupKind: string; readonly options: readonly { readonly referenceId: string; readonly label: string; readonly safePayload: unknown }[] }[] }[]): Promise<void> {
     try { await this.toolMemory?.append(context, companyId, conversationIdValue, candidates); }
     catch { /* Derived tool memory must never block an otherwise completed conversation turn. */ }
+  }
+  private finalize(context: WorkspaceContext, companyId: number, conversationIdValue: ReturnType<typeof conversationId>, inbound: ConversationMessage, outboundParticipantId: ReturnType<typeof conversationParticipantId>, executionRecordId: string, authorityGeneration: number, content: string, idempotencyKey: string, occurredAt: string, whatsAppConnectionId?: string) {
+    if (typeof (this.conversations as unknown as { finalizeAssistantResponse?: unknown }).finalizeAssistantResponse !== "function") return { kind: "finalized" as const, message: this.conversations.addMessage(context, companyId, conversationIdValue, { senderParticipantId: outboundParticipantId, direction: "outbound", content, idempotencyKey, executionRecordId }) };
+    return this.conversations.finalizeAssistantResponse(context, companyId, conversationIdValue, { inboundMessageId: inbound.id, outboundParticipantId, executionRecordId, authorityGeneration, content, idempotencyKey, occurredAt, ...(whatsAppConnectionId ? { whatsAppConnectionId } : {}) });
   }
 }
 

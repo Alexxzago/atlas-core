@@ -98,7 +98,7 @@ export class WhatsAppWebhookService {
           if (turn.response.outcome === "safe_fallback") this.markHumanRequired(context, connection.companyId, binding.conversationId);
           if (this.outbound) await this.outbound.deliverWhatsAppText(context, connection.companyId, { conversationId: binding.conversationId, conversationMessageId: turn.outbound.id, whatsAppConnectionId: connection.id, recipientWaId });
           const completedAt = this.clock.now(); this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", turn.response.outcome, completedAt); this.events.updateState(event.id, "claimed", "completed", completedAt);
-        } catch (error: unknown) { const failedAt = this.clock.now(); if (!(error instanceof OperationalConversationTurnSuppressedError)) this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "provider_unavailable", failedAt); this.events.updateState(event.id, "claimed", "failed", failedAt); }
+        } catch (error: unknown) { const failedAt = this.clock.now(); if (error instanceof OperationalConversationTurnSuppressedError) { this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", "unsupported", failedAt); this.events.updateState(event.id, "claimed", "completed", failedAt); } else { this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "provider_unavailable", failedAt); this.events.updateState(event.id, "claimed", "failed", failedAt); } }
       }
       return;
     }
@@ -204,7 +204,7 @@ export class WhatsAppWebhookService {
     if (!this.controls) return;
     const current = this.controls.findConversationControl(context, companyId, conversationId);
     if (!current || current.state !== "automated") return;
-    const updated = reconstructConversationControl({ ...current, state: "human_required", attentionReason: "automation_failure", version: current.version + 1, updatedAt: this.clock.now() });
+    const updated = reconstructConversationControl({ ...current, state: "human_required", attentionReason: "automation_failure", version: current.version + 1, authorityGeneration: current.authorityGeneration + 1, updatedAt: this.clock.now() });
     this.controls.updateConversationControl(context, companyId, updated, current.version);
   }
 

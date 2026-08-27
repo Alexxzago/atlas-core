@@ -12,7 +12,7 @@ const inbound = Object.freeze({ id: conversationMessageId("cmsg_0123456789abcdef
 const connection = { id: whatsAppConnectionId("wac_0123456789abcdef0123456789abcdef"), workspaceId: 1, companyId: 1, assistantProfileId: "asp_0123456789abcdef0123456789abcdef", phoneNumberId: "phone" };
 
 function control(state: ConversationControl["state"], resolved = true): ConversationControl {
-  return reconstructConversationControl({ conversationId: conversation, state, controllingActorId: state === "human_controlled" ? "operator-1" as never : null, lastControllingActorId: state === "human_controlled" ? "operator-1" as never : null, takenAt: state === "human_controlled" ? at : null, releasedAt: null, lastOperatorActivityAt: null, attentionReason: state === "automated" ? null : "automation_failure", resolvedAt: resolved ? at : null, resolvedBy: resolved ? "operator-1" as never : null, version: 1, createdAt: at, updatedAt: at });
+  return reconstructConversationControl({ conversationId: conversation, state, controllingActorId: state === "human_controlled" ? "operator-1" as never : null, lastControllingActorId: state === "human_controlled" ? "operator-1" as never : null, takenAt: state === "human_controlled" ? at : null, releasedAt: null, lastOperatorActivityAt: null, attentionReason: state === "automated" ? null : "automation_failure", resolvedAt: resolved ? at : null, resolvedBy: resolved ? "operator-1" as never : null, version: 1, authorityGeneration: 1, createdAt: at, updatedAt: at });
 }
 
 class Controls {
