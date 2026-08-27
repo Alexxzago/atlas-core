@@ -115,6 +115,7 @@ test("EPIC-017 captures an inbound provider event and message atomically for res
     const first = events.captureInbound(event, inbound, record), duplicate = events.captureInbound({ ...event, id: "cpe_4123456789abcdef0123456789abcdef" as never }, inbound, record);
     assert.equal(first.claimed, true); assert.equal(duplicate.claimed, false); assert.equal(first.inbound.id, duplicate.inbound.id);
     assert.equal(value.conversations.listMessages(value.primary, value.first.id, conversation.id).length, 1);
+    assert.deepEqual((value.database.prepare("SELECT event_type,related_message_id FROM conversation_events WHERE conversation_id=?").all(conversation.id) as Array<{ event_type: string; related_message_id: string }>).map((row) => [row.event_type, row.related_message_id]), [["inbound_message_received", inbound.id]]);
     assert.equal(events.listRecoverable("meta_whatsapp_cloud", 10)[0]?.conversationMessageId, inbound.id);
   } finally { value.database.close(); }
 });
@@ -147,6 +148,7 @@ test("EPIC-040 replays the same media capture without duplicate durable rows", (
   const value = setup(); try { const input = mediaCapture(value, "7123456789abcdef0123456789abcdef"), events = new ChannelProviderEventRepository(value.database), first = events.captureInboundExecution(input.event, input.inbound, input.provider, input.request, [input.attachment]), replay = events.captureInboundExecution({ ...input.event, id: "cpe_8123456789abcdef0123456789abcdef" as never }, input.inbound, input.provider, input.request, [input.attachment]);
     assert.equal(replay.claimed, false); assert.equal(replay.request.id, first.request.id); assert.equal(replay.media[0]?.id, first.media[0]?.id); assert.equal(replay.request.mediaGateState, "blocked_by_media");
     for (const table of ["channel_provider_events", "conversation_messages", "provider_message_records", "channel_execution_requests", "whatsapp_inbound_media"]) assert.equal((value.database.prepare(`SELECT count(*) AS count FROM ${table}`).get() as { count:number }).count, 1);
+    assert.equal((value.database.prepare("SELECT count(*) AS count FROM conversation_events WHERE event_type='inbound_message_received' AND related_message_id=?").get(input.inbound.id) as { count:number }).count, 1);
   } finally { value.database.close(); }
 });
 

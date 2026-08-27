@@ -51,8 +51,9 @@ interface ContextualWhatsAppConnectionControllers {
 }
 interface ContextualMetaEmbeddedSignupControllers { start:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; status:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; complete:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; reconnect:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; }
 interface ContextualConversationReadControllers {
-  list: (context: WorkspaceContext) => RequestHandler;
-  get: (context: WorkspaceContext) => RequestHandler;
+  list: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
+  get: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
+  feed?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
 }
 interface ContextualConversationControlControllers { takeover: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; release: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; resolve: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; }
 
@@ -211,6 +212,7 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   const conversationReads = dependencies.conversationReadControllers ?? productionConversationReadControllers;
   if (conversationReads) {
     router.get("/:workspaceId/companies/:companyId/conversations", authorize("company:read", false, conversationReads.list));
+    if (conversationReads.feed) router.get("/:workspaceId/companies/:companyId/conversations/feed", authorize("company:read", false, conversationReads.feed));
     router.get("/:workspaceId/companies/:companyId/conversations/:conversationId", authorize("company:read", false, conversationReads.get));
   }
   const conversationControls = dependencies.conversationControlControllers ?? productionConversationControlControllers;

@@ -24,7 +24,7 @@ function createConversation(repository: ConversationRepository, context: ReturnT
 }
 
 test("EPIC-019 validates conversation control invariants", () => {
-  const base = { conversationId: conversationId("cnv_0123456789abcdef0123456789abcdef"), state: "automated" as const, controllingActorId: null, lastControllingActorId: null, takenAt: null, releasedAt: null, lastOperatorActivityAt: null, attentionReason: null, resolvedAt: null, resolvedBy: null, version: 1, createdAt: at, updatedAt: at };
+  const base = { conversationId: conversationId("cnv_0123456789abcdef0123456789abcdef"), state: "automated" as const, controllingActorId: null, lastControllingActorId: null, takenAt: null, releasedAt: null, lastOperatorActivityAt: null, attentionReason: null, resolvedAt: null, resolvedBy: null, version: 1, authorityGeneration: 1, createdAt: at, updatedAt: at };
   assert.ok(Object.isFrozen(reconstructConversationControl(base)));
   assert.throws(() => reconstructConversationControl({ ...base, state: "human_controlled", controllingActorId: null }), ConversationControlDomainError);
   assert.throws(() => reconstructConversationControl({ ...base, controllingActorId: "operator" as never }), ConversationControlDomainError);
@@ -54,7 +54,7 @@ test("EPIC-019 lazily ensures one default control row and uses optimistic contro
   try {
     const conversation = createConversation(value.conversations, value.primary, value.first.id);
     const initial = value.conversations.ensureConversationControl(value.primary, value.first.id, conversation.id)!;
-    assert.deepEqual(initial, reconstructConversationControl({ conversationId: conversation.id, state: "automated", controllingActorId: null, lastControllingActorId: null, takenAt: null, releasedAt: null, lastOperatorActivityAt: null, attentionReason: null, resolvedAt: null, resolvedBy: null, version: 1, createdAt: at, updatedAt: at }));
+    assert.deepEqual(initial, reconstructConversationControl({ conversationId: conversation.id, state: "automated", controllingActorId: null, lastControllingActorId: null, takenAt: null, releasedAt: null, lastOperatorActivityAt: null, attentionReason: null, resolvedAt: null, resolvedBy: null, version: 1, authorityGeneration: 1, createdAt: at, updatedAt: at }));
     assert.equal(value.conversations.ensureConversationControl(value.primary, value.first.id, conversation.id)!.version, 1);
     assert.equal((value.database.prepare("SELECT COUNT(*) AS count FROM conversation_controls").get() as { count: number }).count, 1);
     const controlled = reconstructConversationControl({ ...initial, state: "human_controlled", controllingActorId: "operator-1" as never, lastControllingActorId: "operator-1" as never, takenAt: later, attentionReason: "customer_request", version: 2, updatedAt: later });

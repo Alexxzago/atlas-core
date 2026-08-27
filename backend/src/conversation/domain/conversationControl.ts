@@ -16,6 +16,7 @@ export interface ConversationControl {
   readonly resolvedAt: string | null;
   readonly resolvedBy: UserId | null;
   readonly version: number;
+  readonly authorityGeneration: number;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -62,6 +63,7 @@ export function reconstructConversationControl(value: ConversationControl): Conv
   if (releasedAt !== null && controllingActorId !== null) throw new ConversationControlDomainError("Released conversations cannot have an active controller.");
   if ((resolvedAt === null) !== (resolvedBy === null)) throw new ConversationControlDomainError("Conversation resolution is incomplete.");
   if (!Number.isSafeInteger(value.version) || value.version < 1) throw new ConversationControlDomainError("Conversation control version is invalid.");
+  if (!Number.isSafeInteger(value.authorityGeneration) || value.authorityGeneration < 1) throw new ConversationControlDomainError("Conversation authority generation is invalid.");
   if (updatedAt < createdAt || (takenAt !== null && (takenAt < createdAt || takenAt > updatedAt)) || (releasedAt !== null && (takenAt === null || releasedAt < takenAt || releasedAt > updatedAt)) || (lastOperatorActivityAt !== null && (lastOperatorActivityAt < createdAt || lastOperatorActivityAt > updatedAt)) || (resolvedAt !== null && (resolvedAt < createdAt || resolvedAt > updatedAt))) throw new ConversationControlDomainError("Conversation control timestamps are inconsistent.");
   return Object.freeze({ ...value, conversationId: conversationId(value.conversationId), state, controllingActorId, lastControllingActorId, takenAt, releasedAt, lastOperatorActivityAt, attentionReason: value.attentionReason === null ? null : conversationAttentionReason(value.attentionReason), resolvedAt, resolvedBy, createdAt, updatedAt });
 }
@@ -85,6 +87,7 @@ export interface ConversationInboxProjection {
   readonly deliveryCategory: "received" | "sent" | null;
   readonly lastActivityAt: string;
   readonly delivery: WhatsAppOutboundDeliveryProjection | null;
+  readonly controlledByCurrentActor: boolean;
 }
 
 export interface ConversationDetailProjection extends ConversationInboxProjection {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
-import type { ConversationRepositoryPort } from "../application/ports.js";
+import type { UserId } from "../../identity/domain/user.js";
+import type { AssistantResponseFinalizationResult, ConversationRepositoryPort } from "../application/ports.js";
 import {
   conversationId,
   communicationChannel,
@@ -88,15 +89,19 @@ export class ConversationService {
     const current = this.get(context, companyIdValue, conversationIdValue);
     return this.conversations.findMessageByIdempotencyKey(context, current.companyId, current.id, idempotencyKey);
   }
-  public listInbox(context: WorkspaceContext, companyIdValue: unknown): ConversationInboxProjection[] {
-    const companyId = parseCompanyId(companyIdValue);
-    return this.conversations.listConversationInbox(context, companyId);
+  public finalizeAssistantResponse(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, input: { inboundMessageId: ConversationMessage["id"]; outboundParticipantId: ConversationParticipant["id"]; executionRecordId: string; authorityGeneration: number; content: string; idempotencyKey: string; occurredAt: string; whatsAppConnectionId?: string }): AssistantResponseFinalizationResult {
+    const current = this.get(context, companyIdValue, conversationIdValue);
+    return this.conversations.finalizeAssistantResponse(context, current.companyId, current.id, input.inboundMessageId, input.outboundParticipantId, input.executionRecordId, input.authorityGeneration, input.content, input.idempotencyKey, input.occurredAt, input.whatsAppConnectionId ?? null);
   }
-  public detail(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): ConversationDetailProjection {
+  public listInbox(context: WorkspaceContext, companyIdValue: unknown, actorId?: UserId): ConversationInboxProjection[] {
+    const companyId = parseCompanyId(companyIdValue);
+    return this.conversations.listConversationInbox(context, companyId).map((value) => Object.freeze({ ...value, controlledByCurrentActor: actorId === undefined ? false : this.conversations.isConversationControlledBy(context, companyId, value.conversationId, actorId) }));
+  }
+  public detail(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, actorId?: UserId): ConversationDetailProjection {
     const companyId = parseCompanyId(companyIdValue), id = parseConversationId(conversationIdValue);
     const detail = this.conversations.findConversationDetail(context, companyId, id);
     if (!detail) throw new ConversationNotFoundError("Conversation was not found.");
-    return detail;
+    return Object.freeze({ ...detail, controlledByCurrentActor: actorId === undefined ? false : this.conversations.isConversationControlledBy(context, companyId, detail.conversationId, actorId) });
   }
 
   public validateOpen(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): Conversation {

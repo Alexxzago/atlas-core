@@ -51,9 +51,10 @@ export class ChannelProviderEventRepository implements ChannelProviderEventRepos
       }
       current = this.findByTransportProviderAndExternalEventId(value.transportProvider, value.externalEventId);
       if (!current?.conversationMessageId) throw new Error("Inbound event could not be linked.");
-      const row = this.db.prepare("SELECT * FROM conversation_messages WHERE id=?").get(current.conversationMessageId) as MessageRow | undefined;
-      if (!row) throw new Error("Inbound conversation message could not be read.");
-      this.db.exec("COMMIT;");
+       const row = this.db.prepare("SELECT * FROM conversation_messages WHERE id=?").get(current.conversationMessageId) as MessageRow | undefined;
+       if (!row) throw new Error("Inbound conversation message could not be read.");
+       this.recordInboundFeedEvent(current.conversationMessageId);
+       this.db.exec("COMMIT;");
       return { event: current, inbound: message(row), claimed: inserted };
     } catch (error: unknown) { if (this.db.isTransaction) this.db.exec("ROLLBACK;"); throw error; }
   }
@@ -82,6 +83,7 @@ export class ChannelProviderEventRepository implements ChannelProviderEventRepos
        this.db.prepare("INSERT INTO channel_execution_requests(id,channel_provider_event_id,state,media_gate_state,snapshot_json,lease_owner,lease_expires_at,outcome,created_at,updated_at) VALUES(?,?,'pending',?,?,NULL,NULL,NULL,?,?) ON CONFLICT(channel_provider_event_id) DO NOTHING").run(execution.id, current.id, attachments.length === 0 ? "open" : "blocked_by_media", JSON.stringify(execution.snapshot), execution.createdAt, execution.updatedAt);
       const saved = this.db.prepare("SELECT * FROM channel_execution_requests WHERE channel_provider_event_id=?").get(current.id) as RequestRow | undefined; if (!saved) throw new Error("Execution request could not be persisted.");
        const row = this.db.prepare("SELECT * FROM conversation_messages WHERE id=?").get(current.conversationMessageId) as MessageRow | undefined; if (!row) throw new Error("Inbound conversation message could not be read.");
+       this.recordInboundFeedEvent(current.conversationMessageId);
        const capturedMedia:WhatsAppInboundMedia[]=[];
        for(const attachment of attachments){
          if(attachment.connectionId!==value.transportConnectionId)throw new WhatsAppInboundMediaError("media_ingest_failed");
@@ -93,6 +95,9 @@ export class ChannelProviderEventRepository implements ChannelProviderEventRepos
        }
        this.db.exec("COMMIT;"); return { event: current, inbound: message(row), request: request(saved), media:Object.freeze(capturedMedia), claimed: inserted };
     } catch (error: unknown) { if (this.db.isTransaction) this.db.exec("ROLLBACK;"); throw error; }
+  }
+  private recordInboundFeedEvent(messageId: string): void {
+    this.db.prepare("INSERT INTO conversation_events(id,workspace_id,company_id,conversation_id,event_type,actor_user_id,control_version,authority_generation,related_message_id,related_operation_id,occurred_at) SELECT ?,co.workspace_id,c.company_id,c.id,'inbound_message_received',NULL,NULL,NULL,m.id,NULL,m.created_at FROM conversation_messages m JOIN conversations c ON c.id=m.conversation_id JOIN companies co ON co.id=c.company_id WHERE m.id=? AND NOT EXISTS(SELECT 1 FROM conversation_events WHERE event_type='inbound_message_received' AND related_message_id=m.id)").run(`cev_${crypto.randomUUID().replaceAll("-", "")}`, messageId);
   }
   public leaseExecutionRequests(owner: string, now: string, expiresAt: string, limit: number): ChannelExecutionRequest[] {
     if (!Number.isSafeInteger(limit) || limit < 1) return [];

@@ -25,6 +25,7 @@ export interface OperationalAssistantRuntimeContext {
     readonly whatsAppConnectionId?: string;
     readonly whatsAppPhoneNumberId?: string;
     readonly conversationId?: string;
+    readonly authorityGeneration?: number;
     readonly channelProvider?: string;
   };
 }
@@ -139,6 +140,7 @@ function snapshot(company: Company, profile: AssistantProfile, knowledge: Compan
     whatsAppConnectionId: context.snapshotContext?.whatsAppConnectionId ?? null,
     whatsAppPhoneNumberId: context.snapshotContext?.whatsAppPhoneNumberId ?? null,
     conversationId: context.snapshotContext?.conversationId ?? null,
+    authorityGeneration: context.snapshotContext?.authorityGeneration ?? null,
     channelProvider: context.snapshotContext?.channelProvider ?? null,
     executionPolicyVersion: "assistant-profile-execution-v1" as const,
     safetyPolicyVersion: "assistant-safety-v1" as const,

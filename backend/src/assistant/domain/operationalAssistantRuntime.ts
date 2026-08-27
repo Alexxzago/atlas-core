@@ -32,6 +32,7 @@ export interface ImmutableExecutionSnapshot {
   readonly whatsAppConnectionId: string | null;
   readonly whatsAppPhoneNumberId: string | null;
   readonly conversationId: string | null;
+  readonly authorityGeneration: number | null;
   readonly channelProvider: string | null;
   readonly executionPolicyVersion: "assistant-profile-execution-v1";
   readonly safetyPolicyVersion: "assistant-safety-v1";
