@@ -1,0 +1,22 @@
+export type VoiceAudioResponseMode = "text_only" | "voice_with_text_fallback";
+export type VoiceWorkState = "pending" | "leased" | "completed" | "retryable" | "failed" | "suppressed";
+export type VoiceUploadState = "pending_upload" | "uploading" | "uploaded" | "expired" | "failed";
+export type VoiceTranscriptOutcome = "completed" | "unsupported" | "failed" | "suppressed";
+
+export interface WhatsAppVoicePolicy { readonly workspaceId:number; readonly companyId:number; readonly connectionId:string; readonly voiceAiEnabled:boolean; readonly audioResponseMode:VoiceAudioResponseMode; readonly version:number; readonly createdAt:string; readonly updatedAt:string; }
+export interface ConversationAudioTranscript { readonly id:string; readonly workspaceId:number; readonly companyId:number; readonly conversationId:string; readonly messageId:string; readonly mediaAssetId:string; readonly normalizedTranscript:string; readonly languageTag:string|null; readonly inputDigest:string; readonly outcome:VoiceTranscriptOutcome; readonly safeFailureCategory:string|null; readonly createdAt:string; }
+export interface VoiceWorkRequest { readonly id:string; readonly workspaceId:number; readonly companyId:number; readonly conversationId:string; readonly messageId:string; readonly state:VoiceWorkState; readonly leaseOwner:string|null; readonly leaseExpiresAt:string|null; readonly attemptCount:number; readonly expectedAuthorityGeneration:number; readonly safeOutcome:string|null; readonly safeFailureCategory:string|null; readonly createdAt:string; readonly updatedAt:string; readonly completedAt:string|null; }
+export interface AudioTranscriptionRequest extends VoiceWorkRequest { readonly mediaAssetId:string; }
+export interface VoiceSynthesisRequest extends VoiceWorkRequest { readonly outboundDeliveryId:string; readonly renditionSettlementId:string|null; }
+export interface WhatsAppOutboundMediaUpload { readonly id:string; readonly workspaceId:number; readonly companyId:number; readonly outboundDeliveryId:string; readonly mediaAssetId:string; readonly providerMediaId:string|null; readonly state:VoiceUploadState; readonly leaseOwner:string|null; readonly leaseExpiresAt:string|null; readonly attemptCount:number; readonly safeErrorCategory:string|null; readonly createdAt:string; readonly updatedAt:string; }
+export interface VoiceResponseVisibility { readonly workspaceId:number; readonly companyId:number; readonly conversationId:string; readonly messageId:string; readonly outboundDeliveryId:string; readonly kind:"externally_committed"; readonly committedAt:string; readonly createdAt:string; }
+/** Public projection: no provider IDs, storage references, lease state, or error detail. */
+export interface VoiceMessageReadModel { readonly messageId:string; readonly direction:"inbound"|"outbound"; readonly modality:"audio"|"voice"; readonly transcript:string|null; readonly transcriptLanguageTag:string|null; readonly transcriptionState:"pending"|"completed"|"failed"|"suppressed"|"unsupported"|null; readonly deferredState:"processing"|"audio_ready"|"accepted"|"delivered"|"read"|"fallback"|"suppressed"|"uncertain"|"failed"|null; readonly fallbackAvailable:boolean; readonly playbackAvailable:boolean; }
+export interface VoicePlayback { readonly assetId:string; readonly mediaType:"audio/mpeg"|"audio/ogg"|"audio/wav"; }
+
+export class WhatsAppVoiceDomainError extends Error {}
+export function voiceBounded(value:string,label:string,maximum:number):string { const normalized=value.normalize("NFKC").trim(); if(!normalized||Array.from(normalized).length>maximum||/[\u0000-\u001f\u007f]/u.test(normalized))throw new WhatsAppVoiceDomainError(`${label} is invalid.`); return normalized; }
+export function voiceDigest(value:string):string { if(!/^[a-f0-9]{64}$/.test(value))throw new WhatsAppVoiceDomainError("Voice digest is invalid."); return value; }
+export function voicePositive(value:number,label:string):number { if(!Number.isSafeInteger(value)||value<1)throw new WhatsAppVoiceDomainError(`${label} is invalid.`); return value; }
+export function voiceTimestamp(value:string):string { if(!Number.isFinite(Date.parse(value))||new Date(value).toISOString()!==value)throw new WhatsAppVoiceDomainError("Voice timestamp is invalid."); return value; }
+export function voiceMode(value:string):VoiceAudioResponseMode { if(value!=="text_only"&&value!=="voice_with_text_fallback")throw new WhatsAppVoiceDomainError("Voice response mode is invalid."); return value; }

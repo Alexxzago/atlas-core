@@ -1676,6 +1676,178 @@ const migrations: Migration[] = [
       SELECT RAISE(ABORT,'Conversation events are append-only');
     END;
   `);}},
+  { id:60,name:"0060_voice_ai_whatsapp",checksumSource:"voice-policy-transcript-leased-work-foundations|preserve-outbound-rowid-and-event-sequence-high-watermark|immutable-message-evidence|tenant-scoped-voice-persistence-v1",disableForeignKeys:true,apply(database):void{
+    const eventHighWatermark=(database.prepare("SELECT seq FROM sqlite_sequence WHERE name='conversation_events'").get() as {seq:number}|undefined)?.seq ?? 0;
+    database.exec(`
+      CREATE TABLE channel_execution_requests_v60(
+        id TEXT PRIMARY KEY,channel_provider_event_id TEXT NOT NULL UNIQUE REFERENCES channel_provider_events(id) ON DELETE CASCADE,
+        state TEXT NOT NULL CHECK(state IN ('pending','leased','completed','failed','unsupported')),snapshot_json TEXT NOT NULL,
+        lease_owner TEXT,lease_expires_at TEXT,outcome TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+        media_gate_state TEXT NOT NULL DEFAULT 'open' CHECK(media_gate_state IN ('open','blocked_by_media','blocked_by_transcript')),
+        CHECK((lease_owner IS NULL AND lease_expires_at IS NULL) OR (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL))
+      );
+      INSERT INTO channel_execution_requests_v60 SELECT * FROM channel_execution_requests;
+      DROP TABLE channel_execution_requests;
+      ALTER TABLE channel_execution_requests_v60 RENAME TO channel_execution_requests;
+      CREATE INDEX idx_channel_execution_requests_ready ON channel_execution_requests(state,created_at,id);
+      CREATE INDEX idx_channel_execution_requests_lease ON channel_execution_requests(state,lease_expires_at,id);
+
+      CREATE TABLE outbound_deliveries_v60(
+        id TEXT PRIMARY KEY,provider_message_record_id TEXT NOT NULL REFERENCES provider_message_records(id) ON DELETE CASCADE,
+        transport_connection_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('pending','leased','accepted','delivered','read','retryable','permanent_failure','uncertain','blocked_by_synthesis','suppressed')),
+        attempt_count INTEGER NOT NULL CHECK(attempt_count>=0),next_attempt_at TEXT NOT NULL,lease_owner TEXT,lease_expires_at TEXT,safe_error_category TEXT,
+        payload_kind TEXT NOT NULL DEFAULT 'text' CHECK(payload_kind IN ('text','deferred_voice','audio')),
+        response_policy TEXT NOT NULL DEFAULT 'standard' CHECK(response_policy IN ('standard','deferred_voice')),
+        media_asset_id TEXT REFERENCES media_assets(id) ON DELETE RESTRICT,
+        expected_authority_generation INTEGER CHECK(expected_authority_generation IS NULL OR expected_authority_generation>0),
+        send_started_at TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+        CHECK((lease_owner IS NULL AND lease_expires_at IS NULL) OR (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)),
+        CHECK(payload_kind!='deferred_voice' OR response_policy='deferred_voice'),
+        CHECK(payload_kind!='deferred_voice' OR state IN ('blocked_by_synthesis','suppressed')),
+        CHECK(response_policy!='deferred_voice' OR expected_authority_generation IS NOT NULL),
+        CHECK(state!='blocked_by_synthesis' OR (payload_kind='deferred_voice' AND response_policy='deferred_voice' AND expected_authority_generation IS NOT NULL)),
+        CHECK(payload_kind!='audio' OR media_asset_id IS NOT NULL),CHECK(payload_kind!='text' OR media_asset_id IS NULL),
+        UNIQUE(provider_message_record_id,transport_connection_id)
+      );
+      INSERT INTO outbound_deliveries_v60(rowid,id,provider_message_record_id,transport_connection_id,state,attempt_count,next_attempt_at,lease_owner,lease_expires_at,safe_error_category,payload_kind,response_policy,media_asset_id,expected_authority_generation,send_started_at,created_at,updated_at)
+      SELECT rowid,id,provider_message_record_id,transport_connection_id,state,attempt_count,next_attempt_at,lease_owner,lease_expires_at,safe_error_category,'text','standard',NULL,NULL,NULL,created_at,updated_at FROM outbound_deliveries;
+      DROP TABLE outbound_deliveries;
+      ALTER TABLE outbound_deliveries_v60 RENAME TO outbound_deliveries;
+      CREATE INDEX idx_outbound_deliveries_ready ON outbound_deliveries(state,next_attempt_at,id);
+      CREATE INDEX idx_outbound_deliveries_lease ON outbound_deliveries(state,lease_expires_at,id);
+      CREATE TRIGGER outbound_deliveries_media_scope_insert BEFORE INSERT ON outbound_deliveries
+      WHEN NEW.media_asset_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM media_assets a JOIN provider_message_records p ON p.id=NEW.provider_message_record_id JOIN conversation_messages m ON m.id=p.conversation_message_id JOIN conversations c ON c.id=m.conversation_id WHERE a.id=NEW.media_asset_id AND a.workspace_id=(SELECT workspace_id FROM companies WHERE id=c.company_id) AND a.company_id=c.company_id)
+      BEGIN SELECT RAISE(ABORT,'Outbound delivery media asset scope is invalid'); END;
+      CREATE TRIGGER outbound_deliveries_media_scope_update BEFORE UPDATE OF provider_message_record_id,media_asset_id ON outbound_deliveries
+      WHEN NEW.media_asset_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM media_assets a JOIN provider_message_records p ON p.id=NEW.provider_message_record_id JOIN conversation_messages m ON m.id=p.conversation_message_id JOIN conversations c ON c.id=m.conversation_id WHERE a.id=NEW.media_asset_id AND a.workspace_id=(SELECT workspace_id FROM companies WHERE id=c.company_id) AND a.company_id=c.company_id)
+      BEGIN SELECT RAISE(ABORT,'Outbound delivery media asset scope is invalid'); END;
+      CREATE TRIGGER outbound_deliveries_suppressed_terminal BEFORE UPDATE OF state ON outbound_deliveries
+      WHEN OLD.state='suppressed' AND NEW.state!='suppressed'
+      BEGIN SELECT RAISE(ABORT,'Suppressed outbound deliveries are terminal'); END;
+
+      CREATE TABLE conversation_events_v60(
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL CHECK(event_type IN ('handoff_requested','takeover_applied','takeover_rejected','release_applied','release_rejected','automation_resumed','automation_blocked','operator_message_created','assistant_message_created','inbound_message_received','conversation_reopened','conversation_resolved','voice_state_changed')),
+        actor_user_id TEXT CHECK(actor_user_id IS NULL OR length(actor_user_id) BETWEEN 1 AND 128),control_version INTEGER CHECK(control_version IS NULL OR control_version>0),authority_generation INTEGER CHECK(authority_generation IS NULL OR authority_generation>0),related_message_id TEXT,related_operation_id TEXT CHECK(related_operation_id IS NULL OR length(related_operation_id) BETWEEN 1 AND 200),occurred_at TEXT NOT NULL,
+        FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+        CHECK(event_type!='voice_state_changed' OR related_message_id IS NOT NULL)
+      );
+      INSERT INTO conversation_events_v60(sequence,id,workspace_id,company_id,conversation_id,event_type,actor_user_id,control_version,authority_generation,related_message_id,related_operation_id,occurred_at)
+      SELECT sequence,id,workspace_id,company_id,conversation_id,event_type,actor_user_id,control_version,authority_generation,related_message_id,related_operation_id,occurred_at FROM conversation_events;
+      DROP TABLE conversation_events;
+      ALTER TABLE conversation_events_v60 RENAME TO conversation_events;
+      UPDATE sqlite_sequence SET seq=CASE WHEN seq<${eventHighWatermark} THEN ${eventHighWatermark} ELSE seq END WHERE name='conversation_events';
+      CREATE INDEX idx_conversation_events_company_sequence ON conversation_events(workspace_id,company_id,sequence);
+      CREATE INDEX idx_conversation_events_conversation_sequence ON conversation_events(workspace_id,company_id,conversation_id,sequence);
+      CREATE TRIGGER conversation_events_scope_insert BEFORE INSERT ON conversation_events
+      WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id)
+        OR (NEW.related_message_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM conversation_messages m WHERE m.id=NEW.related_message_id AND m.conversation_id=NEW.conversation_id))
+        OR (NEW.related_operation_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM conversation_control_operations o WHERE o.workspace_id=NEW.workspace_id AND o.company_id=NEW.company_id AND o.conversation_id=NEW.conversation_id AND o.operation_id=NEW.related_operation_id))
+      BEGIN SELECT RAISE(ABORT,'Conversation event scope is invalid'); END;
+      CREATE TRIGGER conversation_events_no_update BEFORE UPDATE ON conversation_events BEGIN SELECT RAISE(ABORT,'Conversation events are append-only'); END;
+      CREATE TRIGGER conversation_events_no_delete BEFORE DELETE ON conversation_events BEGIN SELECT RAISE(ABORT,'Conversation events are append-only'); END;
+      CREATE TRIGGER conversation_messages_no_update BEFORE UPDATE ON conversation_messages BEGIN SELECT RAISE(ABORT,'Conversation messages are immutable'); END;
+      CREATE TABLE conversation_message_teardowns(
+        conversation_id TEXT PRIMARY KEY,company_id INTEGER NOT NULL
+      );
+      CREATE TRIGGER companies_authorize_conversation_message_teardown BEFORE DELETE ON companies
+      BEGIN
+        INSERT INTO conversation_message_teardowns(conversation_id,company_id)
+        SELECT id,company_id FROM conversations WHERE company_id=OLD.id;
+      END;
+      CREATE TRIGGER companies_clear_conversation_message_teardown AFTER DELETE ON companies
+      BEGIN
+        DELETE FROM conversation_message_teardowns WHERE company_id=OLD.id;
+      END;
+      CREATE TRIGGER conversation_messages_no_delete BEFORE DELETE ON conversation_messages
+      WHEN NOT EXISTS(SELECT 1 FROM conversation_message_teardowns t WHERE t.conversation_id=OLD.conversation_id)
+      BEGIN SELECT RAISE(ABORT,'Conversation messages are immutable'); END;
+
+      CREATE TABLE whatsapp_voice_policies(
+        workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,whatsapp_connection_id TEXT NOT NULL UNIQUE REFERENCES whatsapp_connections(id) ON DELETE CASCADE,
+        voice_ai_enabled INTEGER NOT NULL DEFAULT 0 CHECK(voice_ai_enabled IN (0,1)),audio_response_mode TEXT NOT NULL DEFAULT 'text_only' CHECK(audio_response_mode IN ('text_only','voice_with_text_fallback')),
+        version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+        FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+      );
+      INSERT INTO whatsapp_voice_policies(workspace_id,company_id,whatsapp_connection_id,created_at,updated_at)
+      SELECT workspace_id,company_id,id,created_at,updated_at FROM whatsapp_connections;
+      CREATE TRIGGER whatsapp_connections_seed_voice_policy AFTER INSERT ON whatsapp_connections BEGIN
+        INSERT INTO whatsapp_voice_policies(workspace_id,company_id,whatsapp_connection_id,created_at,updated_at)
+        VALUES(NEW.workspace_id,NEW.company_id,NEW.id,NEW.created_at,NEW.updated_at);
+      END;
+      CREATE TRIGGER whatsapp_voice_policies_scope_insert BEFORE INSERT ON whatsapp_voice_policies WHEN NOT EXISTS(SELECT 1 FROM whatsapp_connections w WHERE w.id=NEW.whatsapp_connection_id AND w.workspace_id=NEW.workspace_id AND w.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'WhatsApp voice policy scope is invalid'); END;
+      CREATE TRIGGER whatsapp_voice_policies_scope_update BEFORE UPDATE OF workspace_id,company_id,whatsapp_connection_id ON whatsapp_voice_policies WHEN NOT EXISTS(SELECT 1 FROM whatsapp_connections w WHERE w.id=NEW.whatsapp_connection_id AND w.workspace_id=NEW.workspace_id AND w.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'WhatsApp voice policy scope is invalid'); END;
+      CREATE TABLE whatsapp_voice_policy_operations(
+        workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,whatsapp_connection_id TEXT NOT NULL,operation_id TEXT NOT NULL CHECK(length(operation_id) BETWEEN 1 AND 200),actor_user_id TEXT NOT NULL CHECK(length(actor_user_id) BETWEEN 1 AND 128),request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),expected_version INTEGER NOT NULL CHECK(expected_version>0),outcome TEXT NOT NULL CHECK(outcome IN ('applied','stale_version')),resulting_voice_ai_enabled INTEGER CHECK(resulting_voice_ai_enabled IN (0,1)),resulting_audio_response_mode TEXT CHECK(resulting_audio_response_mode IN ('text_only','voice_with_text_fallback')),resulting_version INTEGER CHECK(resulting_version IS NULL OR resulting_version>0),occurred_at TEXT NOT NULL,
+        PRIMARY KEY(workspace_id,company_id,whatsapp_connection_id,operation_id),FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(whatsapp_connection_id) REFERENCES whatsapp_connections(id) ON DELETE CASCADE
+      );
+      CREATE INDEX idx_whatsapp_voice_policy_operations_connection ON whatsapp_voice_policy_operations(workspace_id,company_id,whatsapp_connection_id,occurred_at,operation_id);
+      CREATE TRIGGER whatsapp_voice_policy_operations_scope_insert BEFORE INSERT ON whatsapp_voice_policy_operations WHEN NOT EXISTS(SELECT 1 FROM whatsapp_connections w WHERE w.id=NEW.whatsapp_connection_id AND w.workspace_id=NEW.workspace_id AND w.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'WhatsApp voice policy operation scope is invalid'); END;
+      CREATE TRIGGER whatsapp_voice_policy_operations_no_update BEFORE UPDATE ON whatsapp_voice_policy_operations BEGIN SELECT RAISE(ABORT,'WhatsApp voice policy operations are append-only'); END;
+      CREATE TRIGGER whatsapp_voice_policy_operations_no_delete BEFORE DELETE ON whatsapp_voice_policy_operations BEGIN SELECT RAISE(ABORT,'WhatsApp voice policy operations are append-only'); END;
+
+      CREATE TABLE conversation_audio_transcripts(
+        id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,conversation_message_id TEXT NOT NULL UNIQUE REFERENCES conversation_messages(id) ON DELETE CASCADE,media_asset_id TEXT NOT NULL REFERENCES media_assets(id) ON DELETE RESTRICT,normalized_transcript TEXT NOT NULL,language_tag TEXT CHECK(language_tag IS NULL OR length(language_tag) BETWEEN 1 AND 35),input_digest TEXT NOT NULL CHECK(length(input_digest)=64 AND input_digest NOT GLOB '*[^0-9a-f]*'),outcome TEXT NOT NULL CHECK(outcome IN ('completed','unsupported','failed','suppressed')),safe_failure_category TEXT CHECK(safe_failure_category IS NULL OR length(safe_failure_category) BETWEEN 1 AND 100),created_at TEXT NOT NULL,
+        FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+      );
+      CREATE INDEX idx_conversation_audio_transcripts_conversation ON conversation_audio_transcripts(workspace_id,company_id,conversation_id,created_at,id);
+      CREATE TRIGGER conversation_audio_transcripts_scope_insert BEFORE INSERT ON conversation_audio_transcripts WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id JOIN conversation_messages m ON m.id=NEW.conversation_message_id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id AND m.conversation_id=c.id AND m.direction='inbound') OR NOT EXISTS(SELECT 1 FROM media_assets a JOIN whatsapp_inbound_media w ON w.media_asset_id=a.id WHERE a.id=NEW.media_asset_id AND a.workspace_id=NEW.workspace_id AND a.company_id=NEW.company_id AND w.conversation_message_id=NEW.conversation_message_id AND w.provider_kind='audio' AND w.state='associated') BEGIN SELECT RAISE(ABORT,'Conversation audio transcript scope is invalid'); END;
+      CREATE TRIGGER conversation_audio_transcripts_no_update BEFORE UPDATE ON conversation_audio_transcripts BEGIN SELECT RAISE(ABORT,'Conversation audio transcripts are immutable'); END;
+      CREATE TRIGGER conversation_audio_transcripts_no_delete BEFORE DELETE ON conversation_audio_transcripts BEGIN SELECT RAISE(ABORT,'Conversation audio transcripts are immutable'); END;
+
+      CREATE TABLE audio_transcription_requests(
+        id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,conversation_message_id TEXT NOT NULL UNIQUE REFERENCES conversation_messages(id) ON DELETE CASCADE,media_asset_id TEXT NOT NULL REFERENCES media_assets(id) ON DELETE RESTRICT,state TEXT NOT NULL CHECK(state IN ('pending','leased','completed','retryable','failed','suppressed')),lease_owner TEXT,lease_expires_at TEXT,attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count BETWEEN 0 AND 20),expected_authority_generation INTEGER NOT NULL CHECK(expected_authority_generation>0),safe_outcome TEXT CHECK(safe_outcome IS NULL OR length(safe_outcome) BETWEEN 1 AND 100),safe_failure_category TEXT CHECK(safe_failure_category IS NULL OR length(safe_failure_category) BETWEEN 1 AND 100),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,completed_at TEXT,
+        FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,CHECK((lease_owner IS NULL AND lease_expires_at IS NULL) OR (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL))
+      );
+      CREATE INDEX idx_audio_transcription_requests_ready ON audio_transcription_requests(workspace_id,company_id,state,lease_expires_at,created_at,id);
+      CREATE TRIGGER audio_transcription_requests_scope_insert BEFORE INSERT ON audio_transcription_requests WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id JOIN conversation_messages m ON m.id=NEW.conversation_message_id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id AND m.conversation_id=c.id AND m.direction='inbound') OR NOT EXISTS(SELECT 1 FROM media_assets a JOIN whatsapp_inbound_media w ON w.media_asset_id=a.id WHERE a.id=NEW.media_asset_id AND a.workspace_id=NEW.workspace_id AND a.company_id=NEW.company_id AND w.conversation_message_id=NEW.conversation_message_id AND w.provider_kind='audio' AND w.state='associated') BEGIN SELECT RAISE(ABORT,'Audio transcription request scope is invalid'); END;
+      CREATE TRIGGER audio_transcription_requests_scope_update BEFORE UPDATE OF workspace_id,company_id,conversation_id,conversation_message_id,media_asset_id ON audio_transcription_requests WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id JOIN conversation_messages m ON m.id=NEW.conversation_message_id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id AND m.conversation_id=c.id AND m.direction='inbound') OR NOT EXISTS(SELECT 1 FROM media_assets a JOIN whatsapp_inbound_media w ON w.media_asset_id=a.id WHERE a.id=NEW.media_asset_id AND a.workspace_id=NEW.workspace_id AND a.company_id=NEW.company_id AND w.conversation_message_id=NEW.conversation_message_id AND w.provider_kind='audio' AND w.state='associated') BEGIN SELECT RAISE(ABORT,'Audio transcription request scope is invalid'); END;
+
+      CREATE TABLE voice_synthesis_requests(
+        id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,conversation_message_id TEXT NOT NULL UNIQUE REFERENCES conversation_messages(id) ON DELETE CASCADE,outbound_delivery_id TEXT NOT NULL UNIQUE REFERENCES outbound_deliveries(id) ON DELETE CASCADE,expected_authority_generation INTEGER NOT NULL CHECK(expected_authority_generation>0),state TEXT NOT NULL CHECK(state IN ('pending','leased','completed','retryable','failed','suppressed')),lease_owner TEXT,lease_expires_at TEXT,attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count BETWEEN 0 AND 20),safe_outcome TEXT CHECK(safe_outcome IS NULL OR length(safe_outcome) BETWEEN 1 AND 100),safe_failure_category TEXT CHECK(safe_failure_category IS NULL OR length(safe_failure_category) BETWEEN 1 AND 100),rendition_settlement_id TEXT UNIQUE CHECK(rendition_settlement_id IS NULL OR length(rendition_settlement_id) BETWEEN 1 AND 200),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,completed_at TEXT,
+        FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,CHECK((lease_owner IS NULL AND lease_expires_at IS NULL) OR (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL))
+      );
+      CREATE INDEX idx_voice_synthesis_requests_ready ON voice_synthesis_requests(workspace_id,company_id,state,lease_expires_at,created_at,id);
+      CREATE TRIGGER voice_synthesis_requests_scope_insert BEFORE INSERT ON voice_synthesis_requests WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id JOIN conversation_messages m ON m.id=NEW.conversation_message_id JOIN provider_message_records p ON p.conversation_message_id=m.id JOIN outbound_deliveries d ON d.provider_message_record_id=p.id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id AND m.conversation_id=c.id AND m.direction='outbound' AND d.id=NEW.outbound_delivery_id AND d.response_policy='deferred_voice') BEGIN SELECT RAISE(ABORT,'Voice synthesis request scope is invalid'); END;
+      CREATE TRIGGER voice_synthesis_requests_scope_update BEFORE UPDATE OF workspace_id,company_id,conversation_id,conversation_message_id,outbound_delivery_id ON voice_synthesis_requests WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id JOIN conversation_messages m ON m.id=NEW.conversation_message_id JOIN provider_message_records p ON p.conversation_message_id=m.id JOIN outbound_deliveries d ON d.provider_message_record_id=p.id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id AND m.conversation_id=c.id AND m.direction='outbound' AND d.id=NEW.outbound_delivery_id AND d.response_policy='deferred_voice') BEGIN SELECT RAISE(ABORT,'Voice synthesis request scope is invalid'); END;
+
+      CREATE TABLE whatsapp_outbound_media_uploads(
+        id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,outbound_delivery_id TEXT NOT NULL UNIQUE REFERENCES outbound_deliveries(id) ON DELETE CASCADE,media_asset_id TEXT NOT NULL REFERENCES media_assets(id) ON DELETE RESTRICT,provider_media_id TEXT CHECK(provider_media_id IS NULL OR length(provider_media_id) BETWEEN 1 AND 200),state TEXT NOT NULL CHECK(state IN ('pending_upload','uploading','uploaded','expired','failed')),lease_owner TEXT,lease_expires_at TEXT,attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count BETWEEN 0 AND 20),safe_error_category TEXT CHECK(safe_error_category IS NULL OR length(safe_error_category) BETWEEN 1 AND 100),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+        FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,CHECK((lease_owner IS NULL AND lease_expires_at IS NULL) OR (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL))
+      );
+      CREATE INDEX idx_whatsapp_outbound_media_uploads_recovery ON whatsapp_outbound_media_uploads(workspace_id,company_id,state,lease_expires_at,created_at,id);
+      CREATE TRIGGER whatsapp_outbound_media_uploads_scope_insert BEFORE INSERT ON whatsapp_outbound_media_uploads WHEN NOT EXISTS(SELECT 1 FROM media_assets a WHERE a.id=NEW.media_asset_id AND a.workspace_id=NEW.workspace_id AND a.company_id=NEW.company_id AND a.kind='audio') OR NOT EXISTS(SELECT 1 FROM outbound_deliveries d JOIN provider_message_records p ON p.id=d.provider_message_record_id JOIN conversation_messages m ON m.id=p.conversation_message_id JOIN conversations c ON c.id=m.conversation_id JOIN companies co ON co.id=c.company_id WHERE d.id=NEW.outbound_delivery_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id AND d.media_asset_id=NEW.media_asset_id) BEGIN SELECT RAISE(ABORT,'WhatsApp outbound media upload scope is invalid'); END;
+      CREATE TRIGGER whatsapp_outbound_media_uploads_scope_update BEFORE UPDATE OF workspace_id,company_id,outbound_delivery_id,media_asset_id ON whatsapp_outbound_media_uploads WHEN NOT EXISTS(SELECT 1 FROM media_assets a WHERE a.id=NEW.media_asset_id AND a.workspace_id=NEW.workspace_id AND a.company_id=NEW.company_id AND a.kind='audio') OR NOT EXISTS(SELECT 1 FROM outbound_deliveries d JOIN provider_message_records p ON p.id=d.provider_message_record_id JOIN conversation_messages m ON m.id=p.conversation_message_id JOIN conversations c ON c.id=m.conversation_id JOIN companies co ON co.id=c.company_id WHERE d.id=NEW.outbound_delivery_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id AND d.media_asset_id=NEW.media_asset_id) BEGIN SELECT RAISE(ABORT,'WhatsApp outbound media upload scope is invalid'); END;
+
+      CREATE TABLE voice_response_visibility(
+        workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,conversation_message_id TEXT NOT NULL UNIQUE REFERENCES conversation_messages(id) ON DELETE CASCADE,outbound_delivery_id TEXT NOT NULL UNIQUE REFERENCES outbound_deliveries(id) ON DELETE CASCADE,kind TEXT NOT NULL CHECK(kind='externally_committed'),committed_at TEXT NOT NULL,created_at TEXT NOT NULL,
+        FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+      );
+      CREATE INDEX idx_voice_response_visibility_conversation ON voice_response_visibility(workspace_id,company_id,conversation_id,committed_at,conversation_message_id);
+      CREATE TRIGGER voice_response_visibility_scope_insert BEFORE INSERT ON voice_response_visibility WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id JOIN conversation_messages m ON m.id=NEW.conversation_message_id JOIN provider_message_records p ON p.conversation_message_id=m.id JOIN outbound_deliveries d ON d.provider_message_record_id=p.id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id AND m.conversation_id=c.id AND m.direction='outbound' AND d.id=NEW.outbound_delivery_id AND d.response_policy='deferred_voice' AND d.state='accepted' AND p.external_message_id IS NOT NULL) BEGIN SELECT RAISE(ABORT,'Voice response visibility scope is invalid'); END;
+      CREATE TRIGGER voice_response_visibility_no_update BEFORE UPDATE ON voice_response_visibility BEGIN SELECT RAISE(ABORT,'Voice response visibility is append-only'); END;
+      CREATE TRIGGER voice_response_visibility_no_delete BEFORE DELETE ON voice_response_visibility BEGIN SELECT RAISE(ABORT,'Voice response visibility is append-only'); END;
+    `);
+  }},
+  { id:62,name:"0062_voice_read_events",checksumSource:"voice-read-projection-private-playback-metadata-only-terminal-events",apply(database):void{database.exec(`
+    CREATE TRIGGER voice_read_event_transcript AFTER INSERT ON conversation_audio_transcripts
+    WHEN NEW.outcome='completed'
+    BEGIN INSERT INTO conversation_events(id,workspace_id,company_id,conversation_id,event_type,related_message_id,occurred_at) VALUES('cev_' || lower(hex(randomblob(16))),NEW.workspace_id,NEW.company_id,NEW.conversation_id,'voice_state_changed',NEW.conversation_message_id,NEW.created_at); END;
+    CREATE TRIGGER voice_read_event_transcription_terminal AFTER UPDATE OF state ON audio_transcription_requests
+    WHEN OLD.state!=NEW.state AND NEW.state IN ('failed','suppressed')
+    BEGIN INSERT INTO conversation_events(id,workspace_id,company_id,conversation_id,event_type,related_message_id,occurred_at) VALUES('cev_' || lower(hex(randomblob(16))),NEW.workspace_id,NEW.company_id,NEW.conversation_id,'voice_state_changed',NEW.conversation_message_id,NEW.updated_at); END;
+    CREATE TRIGGER voice_read_event_synthesis_terminal AFTER UPDATE OF state ON voice_synthesis_requests
+    WHEN OLD.state!=NEW.state AND NEW.state IN ('completed','failed','suppressed')
+    BEGIN INSERT INTO conversation_events(id,workspace_id,company_id,conversation_id,event_type,related_message_id,occurred_at) VALUES('cev_' || lower(hex(randomblob(16))),NEW.workspace_id,NEW.company_id,NEW.conversation_id,'voice_state_changed',NEW.conversation_message_id,NEW.updated_at); END;
+    CREATE TRIGGER voice_read_event_upload_terminal AFTER UPDATE OF state ON whatsapp_outbound_media_uploads
+    WHEN OLD.state!=NEW.state AND NEW.state IN ('uploaded','failed')
+    BEGIN INSERT INTO conversation_events(id,workspace_id,company_id,conversation_id,event_type,related_message_id,occurred_at) SELECT 'cev_' || lower(hex(randomblob(16))),NEW.workspace_id,NEW.company_id,m.conversation_id,'voice_state_changed',m.id,NEW.updated_at FROM outbound_deliveries d JOIN provider_message_records p ON p.id=d.provider_message_record_id JOIN conversation_messages m ON m.id=p.conversation_message_id WHERE d.id=NEW.outbound_delivery_id; END;
+    CREATE TRIGGER voice_read_event_delivery_visible AFTER UPDATE OF state ON outbound_deliveries
+    WHEN OLD.state!=NEW.state AND NEW.response_policy='deferred_voice' AND NEW.state IN ('accepted','delivered','read')
+    BEGIN INSERT INTO conversation_events(id,workspace_id,company_id,conversation_id,event_type,related_message_id,occurred_at) SELECT 'cev_' || lower(hex(randomblob(16))),co.workspace_id,co.id,m.conversation_id,'voice_state_changed',m.id,NEW.updated_at FROM provider_message_records p JOIN conversation_messages m ON m.id=p.conversation_message_id JOIN conversations c ON c.id=m.conversation_id JOIN companies co ON co.id=c.company_id WHERE p.id=NEW.provider_message_record_id; END;
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {
@@ -1683,6 +1855,10 @@ function migrationChecksum(migration: Migration): string {
     .update(`${migration.id}:${migration.name}:${migration.checksumSource}`)
     .digest("hex");
 }
+
+const retiredMigrations = new Map<number, { readonly name: string; readonly checksum: string }>([
+  [61, { name: "0061_voice_audio_upload_reservation", checksum: "56ed576cbc89fef1304834bb20dcb38cb49498460154045193421176e0ee6940" }],
+]);
 
 function readCount(database: SynchronousDatabase, table: "companies" | "company_knowledge" | "companies_workspace_migration"): number {
   const row = database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
@@ -1711,6 +1887,8 @@ export function runMigrations(database: SynchronousDatabase, maximumMigrationId 
   for (const applied of appliedRows) {
     const known = knownById.get(applied.id);
     if (!known || known.name !== applied.name) {
+      const retired = retiredMigrations.get(applied.id);
+      if (retired?.name === applied.name && retired.checksum === applied.checksum) continue;
       throw new Error(`Database contains unknown migration ${applied.id}:${applied.name}.`);
     }
     if (applied.checksum !== migrationChecksum(known)) {

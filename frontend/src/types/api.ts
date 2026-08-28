@@ -52,7 +52,8 @@ export type Permission = "workspace:read"|"workspace:manage"|"company:read"|"com
 export type ConversationControlState = "automated" | "human_required" | "human_controlled";
 export interface ConversationDelivery { state: "pending" | "leased" | "accepted" | "delivered" | "read" | "retryable" | "permanent_failure" | "uncertain"; updatedAt: string; safeErrorCategory: string | null; }
 export interface ConversationInboxItem { conversationId: string; channel: "internal" | "web_chat" | "whatsapp"; state: "open" | "closed"; controlState: ConversationControlState; controlledByCurrentActor: boolean; attentionReason: string | null; takenAt: string | null; releasedAt: string | null; lastOperatorActivityAt: string | null; resolvedAt: string | null; controlVersion: number; updatedAt: string; participant: string | null; preview: string | null; deliveryCategory: "received" | "sent" | null; lastActivityAt: string; delivery: ConversationDelivery | null; }
-export interface ConversationDetail extends ConversationInboxItem { messages: Array<{ messageId: string; participant: string; deliveryCategory: "received" | "sent"; content: string; createdAt: string; delivery: ConversationDelivery | null }>; }
+export interface VoiceMessageReadModel { messageId:string; direction:"inbound"|"outbound"; modality:"audio"|"voice"; transcript:string|null; transcriptLanguageTag:string|null; transcriptionState:"pending"|"completed"|"failed"|"suppressed"|"unsupported"|null; deferredState:"processing"|"audio_ready"|"accepted"|"delivered"|"read"|"fallback"|"suppressed"|"uncertain"|"failed"|null; fallbackAvailable:boolean; playbackAvailable:boolean; }
+export interface ConversationDetail extends ConversationInboxItem { messages: Array<{ messageId: string; participant: string; deliveryCategory: "received" | "sent"; content: string; createdAt: string; delivery: ConversationDelivery | null; voiceAvailable?: boolean }>; }
 export interface ConversationControlResponse { control: Pick<ConversationInboxItem, "controlState" | "controlledByCurrentActor" | "attentionReason" | "takenAt" | "releasedAt" | "lastOperatorActivityAt" | "resolvedAt" | "controlVersion" | "updatedAt">; outcome?: "resolved"; }
 export interface ConversationFeedEvent { eventId: string; type: string; conversationId: string; occurredAt: string; controlVersion: number | null; authorityGeneration: number | null; relatedMessageId: string | null; }
 export interface ConversationFeedResponse { events: ConversationFeedEvent[]; nextCursor: string; hasMore: boolean; resyncRequired: boolean; }
@@ -195,6 +196,21 @@ export interface WhatsAppConnectionOperationalStatus {
   lastWebhookActivityAt: string | null;
   healthFailureCode: string | null;
   updatedAt: string;
+}
+
+export type VoiceAudioResponseMode = "text_only" | "voice_with_text_fallback";
+
+export interface WhatsAppVoicePolicy {
+  voiceAiEnabled: boolean;
+  audioResponseMode: VoiceAudioResponseMode;
+  version: number;
+}
+
+export interface UpdateWhatsAppVoicePolicyInput {
+  operationId: string;
+  expectedVersion: number;
+  voiceAiEnabled: boolean;
+  audioResponseMode: VoiceAudioResponseMode;
 }
 
 export type AssistantReadinessStatus = "ready" | "blocked";

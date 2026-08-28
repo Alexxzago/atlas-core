@@ -16,6 +16,7 @@ import type { WhatsAppConnectionService } from "./WhatsAppConnectionService.js";
 import type { WhatsAppOutboundDeliveryService } from "./WhatsAppOutboundDeliveryService.js";
 import type { WhatsAppDeliveryStatusService } from "./WhatsAppDeliveryStatusService.js";
 import { neutralAttachmentMessage, type WhatsAppInboundMediaKind } from "../domain/whatsappInboundMedia.js";
+import { VoiceSemanticContentUnavailableError } from "./voiceSemanticContentResolver.js";
 
 export interface WhatsAppWebhookConfiguration { readonly appSecret: string; readonly verifyToken: string; }
 export interface WhatsAppInboundTextMessage { readonly phoneNumberId: string; readonly waId: string; readonly wamid: string; readonly text: string; }
@@ -98,7 +99,7 @@ export class WhatsAppWebhookService {
           if (turn.response.outcome === "safe_fallback") this.markHumanRequired(context, connection.companyId, binding.conversationId);
           if (this.outbound) await this.outbound.deliverWhatsAppText(context, connection.companyId, { conversationId: binding.conversationId, conversationMessageId: turn.outbound.id, whatsAppConnectionId: connection.id, recipientWaId });
           const completedAt = this.clock.now(); this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", turn.response.outcome, completedAt); this.events.updateState(event.id, "claimed", "completed", completedAt);
-        } catch (error: unknown) { const failedAt = this.clock.now(); if (error instanceof OperationalConversationTurnSuppressedError) { this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", "unsupported", failedAt); this.events.updateState(event.id, "claimed", "completed", failedAt); } else { this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "provider_unavailable", failedAt); this.events.updateState(event.id, "claimed", "failed", failedAt); } }
+        } catch (error: unknown) { const failedAt = this.clock.now(); if (error instanceof OperationalConversationTurnSuppressedError || error instanceof VoiceSemanticContentUnavailableError) { this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", "suppressed", failedAt); this.events.updateState(event.id, "claimed", "completed", failedAt); } else { this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "provider_unavailable", failedAt); this.events.updateState(event.id, "claimed", "failed", failedAt); } }
       }
       return;
     }

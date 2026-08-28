@@ -33,6 +33,12 @@ export interface OperationalConversationTurnHooks {
   readonly beforeRuntime?: (inbound: ConversationMessage) => boolean | Promise<boolean>;
 }
 
+export interface ConversationSemanticProjection {
+  resolveInbound(context: WorkspaceContext, companyId: number, message: ConversationMessage): ConversationMessage;
+  includeHistory(context: WorkspaceContext, companyId: number, message: ConversationMessage): boolean;
+  applyAssistant(context: WorkspaceContext, companyId: number, message: ConversationMessage): boolean;
+}
+
 export class OperationalConversationTurnSuppressedError extends Error {
   public constructor(readonly inbound: ConversationMessage) { super("Conversation turn was suppressed."); }
 }
@@ -65,6 +71,7 @@ export class OperationalConversationTurnService {
     private readonly retrieval?: LexicalKnowledgeRetrievalService,
     private readonly attachments?: SafeConversationAttachmentService,
     private readonly controls?: ConversationRepositoryPort,
+    private readonly semantic?: ConversationSemanticProjection,
   ) {
     if (!Number.isSafeInteger(historyLimit) || historyLimit < 1) throw new Error("Conversation history limit is invalid.");
   }
@@ -94,21 +101,22 @@ export class OperationalConversationTurnService {
       if (!knowledge) throw new OperationalConversationTurnKnowledgeUnavailableError("Published knowledge is unavailable.");
        const authority = this.controls?.ensureConversationControl(context, scopedCompanyId, conversation.id);
        if (authority && authority.state !== "automated") throw new OperationalConversationTurnSuppressedError(inbound);
-       const history = historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit);
+       const semanticInbound = this.semantic?.resolveInbound(context, scopedCompanyId, inbound) ?? inbound;
+        const history = historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit, context, scopedCompanyId, this.semantic);
       if (await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
-        const intelligenceResult = this.intelligence ? await this.intelligence.apply(context, scopedCompanyId, inbound) : null;
+         const intelligenceResult = this.intelligence ? await this.intelligence.apply(context, scopedCompanyId, semanticInbound) : null;
         const memory = intelligenceResult?.state ? conversationWorkingMemory(intelligenceResult.state) : "";
-       const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, history, {
+        const executed = await this.runtime.execute(company, profile, knowledge, semanticInbound.content, history, {
           purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
            snapshotContext: { conversationId: conversation.id, channelProvider: conversation.channel, authorityGeneration: authority?.authorityGeneration ?? 1 }, conversationMemory: memory,
-          ...(this.retrieval ? { retrieval: this.retrieval.context(context, scopedCompanyId, knowledge.sourceRevisionIds, inbound.content) } : {}),
+           ...(this.retrieval ? { retrieval: this.retrieval.context(context, scopedCompanyId, knowledge.sourceRevisionIds, semanticInbound.content) } : {}),
       });
        await this.appendToolMemory(context, scopedCompanyId, conversation.id, executed.toolMemoryCandidates);
         const finalized = this.finalize(context, scopedCompanyId, conversation.id, inbound, parsed.outboundParticipantId, executed.record.id, authority?.authorityGeneration ?? 1, executed.response.answer, `assistant:${inbound.id}`, executed.record.completedAt ?? inbound.createdAt);
         if (finalized.kind === "authority_lost") throw new OperationalConversationTurnSuppressedError(inbound);
         if (finalized.kind === "not_found" || finalized.kind === "execution_not_owned") throw new OperationalConversationTurnNotFoundError("Conversation was not found.");
         const outbound = finalized.message;
-        if (this.intelligence) await this.intelligence.apply(context, scopedCompanyId, outbound);
+         if (this.intelligence && (this.semantic?.applyAssistant(context, scopedCompanyId, outbound) ?? true)) await this.intelligence.apply(context, scopedCompanyId, outbound);
         return Object.freeze({ inbound, outbound, response: executed.response, executionRecordId: executed.record.id });
     } finally { release(); }
   }
@@ -136,24 +144,25 @@ export class OperationalConversationTurnService {
       if (!knowledge) throw new OperationalConversationTurnKnowledgeUnavailableError("Published knowledge is unavailable.");
        const authority = this.controls?.ensureConversationControl(context, scopedCompanyId, conversation.id);
        if ((authority && authority.state !== "automated") || await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
-        const intelligenceResult = this.intelligence ? await this.intelligence.apply(context, scopedCompanyId, inbound) : null;
+       const semanticInbound = this.semantic?.resolveInbound(context, scopedCompanyId, inbound) ?? inbound;
+         const intelligenceResult = this.intelligence ? await this.intelligence.apply(context, scopedCompanyId, semanticInbound) : null;
         const memory = intelligenceResult?.state ? conversationWorkingMemory(intelligenceResult.state) : "";
        const safeAttachments = this.attachments?.getSafeConversationAttachments(context, scopedCompanyId, inbound.id) ?? [];
-       const executed = await this.runtime.execute(company, profile, knowledge, inbound.content, historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit), {
+        const executed = await this.runtime.execute(company, profile, knowledge, semanticInbound.content, historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit, context, scopedCompanyId, this.semantic), {
         purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
         snapshotContext: {
           conversationId: conversation.id,
           channelProvider: conversation.channel,
           ...(input.whatsAppConnectionId ? { whatsAppConnectionId: input.whatsAppConnectionId } : {}),
            ...(input.whatsAppPhoneNumberId ? { whatsAppPhoneNumberId: input.whatsAppPhoneNumberId } : {}), authorityGeneration: authority?.authorityGeneration ?? 1,
-           }, conversationMemory: memory, ...(this.retrieval ? { retrieval: this.retrieval.context(context, scopedCompanyId, knowledge.sourceRevisionIds, inbound.content) } : {}), ...(safeAttachments.length ? { attachments: safeAttachments } : {}),
+            }, conversationMemory: memory, ...(this.retrieval ? { retrieval: this.retrieval.context(context, scopedCompanyId, knowledge.sourceRevisionIds, semanticInbound.content) } : {}), ...(safeAttachments.length ? { attachments: safeAttachments } : {}),
       });
         await this.appendToolMemory(context, scopedCompanyId, conversation.id, executed.toolMemoryCandidates);
         const finalized = this.finalize(context, scopedCompanyId, conversation.id, inbound, outboundParticipantId, executed.record.id, authority?.authorityGeneration ?? 1, executed.response.answer, input.replyIdempotencyKey, executed.record.completedAt ?? inbound.createdAt, input.whatsAppConnectionId);
         if (finalized.kind === "authority_lost") throw new OperationalConversationTurnSuppressedError(inbound);
         if (finalized.kind === "not_found" || finalized.kind === "execution_not_owned") throw new OperationalConversationTurnNotFoundError("Conversation was not found.");
         const outbound = finalized.message;
-        if (this.intelligence) await this.intelligence.apply(context, scopedCompanyId, outbound);
+         if (this.intelligence && (this.semantic?.applyAssistant(context, scopedCompanyId, outbound) ?? true)) await this.intelligence.apply(context, scopedCompanyId, outbound);
         return Object.freeze({ inbound, outbound, response: executed.response, executionRecordId: executed.record.id });
     } finally { release(); }
   }
@@ -191,6 +200,7 @@ function turnInput(value: unknown): { profileId: ReturnType<typeof assistantProf
   } catch { throw new OperationalConversationTurnValidationError("Turn input is invalid."); }
 }
 
-function historyFor(messages: readonly ConversationMessage[], limit: number): readonly AssistantConversationHistoryEntry[] {
-  return Object.freeze(messages.slice(-limit).map(({ direction, content, createdAt }) => Object.freeze({ direction, content, createdAt })));
+function historyFor(messages: readonly ConversationMessage[], limit: number, context?: WorkspaceContext, companyId?: number, semantic?: ConversationSemanticProjection): readonly AssistantConversationHistoryEntry[] {
+  const projected = context && companyId !== undefined && semantic ? messages.filter(message => semantic.includeHistory(context, companyId, message)).map(message => message.direction === "inbound" ? semantic.resolveInbound(context, companyId, message) : message) : messages;
+  return Object.freeze(projected.slice(-limit).map(({ direction, content, createdAt }) => Object.freeze({ direction, content, createdAt })));
 }

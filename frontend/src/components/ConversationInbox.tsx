@@ -5,6 +5,7 @@ import type { ConversationControlResponse, ConversationDelivery, ConversationDet
 import { EmptyExperience } from "../design-system/product";
 import { PageHeader } from "./AppShell";
 import { buildConversationInboxViewModel, type ConversationState } from "./conversationInboxPresentation";
+import { VoiceMessage } from "./VoiceMessage";
 
 interface Props { readonly csrf: string; readonly workspaceId: string | null; readonly companyId: number | null; readonly capabilities: readonly Permission[]; }
 const pollDelay = 3_000, maximumBackoff = 30_000, maximumPagesPerCycle = 20;
@@ -14,7 +15,7 @@ function aborted(error: unknown): boolean { return error instanceof DOMException
 export function ConversationInbox({ csrf, workspaceId, companyId, capabilities }: Props): React.JSX.Element {
   const { t, formatDate } = useI18n();
   const [items, setItems] = useState<Awaited<ReturnType<typeof atlasApi.listConversations>>>([]), [selected, setSelected] = useState<ConversationDetail | null>(null);
-  const [listLoading, setListLoading] = useState(false), [detailLoading, setDetailLoading] = useState(false), [working, setWorking] = useState(false), [listError, setListError] = useState(false), [detailError, setDetailError] = useState(false), [mobileDetail, setMobileDetail] = useState(false), [content, setContent] = useState("");
+  const [listLoading, setListLoading] = useState(false), [detailLoading, setDetailLoading] = useState(false), [working, setWorking] = useState(false), [listError, setListError] = useState(false), [detailError, setDetailError] = useState(false), [mobileDetail, setMobileDetail] = useState(false), [content, setContent] = useState(""), [voiceRevisions,setVoiceRevisions]=useState<Record<string,number>>({});
   const listAbort = useRef<AbortController | null>(null), detailAbort = useRef<AbortController | null>(null), mutationAbort = useRef<AbortController | null>(null), feedAbort = useRef<AbortController | null>(null), feedTimer = useRef<number | null>(null), detailHeading = useRef<HTMLHeadingElement>(null), selectedId = useRef<string | null>(null), listRequestId = useRef(0), detailRequestId = useRef(0), operationIds = useRef(new Map<string, string>());
   const readable = capabilities.includes("company:read"), manageable = capabilities.includes("conversation:manage"), canSend = capabilities.includes("conversation:message:send"), controlsDisabled = working || detailLoading || listLoading;
   const viewItems = useMemo(() => buildConversationInboxViewModel(items), [items]); selectedId.current = selected?.conversationId ?? null;
@@ -66,14 +67,15 @@ export function ConversationInbox({ csrf, workspaceId, companyId, capabilities }
       if (!active || inFlight || document.hidden || cursor === null) return;
       inFlight = true; clearTimer(); const controller = new AbortController(); feedAbort.current?.abort(); feedAbort.current = controller;
       try {
-        let changed = false, pages = 0;
+        let changed = false, pages = 0; const voiceMessages = new Set<string>();
         while (active && !controller.signal.aborted && cursor !== null && pages < maximumPagesPerCycle) {
           const feed = await atlasApi.getConversationFeed(workspaceId, companyId, cursor, undefined, controller.signal);
           if (!current() || controller !== feedAbort.current) return;
           if (feed.resyncRequired) { inFlight = false; await bootstrap(); return; }
-          changed = changed || feed.events.length > 0; cursor = feed.nextCursor; pages += 1;
+          for(const event of feed.events){if(event.type==="voice_state_changed"&&event.conversationId===selectedId.current&&event.relatedMessageId)voiceMessages.add(event.relatedMessageId);else changed=true;} cursor = feed.nextCursor; pages += 1;
           if (!feed.hasMore) break;
         }
+        if(voiceMessages.size>0)setVoiceRevisions(current=>{const next={...current};for(const id of voiceMessages)next[id]=(next[id]??0)+1;return next;});
         if (changed) await load();
         if (active && controller === feedAbort.current && !controller.signal.aborted) { failures = 0; schedule(pages === maximumPagesPerCycle ? 0 : pollDelay, poll); }
       } catch (error) {
@@ -81,7 +83,7 @@ export function ConversationInbox({ csrf, workspaceId, companyId, capabilities }
       } finally { if (controller === feedAbort.current) { inFlight = false; if (resumePending && active && !document.hidden) { resumePending = false; void (cursor === null ? bootstrap() : poll()); } } }
     };
     const visibility = (): void => { if (document.hidden) { clearTimer(); feedAbort.current?.abort(); return; } if (inFlight) { resumePending = true; feedAbort.current?.abort(); return; } if (cursor === null) void bootstrap(); else void poll(); };
-    setItems([]); setSelected(null); setMobileDetail(false); setContent(""); document.addEventListener("visibilitychange", visibility); void bootstrap();
+    setItems([]); setSelected(null); setVoiceRevisions({}); setMobileDetail(false); setContent(""); document.addEventListener("visibilitychange", visibility); void bootstrap();
     return () => { active = false; clearTimer(); feedAbort.current?.abort(); listAbort.current?.abort(); detailAbort.current?.abort(); mutationAbort.current?.abort(); document.removeEventListener("visibilitychange", visibility); };
   }, [workspaceId, companyId, readable, load]);
 
@@ -114,7 +116,7 @@ export function ConversationInbox({ csrf, workspaceId, companyId, capabilities }
       <main className="conversation-detail" aria-label={t("conversation.detailLabel")}>{mobileDetail && <button className="conversation-detail__back" type="button" onClick={() => setMobileDetail(false)}>← {t("conversation.backToList")}</button>}
         {!selected && !detailLoading && !detailError && <div className="conversation-detail__prompt"><h2>{t("conversation.selectTitle")}</h2><p>{t("conversation.selectDescription")}</p></div>}{detailLoading && !selected && <p role="status">{t("conversation.loadingDetail")}</p>}{detailError && <div className="inline-message inline-message--error" role="alert"><p>{t("conversation.detailUnavailable")}</p>{selectedId.current && <button className="button button--secondary" onClick={() => void loadDetail(selectedId.current!)}>{t("common.retry")}</button>}</div>}
         {selected && !detailError && <article aria-busy={detailLoading}><header className="conversation-detail__header"><h2 ref={detailHeading} tabIndex={-1}>{selected.participant?.trim() || t("conversation.unnamed")}</h2><p>{t(`conversation.channel.${selected.channel}`)} · {stateLabel(selected.preview ? (selected.controlState === "human_required" ? "attention" : selected.controlState === "human_controlled" ? "human" : "automated") : "empty", t)}</p></header>
-          {selected.messages.length === 0 ? <div className="conversation-no-messages"><h3>{t("conversation.noMessagesTitle")}</h3><p>{t("conversation.noMessagesDescription")}</p></div> : <ol className="conversation-timeline" aria-label={t("conversation.messages")}>{[...selected.messages].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((message) => { const delivery = message.deliveryCategory === "sent" ? message.delivery : null; return <li key={message.messageId} className={`conversation-message conversation-message--${message.deliveryCategory}`}><strong>{message.deliveryCategory === "received" ? t("conversation.customer") : t("conversation.atlasOrTeam")}</strong><p>{message.content}</p><time dateTime={message.createdAt}>{formatTimestamp(message.createdAt)}</time>{delivery && <div className={`conversation-delivery conversation-delivery--${delivery.state}`}><span>{t(deliveryLabel(delivery.state))}</span>{deliveryFailureLabel(delivery.safeErrorCategory) && <small>{t(deliveryFailureLabel(delivery.safeErrorCategory)!)}</small>}</div>}</li>; })}</ol>}
+          {selected.messages.length === 0 ? <div className="conversation-no-messages"><h3>{t("conversation.noMessagesTitle")}</h3><p>{t("conversation.noMessagesDescription")}</p></div> : <ol className="conversation-timeline" aria-label={t("conversation.messages")}>{[...selected.messages].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((message) => { const delivery = message.deliveryCategory === "sent" ? message.delivery : null; return <li key={message.messageId} className={`conversation-message conversation-message--${message.deliveryCategory}`}><strong>{message.deliveryCategory === "received" ? t("conversation.customer") : t("conversation.atlasOrTeam")}</strong><p>{message.content}</p>{message.voiceAvailable&&<VoiceMessage workspaceId={workspaceId} companyId={companyId} conversationId={selected.conversationId} messageId={message.messageId} revision={voiceRevisions[message.messageId]??0}/>}<time dateTime={message.createdAt}>{formatTimestamp(message.createdAt)}</time>{delivery && <div className={`conversation-delivery conversation-delivery--${delivery.state}`}><span>{t(deliveryLabel(delivery.state))}</span>{deliveryFailureLabel(delivery.safeErrorCategory) && <small>{t(deliveryFailureLabel(delivery.safeErrorCategory)!)}</small>}</div>}</li>; })}</ol>}
           <section className="conversation-control"><div><h3>{t("conversation.controlTitle")}</h3><p>{selected.controlState === "human_controlled" ? t("conversation.releaseHelp") : t("conversation.takeHelp")}</p></div>{manageable && selected.controlState !== "human_controlled" && <button className="button button--primary" disabled={controlsDisabled} onClick={() => void control("take")}>{t("conversation.take")}</button>}{manageable && selected.controlState === "human_controlled" && selected.controlledByCurrentActor && <div className="action-row"><button className="button button--primary" disabled={controlsDisabled} onClick={() => void control("resolve")}>{t("conversation.resolve")}</button><button className="button button--quiet" disabled={controlsDisabled} onClick={() => void control("release")}>{t("conversation.release")}</button></div>}</section>
           {canSend && selected.controlState === "human_controlled" && selected.controlledByCurrentActor && <form className="conversation-composer" onSubmit={(event) => void send(event)}><label className="form-field"><span>{t("conversation.reply")}</span><textarea required maxLength={10000} value={content} onChange={(event) => setContent(event.target.value)} disabled={controlsDisabled} /></label><button className="button button--primary" disabled={controlsDisabled || !content.trim()}>{working ? t("conversation.sending") : t("conversation.send")}</button></form>}
         </article>}

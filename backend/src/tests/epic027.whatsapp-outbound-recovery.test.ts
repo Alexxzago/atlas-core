@@ -14,7 +14,7 @@ const connectionId = whatsAppConnectionId("wac_0123456789abcdef0123456789abcdef"
 
 function delivery(attemptCount = 0, state: OutboundDelivery["state"] = "pending"): OutboundDelivery { return reconstructOutboundDelivery({ id: outboundDeliveryId("odl_0123456789abcdef0123456789abcdef"), providerMessageRecordId: providerMessageRecordId("pmr_0123456789abcdef0123456789abcdef"), transportConnectionId: connectionId, state, attemptCount, nextAttemptAt: at, leaseOwner: state === "leased" ? "stale" : null, leaseExpiresAt: state === "leased" ? "2026-07-31T11:59:00.000Z" : null, safeErrorCategory: null, createdAt: at, updatedAt: at }); }
 
-function setup(failure: unknown | null, initial = delivery()) {
+function setup(failure: unknown | null, initial = delivery(), authorized = true) {
   let current = initial, sends = 0;
   const attempts: Array<{ outcome: string; category: string | null; next: string | null }> = [];
   const message = { id: messageId, conversationId: conversation, direction: "outbound", content: "Reply" } as ConversationMessage;
@@ -23,7 +23,7 @@ function setup(failure: unknown | null, initial = delivery()) {
     { findConversation: () => ({ id: conversation }), findMessage: () => message } as never,
     { findById: () => ({ id: connectionId, workspaceId: 1, companyId: 1, status: "active", phoneNumberId: "phone" }), findByIdForRecovery: () => ({ id: connectionId, workspaceId: 1, companyId: 1, status: "active", phoneNumberId: "phone" }) } as never,
     { create: (value: { id: string }) => { if (records.length) return null; records.push(value); return value; }, findByMessageAndConnection: () => records[0] ?? null, findById: () => ({ id: "pmr_0123456789abcdef0123456789abcdef", direction: "outbound", communicationChannel: "whatsapp", conversationMessageId: messageId }), attachExternalMessageId: () => null } as never,
-    { create: () => current, findByProviderMessageRecordAndConnection: () => current, leaseReady: (owner: string) => { current = delivery(current.attemptCount + 1, "leased"); current = { ...current, leaseOwner: owner, leaseExpiresAt: "2026-07-31T12:01:00.000Z" }; return [current]; }, settleLease: (_id: string, _owner: string, outcome: OutboundDelivery["state"], next: string | null, category: string | null) => { attempts.push({ outcome, category, next }); current = { ...current, state: outcome, nextAttemptAt: next ?? current.nextAttemptAt, leaseOwner: null, leaseExpiresAt: null, safeErrorCategory: category }; return current; } } as never,
+    { create: () => current, findByProviderMessageRecordAndConnection: () => current, leaseReady: (owner: string) => { current = reconstructOutboundDelivery({ ...current, state: "leased", attemptCount: current.attemptCount + 1, leaseOwner: owner, leaseExpiresAt: "2026-07-31T12:01:00.000Z" }); return [current]; }, authorizeLease: () => authorized, settleLease: (_id: string, _owner: string, outcome: OutboundDelivery["state"], next: string | null, category: string | null) => { attempts.push({ outcome, category, next }); current = { ...current, state: outcome, nextAttemptAt: next ?? current.nextAttemptAt, leaseOwner: null, leaseExpiresAt: null, safeErrorCategory: category }; return current; } } as never,
     { resolve: () => "token" } as never,
     () => ({ sendText: async () => { sends += 1; if (failure) throw failure; return "wamid-out"; } }) as never,
     { now: () => at },
@@ -82,6 +82,20 @@ test("EPIC-027 Phase 5 accepts eventually, terminates exhausted retries, and rec
   await recovered.service.dispatchReady("new-worker");
   assert.equal(recovered.attempts[0]?.outcome, "accepted");
   assert.equal(recovered.sends(), 1);
+});
+
+test("EPIC044 suppresses a deferred delivery before dispatch when authority changes after leasing", async () => {
+  const value = setup(null, reconstructOutboundDelivery({ ...delivery(), expectedAuthorityGeneration: 1 }), false);
+  await value.service.dispatchReady("worker");
+  assert.equal(value.sends(), 0);
+  assert.deepEqual(value.attempts, []);
+});
+
+test("EPIC044 PASS6A generic dispatcher never sends an audio payload", async () => {
+  const value = setup(null, reconstructOutboundDelivery({ ...delivery(), payloadKind: "audio", responsePolicy: "deferred_voice", mediaAssetId: "mas_0123456789abcdef0123456789abcdef", expectedAuthorityGeneration: 1 }));
+  await value.service.dispatchReady("worker");
+  assert.equal(value.sends(), 0);
+  assert.deepEqual(value.attempts, []);
 });
 
 test("EPIC-027 Phase 5 keeps outbound queueing idempotent and never recreates conversation work", async () => {

@@ -8,6 +8,8 @@ import type { WhatsAppConnectionId } from "../domain/whatsappConnection.js";
 import { WhatsAppCloudApiError, type WhatsAppCloudApiPort, type WhatsAppOutboundFailureDiagnostic } from "../providers/WhatsAppCloudApiProvider.js";
 import type { WhatsAppConnectionRepositoryPort, WhatsAppConversationRepositoryPort, WhatsAppCredentialResolverPort } from "../application/ports.js";
 import type { WhatsAppConnectionService } from "./WhatsAppConnectionService.js";
+import type { VoiceRepositoryPort } from "../application/voicePorts.js";
+import type { VoiceDeferredSemanticRecoveryService } from "./voiceDeferredSemanticRecoveryService.js";
 
 export class WhatsAppOutboundDeliveryValidationError extends Error {}
 
@@ -28,6 +30,8 @@ export class WhatsAppOutboundDeliveryService {
     private readonly clock: { now(): string },
     private readonly operationalState?: WhatsAppConnectionService,
     private readonly bindings?: WhatsAppConversationRepositoryPort,
+    private readonly voices?: Pick<VoiceRepositoryPort, "findUploadedProviderMediaId">,
+    private readonly semanticRecovery?: VoiceDeferredSemanticRecoveryService,
   ) {}
 
   public async deliverWhatsAppText(context: WorkspaceContext, companyId: number, input: { conversationId: ConversationId; conversationMessageId: ConversationMessageId; whatsAppConnectionId: WhatsAppConnectionId; recipientWaId: string }): Promise<WhatsAppOutboundDeliveryResult> {
@@ -51,6 +55,9 @@ export class WhatsAppOutboundDeliveryService {
   }
 
   private async dispatch(owner: string, delivery: OutboundDelivery): Promise<void> {
+    if (delivery.payloadKind !== "text" && delivery.payloadKind !== "audio") return;
+    if (delivery.payloadKind === "audio" && !this.voices) return;
+    if (!this.deliveries.authorizeLease(delivery.id, owner, this.clock.now())) return;
     const record = this.providerMessages.findById(delivery.providerMessageRecordId);
     const connection = this.connections.findByIdForRecovery(delivery.transportConnectionId as WhatsAppConnectionId);
     if (!record || record.direction !== "outbound" || record.communicationChannel !== "whatsapp" || !connection || connection.status !== "active") {
@@ -64,16 +71,24 @@ export class WhatsAppOutboundDeliveryService {
       this.settle(owner, delivery, { outcome: "retryable", safeErrorCategory: "provider_unavailable" });
       return;
     }
+    let started = false;
     try {
       const token = this.credentials.resolve(context, connection.companyId, connection.id);
       if (!token) throw new Error("WhatsApp credentials are unavailable.");
-      const externalMessageId = await this.apiFactory(token).sendText(connection.phoneNumberId, binding.waId, message.content);
-      this.providerMessages.attachExternalMessageId(record.id, externalMessageId, this.clock.now());
-      this.deliveries.settleLease(delivery.id, owner, "accepted", null, null, this.clock.now());
+      const providerMediaId = delivery.payloadKind === "audio" ? this.voices?.findUploadedProviderMediaId(context, connection.companyId, delivery.id) ?? null : null;
+      if (delivery.payloadKind === "audio" && !providerMediaId) { this.settle(owner, delivery, { outcome: "retryable", safeErrorCategory: "media_unavailable" }); return; }
+      if (this.deliveries.beginSend && !this.deliveries.beginSend(delivery.id, owner, this.clock.now())) return;
+      started = true;
+      const api = this.apiFactory(token);
+      const externalMessageId = delivery.payloadKind === "audio" ? await (api.sendAudio?.(connection.phoneNumberId, binding.waId, providerMediaId!) ?? Promise.reject(new Error("WhatsApp audio sending is unavailable."))) : await api.sendText(connection.phoneNumberId, binding.waId, message.content);
+      const accepted = this.deliveries.acceptSend ? this.deliveries.acceptSend(delivery.id, owner, externalMessageId, this.clock.now()) : (this.providerMessages.attachExternalMessageId(record.id, externalMessageId, this.clock.now()), this.deliveries.settleLease(delivery.id, owner, "accepted", null, null, this.clock.now()));
+      if (accepted?.responsePolicy === "deferred_voice") await this.semanticRecovery?.recover(context, connection.companyId);
       this.operationalState?.recordProviderActivity(context, connection.companyId, connection.id);
     } catch (error: unknown) {
       this.logFailure(error, connection.id, delivery.id);
-      this.settle(owner, delivery, classify(error));
+      if (started && error instanceof WhatsAppCloudApiError && error.status !== null) this.settle(owner, delivery, classify(error));
+      else if (started && this.deliveries.settleUncertainSend) this.deliveries.settleUncertainSend(delivery.id, owner, "send_outcome_unknown", this.clock.now());
+      else this.settle(owner, delivery, classify(error));
       this.operationalState?.recordProviderFailure(context, connection.companyId, connection.id);
     }
   }

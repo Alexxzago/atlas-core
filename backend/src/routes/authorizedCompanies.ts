@@ -49,11 +49,14 @@ interface ContextualWhatsAppConnectionControllers {
   activate?: (context: WorkspaceContext) => RequestHandler;
   deactivate?: (context: WorkspaceContext) => RequestHandler;
 }
+interface ContextualVoicePolicyControllers { get:(context:WorkspaceContext)=>RequestHandler; put:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler; }
 interface ContextualMetaEmbeddedSignupControllers { start:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; status:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; complete:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; reconnect:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; }
 interface ContextualConversationReadControllers {
   list: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
   get: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
   feed?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
+  voice?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
+  playback?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
 }
 interface ContextualConversationControlControllers { takeover: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; release: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; resolve: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; }
 
@@ -70,6 +73,7 @@ interface AuthorizedCompanyDependencies {
   defaultAssistantControllers?: ContextualDefaultAssistantControllers;
   webChatConnectionControllers?: ContextualWebChatConnectionControllers;
   whatsAppConnectionControllers?: ContextualWhatsAppConnectionControllers;
+  voicePolicyControllers?: ContextualVoicePolicyControllers;
   metaEmbeddedSignupControllers?: ContextualMetaEmbeddedSignupControllers;
   knowledgeControllers?: Record<string, (context: WorkspaceContext, actor: ActorContext) => RequestHandler>;
   conversationMessageController?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
@@ -87,6 +91,7 @@ let productionAssistantReadinessControllers: ContextualAssistantReadinessControl
 let productionDefaultAssistantControllers: ContextualDefaultAssistantControllers | null = null;
 let productionAssistantCapabilityControllers: ContextualAssistantCapabilityControllers | null = null;
 let productionCommercialControls: CommercialControlsRepository | null = null;
+let productionVoicePolicyControllers: ContextualVoicePolicyControllers | null = null;
 export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
 export function configureProductionConversationReadControllers(controllers: ContextualConversationReadControllers): void { productionConversationReadControllers = controllers; }
 export function configureProductionConversationControlControllers(controllers: ContextualConversationControlControllers): void { productionConversationControlControllers = controllers; }
@@ -95,6 +100,7 @@ export function configureProductionAssistantReadinessControllers(controllers: Co
 export function configureProductionDefaultAssistantControllers(controllers: ContextualDefaultAssistantControllers): void { productionDefaultAssistantControllers = controllers; }
 export function configureProductionAssistantCapabilityControllers(controllers: ContextualAssistantCapabilityControllers): void { productionAssistantCapabilityControllers = controllers; }
 export function configureProductionCommercialControls(controls: CommercialControlsRepository): void { productionCommercialControls = controls; }
+export function configureProductionVoicePolicyControllers(controllers: ContextualVoicePolicyControllers): void { productionVoicePolicyControllers = controllers; }
 
 function rawCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -213,6 +219,8 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   if (conversationReads) {
     router.get("/:workspaceId/companies/:companyId/conversations", authorize("company:read", false, conversationReads.list));
     if (conversationReads.feed) router.get("/:workspaceId/companies/:companyId/conversations/feed", authorize("company:read", false, conversationReads.feed));
+    if (conversationReads.voice) router.get("/:workspaceId/companies/:companyId/conversations/:conversationId/messages/:messageId/voice", authorize("company:read", false, conversationReads.voice));
+    if (conversationReads.playback) router.get("/:workspaceId/companies/:companyId/conversations/:conversationId/messages/:messageId/voice/playback", authorize("company:read", false, conversationReads.playback));
     router.get("/:workspaceId/companies/:companyId/conversations/:conversationId", authorize("company:read", false, conversationReads.get));
   }
   const conversationControls = dependencies.conversationControlControllers ?? productionConversationControlControllers;
@@ -239,6 +247,15 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     if (whatsApp.validate) router.post("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/validation", authorize("company:manage", true, whatsApp.validate));
     if (whatsApp.activate) router.post("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/activation", authorize("company:manage", true, whatsApp.activate));
     if (whatsApp.deactivate) router.post("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/deactivation", authorize("company:manage", true, whatsApp.deactivate));
+  }
+  const voicePolicies=dependencies.voicePolicyControllers??productionVoicePolicyControllers;
+  if(voicePolicies){
+    router.get("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/voice-policy",authorize("company:read",false,(context)=>voicePolicies.get(context)));
+    const putVoicePolicy=authorize("company:manage",true,(context,actor)=>(req,res,next)=>{
+      if(!req.is("application/json")){res.status(400).json({error:"Voice policy is invalid."});return;}
+      voicePolicies.put(context,actor)(req,res,next);
+    });
+    router.put("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/voice-policy",putVoicePolicy);
   }
   const embedded=dependencies.metaEmbeddedSignupControllers;
   if(embedded){

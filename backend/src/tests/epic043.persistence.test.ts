@@ -124,8 +124,8 @@ test("EPIC043 migration 0059 upgrades controls additively and backfills authorit
     runMigrations(database);
 
     const head = database
-      .prepare(
-        "SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1",
+        .prepare(
+          "SELECT id,name FROM schema_migrations WHERE id=59",
       )
       .get() as { id: number; name: string };
 

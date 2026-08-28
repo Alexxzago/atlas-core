@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { assistantProfileId, reconstructAssistantProfile, type AssistantProfile } from "../assistant/domain/assistantProfile.js";
 import { createDatabase } from "../config/database.js";
@@ -42,6 +45,7 @@ function fixtureProfile(companyId: number): AssistantProfile {
 
 export function createEpic040MediaFixture() {
   const db = createDatabase(":memory:");
+  const mediaDirectory = mkdtempSync(join(tmpdir(), "atlas-epic040-media-"));
   db.exec("PRAGMA foreign_keys=ON");
   const context = createWorkspaceContext(new WorkspaceRepository(db).resolveDefault());
   const company = new CompanyRepository(db).create(context, { name: "EPIC040", website: "https://epic040.test", status: "ready" });
@@ -84,7 +88,7 @@ export function createEpic040MediaFixture() {
   if (!media.complete(context, company.id, mediaAssetId, { id: "mbl_04000000000000000000000000000000", workspaceId: context.workspaceId, companyId: company.id, digest: "a".repeat(64), sizeBytes: 1, mediaType: "image/jpeg", storageReference: "memory://epic040", state: "active", createdAt: fixtureNow }, fixtureNow)) throw new Error("EPIC040 fixture media asset was not completed.");
   const claim = new WhatsAppInboundMediaRepository(db).claimInboundMediaForRecovery(context, company.id, connection.id, "epic040-worker", fixtureNow, fixtureLeaseExpiresAt);
   if (!claim) throw new Error("EPIC040 fixture ledger was not leased.");
-  return { db, workspaceId: context.workspaceId, companyId: company.id, connectionId: connection.id, conversationId: conversation.id, messageId: captured.inbound.id, providerEventId: captured.event.id, executionRequestId: captured.request.id, ledgerId, leaseToken: claim.leaseToken, mediaAssetId, close: (): void => db.close() };
+  return { db, mediaDirectory, workspaceId: context.workspaceId, companyId: company.id, connectionId: connection.id, conversationId: conversation.id, messageId: captured.inbound.id, providerEventId: captured.event.id, executionRequestId: captured.request.id, ledgerId, leaseToken: claim.leaseToken, mediaAssetId, close: (): void => { db.close(); rmSync(mediaDirectory, { recursive: true, force: true }); } };
 }
 
 interface DurableLedgerState {
@@ -139,12 +143,12 @@ function captureWebhook(fixture: ReturnType<typeof createEpic040MediaFixture>): 
 function capturedMedia(fixture: ReturnType<typeof createEpic040MediaFixture>, wamid: string): { provider_media_id: string; provider_kind: string; declared_mime: string; safe_filename: string | null; content: string; media_gate_state: string } { const row = fixture.db.prepare("SELECT m.provider_media_id,m.provider_kind,m.declared_mime,m.safe_filename,cm.content,r.media_gate_state FROM whatsapp_inbound_media m JOIN channel_provider_events e ON e.id=m.channel_provider_event_id JOIN conversation_messages cm ON cm.id=m.conversation_message_id JOIN channel_execution_requests r ON r.channel_provider_event_id=e.id WHERE e.external_event_id=?").get(wamid) as { provider_media_id: string; provider_kind: string; declared_mime: string; safe_filename: string | null; content: string; media_gate_state: string } | undefined; if (!row) throw new Error("Captured media was not found."); return { ...row }; }
 function readyAsset(fixture: ReturnType<typeof createEpic040MediaFixture>, id: string, kind: "image" | "document" | "audio", mediaType: string, filename: string | null): void { const context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, repository = new MediaRepository(fixture.db), reserved = repository.reserve(context, fixture.companyId, "ingest", `projection-${id}`, id.slice(-1).repeat(64), { id, workspaceId: fixture.workspaceId, companyId: fixture.companyId, kind, mediaType, sizeBytes: null, filename, metadata: {}, status: "pending", createdAt: fixtureNow, archivedAt: null, deletedAt: null }, fixtureNow); if (reserved.kind !== "reserved") throw new Error("Projection asset was not reserved."); if (!repository.complete(context, fixture.companyId, id, { id: `mbl_${id.slice(4)}`, workspaceId: fixture.workspaceId, companyId: fixture.companyId, digest: id.slice(-1).repeat(64), sizeBytes: 1, mediaType, storageReference: `private://${id}`, state: "active", createdAt: fixtureNow }, fixtureNow)) throw new Error("Projection asset was not completed."); }
 
-test("EPIC040 migrates a fresh database through the 0056 head", () => {
+test("EPIC040 migrates a fresh database through the 0062 head", () => {
   const database = createDatabase(":memory:");
   try {
     const head = database.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as { id: number; name: string };
-    assert.equal(head.id, 58);
-    assert.equal(head.name, "0058_meta_embedded_signup_resolved_connection");
+    assert.equal(head.id, 62);
+    assert.equal(head.name, "0062_voice_read_events");
   } finally {
     database.close();
   }
@@ -656,7 +660,7 @@ test("EPIC040 conversation_message ownership resolves durable tenant authority",
 });
 
 test("EPIC040 Media Core associates only ready same-tenant conversation message assets", () => {
-  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, core = createMediaCore(fixture.db, "C:\\ATLAS\\media-test", new FixtureClock());
+  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, core = createMediaCore(fixture.db, fixture.mediaDirectory, new FixtureClock());
   try {
     const association = core.service.attach(context, fixture.companyId, fixture.mediaAssetId, "conversation_message", fixture.messageId);
     assert.equal(association.ownerId, fixture.messageId);
@@ -674,7 +678,7 @@ test("EPIC040 Media Core associates only ready same-tenant conversation message 
 });
 
 test("EPIC040 Media Core composition registers conversation ownership and fails closed otherwise", () => {
-  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, core = createMediaCore(fixture.db, "C:\\ATLAS\\media-test", new FixtureClock());
+  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, core = createMediaCore(fixture.db, fixture.mediaDirectory, new FixtureClock());
   try {
     assert.equal(core.owners.owns(context, fixture.companyId, "conversation_message", fixture.messageId), true);
     assert.equal(core.owners.owns(context, fixture.companyId, "tool_result", "unknown"), false);
@@ -726,7 +730,7 @@ test("EPIC040 parser rejects malformed media without durable capture and rejects
 });
 
 test("EPIC040 parser-captured media is immediately recoverable and opens its gate", async () => {
-  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "whatsapp" }, ledger = new WhatsAppInboundMediaRepository(fixture.db), gates = new ChannelProviderEventRepository(fixture.db), core = createMediaCore(fixture.db, "C:\\ATLAS\\media-test", new FixtureClock());
+  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "whatsapp" }, ledger = new WhatsAppInboundMediaRepository(fixture.db), gates = new ChannelProviderEventRepository(fixture.db), core = createMediaCore(fixture.db, fixture.mediaDirectory, new FixtureClock());
   try {
     await captureWebhook(fixture).acknowledge(inboundPayload({ type: "image", from: "wa-customer", id: "wamid-parser-recovery", image: { id: "media-parser-recovery", mime_type: "image/jpeg" } }));
     const service = new WhatsAppInboundMediaRecoveryService(ledger, { download: async () => ({ kind: "downloaded" as const, download: { mediaType: "image/jpeg", filename: null, content: (async function* (): AsyncIterable<Uint8Array> { yield Uint8Array.from([0xff, 0xd8, 0xff, 0x00]); })() } }) }, core.service, gates, new FixtureClock());
@@ -736,7 +740,7 @@ test("EPIC040 parser-captured media is immediately recoverable and opens its gat
 });
 
 test("EPIC040 projects only ready, scoped conversation-message associations with safe bounded metadata", () => {
-  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, core = createMediaCore(fixture.db, "C:\\ATLAS\\media-test", new FixtureClock()), attachments = new SafeConversationAttachmentService(new SafeConversationAttachmentRepository(fixture.db));
+  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, core = createMediaCore(fixture.db, fixture.mediaDirectory, new FixtureClock()), attachments = new SafeConversationAttachmentService(new SafeConversationAttachmentRepository(fixture.db));
   try {
     assert.deepEqual(attachments.getSafeConversationAttachments(context, fixture.companyId, fixture.messageId), []);
     readyAsset(fixture, "mas_04000000000000000000000000000011", "document", "application/pdf", "invoice.pdf");
@@ -755,7 +759,7 @@ test("EPIC040 projects only ready, scoped conversation-message associations with
 });
 
 test("EPIC040 runtime request represents available attachments without attachment contents", async () => {
-  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, core = createMediaCore(fixture.db, "C:\\ATLAS\\media-test", new FixtureClock()), attachments = new SafeConversationAttachmentService(new SafeConversationAttachmentRepository(fixture.db));
+  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, core = createMediaCore(fixture.db, fixture.mediaDirectory, new FixtureClock()), attachments = new SafeConversationAttachmentService(new SafeConversationAttachmentRepository(fixture.db));
   try {
     core.service.attach(context, fixture.companyId, fixture.mediaAssetId, "conversation_message", fixture.messageId);
     const projected = attachments.getSafeConversationAttachments(context, fixture.companyId, fixture.messageId); let request: import("../assistant/application/assistantExecution.js").AssistantExecutionRequest | undefined;
@@ -770,7 +774,7 @@ test("EPIC040 runtime request represents available attachments without attachmen
 });
 
 test("EPIC040 recovery stores, associates, settles, and opens the execution gate", async () => {
-  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, ledger = new WhatsAppInboundMediaRepository(fixture.db), gates = new ChannelProviderEventRepository(fixture.db), core = createMediaCore(fixture.db, "C:\\ATLAS\\media-test", new FixtureClock());
+  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, ledger = new WhatsAppInboundMediaRepository(fixture.db), gates = new ChannelProviderEventRepository(fixture.db), core = createMediaCore(fixture.db, fixture.mediaDirectory, new FixtureClock());
   try {
     assert.equal(ledger.markTerminalFailure(context, fixture.companyId, fixture.connectionId, fixture.ledgerId, fixture.leaseToken, "media_download_failed", fixtureNow).kind, "applied");
     const ledgerId = addExecutionMedia(fixture, 1);
@@ -786,7 +790,7 @@ test("EPIC040 recovery stores, associates, settles, and opens the execution gate
 });
 
 test("EPIC040 recovery schedules bounded provider retries and leaves the gate blocked", async () => {
-  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, ledger = new WhatsAppInboundMediaRepository(fixture.db), gates = new ChannelProviderEventRepository(fixture.db), core = createMediaCore(fixture.db, "C:\\ATLAS\\media-test", new FixtureClock());
+  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, ledger = new WhatsAppInboundMediaRepository(fixture.db), gates = new ChannelProviderEventRepository(fixture.db), core = createMediaCore(fixture.db, fixture.mediaDirectory, new FixtureClock());
   try {
     assert.equal(ledger.markTerminalFailure(context, fixture.companyId, fixture.connectionId, fixture.ledgerId, fixture.leaseToken, "media_download_failed", fixtureNow).kind, "applied");
     const ledgerId = addExecutionMedia(fixture, 1);
@@ -800,7 +804,7 @@ test("EPIC040 recovery schedules bounded provider retries and leaves the gate bl
 });
 
 test("EPIC040 recovery discovers eligible scoped media without caller-provided tenant scope", async () => {
-  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, ledger = new WhatsAppInboundMediaRepository(fixture.db), gates = new ChannelProviderEventRepository(fixture.db), core = createMediaCore(fixture.db, "C:\\ATLAS\\media-test", new FixtureClock());
+  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, ledger = new WhatsAppInboundMediaRepository(fixture.db), gates = new ChannelProviderEventRepository(fixture.db), core = createMediaCore(fixture.db, fixture.mediaDirectory, new FixtureClock());
   try {
     assert.equal(ledger.markTerminalFailure(context, fixture.companyId, fixture.connectionId, fixture.ledgerId, fixture.leaseToken, "media_download_failed", fixtureNow).kind, "applied");
     const ledgerId = addExecutionMedia(fixture, 1);
@@ -810,7 +814,7 @@ test("EPIC040 recovery discovers eligible scoped media without caller-provided t
 });
 
 test("EPIC040 recovery repairs a gate left blocked after durable settlement", async () => {
-  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, ledger = new WhatsAppInboundMediaRepository(fixture.db), gates = new ChannelProviderEventRepository(fixture.db), core = createMediaCore(fixture.db, "C:\\ATLAS\\media-test", new FixtureClock());
+  const fixture = createEpic040MediaFixture(), context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, ledger = new WhatsAppInboundMediaRepository(fixture.db), gates = new ChannelProviderEventRepository(fixture.db), core = createMediaCore(fixture.db, fixture.mediaDirectory, new FixtureClock());
   try {
     assert.equal(ledger.markTerminalFailure(context, fixture.companyId, fixture.connectionId, fixture.ledgerId, fixture.leaseToken, "media_download_failed", fixtureNow).kind, "applied");
     assert.equal(durableExecutionRequestState(fixture.db, fixture.executionRequestId).media_gate_state, "blocked_by_media");

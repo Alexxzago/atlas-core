@@ -101,7 +101,6 @@ test("EPIC033 does not let a first-seen older human message replace a newer huma
     const newer = value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Newer preference" });
     const older = value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Older preference" });
     const olderAt = "2026-08-17T00:00:00.000Z";
-    value.database.prepare("UPDATE conversation_messages SET created_at=? WHERE id=?").run(olderAt, older.id);
     await value.intelligence.apply(value.context, value.company.id, newer);
     await value.intelligence.apply(value.context, value.company.id, { ...older, createdAt: olderAt });
     const fact = value.intelligence.state(value.context, value.company.id, value.conversation.id)?.facts.find((item) => item.key === "need");

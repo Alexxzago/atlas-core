@@ -13,6 +13,7 @@ export interface ChannelProviderEventRepositoryPort {
   captureInboundExecution(event: ChannelProviderEvent, inbound: ConversationMessage, providerMessage: ProviderMessageRecord, request: ChannelExecutionRequest, media?: readonly WhatsAppInboundMedia[]): { readonly event: ChannelProviderEvent; readonly inbound: ConversationMessage; readonly request: ChannelExecutionRequest; readonly media: readonly WhatsAppInboundMedia[]; readonly claimed: boolean };
   leaseExecutionRequests(owner: string, now: string, expiresAt: string, limit: number): ChannelExecutionRequest[];
   recomputeExecutionMediaGate(context: WorkspaceContext, companyId: number, connectionId: string, executionRequestId: ChannelExecutionRequestId, updatedAt: string): MediaGateRecomputeOutcome;
+  suppressBlockedAudioExecution(context: WorkspaceContext, companyId: number, connectionId: string, executionRequestId: ChannelExecutionRequestId, updatedAt: string): ChannelExecutionRequest | null;
   completeExecutionRequest(id: ChannelExecutionRequestId, owner: string, state: "completed" | "failed", outcome: string | null, updatedAt: string): ChannelExecutionRequest | null;
   releaseExecutionRequest(id: ChannelExecutionRequestId, owner: string, updatedAt: string): ChannelExecutionRequest | null;
   captureUnsupportedExecution(event: ChannelProviderEvent, request: ChannelExecutionRequest): { readonly event: ChannelProviderEvent; readonly request: ChannelExecutionRequest; readonly claimed: boolean };
@@ -33,6 +34,10 @@ export interface OutboundDeliveryRepositoryPort {
   updateState(id: OutboundDeliveryId, state: OutboundDelivery["state"], safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null;
   compareAndSetState(id: OutboundDeliveryId, expectedState: OutboundDelivery["state"], state: OutboundDelivery["state"], safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null;
   leaseReady(owner: string, now: string, expiresAt: string, limit: number): OutboundDelivery[];
+  authorizeLease(id: OutboundDeliveryId, owner: string, at: string): boolean;
+  beginSend(id: OutboundDeliveryId, owner: string, at: string): boolean;
+  acceptSend(id: OutboundDeliveryId, owner: string, externalMessageId: string, updatedAt: string): OutboundDelivery | null;
+  settleUncertainSend(id: OutboundDeliveryId, owner: string, safeErrorCategory: string, updatedAt: string): OutboundDelivery | null;
   completeLease(id: OutboundDeliveryId, owner: string, state: "accepted" | "uncertain", safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null;
   retryLease(id: OutboundDeliveryId, owner: string, nextAttemptAt: string, safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null;
   settleLease(id: OutboundDeliveryId, owner: string, outcome: "accepted" | "retryable" | "permanent_failure", nextAttemptAt: string | null, safeErrorCategory: string | null, updatedAt: string): OutboundDelivery | null;

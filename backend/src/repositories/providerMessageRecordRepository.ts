@@ -1,6 +1,6 @@
 import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
 import type { ProviderMessageRecordRepositoryPort } from "../transport/application/ports.js";
-import { reconstructProviderMessageRecord, type ProviderMessageRecord, type ProviderMessageRecordId } from "../transport/domain/providerDelivery.js";
+import { providerExternalMessageId, reconstructProviderMessageRecord, type ProviderMessageRecord, type ProviderMessageRecordId } from "../transport/domain/providerDelivery.js";
 import { communicationChannel, conversationMessageDirection, conversationMessageId } from "../conversation/domain/conversation.js";
 
 interface Row { id:string; communication_channel:string; transport_provider:string; direction:string; transport_connection_id:string; conversation_message_id:string; external_message_id:string|null; created_at:string; updated_at:string; }
@@ -29,7 +29,7 @@ export class ProviderMessageRecordRepository implements ProviderMessageRecordRep
   }
 
   public attachExternalMessageId(id: ProviderMessageRecordId, externalMessageId: string, updatedAt: string): ProviderMessageRecord | null {
-    const result = this.db.prepare("UPDATE provider_message_records SET external_message_id=?,updated_at=? WHERE id=? AND external_message_id IS NULL").run(externalMessageId, updatedAt, id);
+    const result = this.db.prepare("UPDATE provider_message_records SET external_message_id=?,updated_at=? WHERE id=? AND external_message_id IS NULL").run(providerExternalMessageId(externalMessageId), updatedAt, id);
     if (result.changes !== 1) return null;
     const row = this.db.prepare("SELECT * FROM provider_message_records WHERE id=?").get(id) as Row | undefined;
     return row ? record(row) : null;
