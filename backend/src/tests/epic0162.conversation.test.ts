@@ -61,7 +61,7 @@ test("EPIC-016.2 prevents cross-workspace access and mismatched message senders"
   } finally { database.close(); }
 });
 
-test("EPIC-016.2 closes open conversations once and cascades Company deletion", () => {
+test("EPIC-016.2 closes open conversations once and preserves legacy Company deletion cascades", () => {
   const { database, companies, conversations, primary, primaryCompany } = setup();
   try {
     const open = conversations.createConversation(primary, conversation(primaryCompany.id))!;
@@ -70,10 +70,14 @@ test("EPIC-016.2 closes open conversations once and cascades Company deletion", 
     const closed = conversation(primaryCompany.id, open.id, "closed");
     assert.equal(conversations.updateConversation(primary, primaryCompany.id, closed, "open"), true);
     assert.equal(conversations.updateConversation(primary, primaryCompany.id, closed, "open"), false);
+    assert.throws(() => database.prepare("UPDATE conversation_messages SET content='Changed' WHERE id=?").run(message(open.id, sender.id).id));
+    assert.throws(() => database.prepare("DELETE FROM conversation_messages WHERE id=?").run(message(open.id, sender.id).id));
+    assert.throws(() => database.prepare("DELETE FROM conversations WHERE id=?").run(open.id));
     assert.equal(companies.delete(primary, primaryCompany.id), true);
     assert.equal((database.prepare("SELECT COUNT(*) AS count FROM conversations").get() as { count: number }).count, 0);
     assert.equal((database.prepare("SELECT COUNT(*) AS count FROM conversation_participants").get() as { count: number }).count, 0);
     assert.equal((database.prepare("SELECT COUNT(*) AS count FROM conversation_messages").get() as { count: number }).count, 0);
+    assert.equal((database.prepare("SELECT COUNT(*) AS count FROM conversation_message_teardowns").get() as { count: number }).count, 0);
     assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
   } finally { database.close(); }
 });

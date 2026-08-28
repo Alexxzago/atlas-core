@@ -3,13 +3,17 @@ import type { MediaService } from "../../media/services/mediaService.js";
 import { ChannelProviderEventRepository } from "../../repositories/channelProviderEventRepository.js";
 import { WhatsAppInboundMediaRepository } from "../../repositories/whatsappInboundMediaRepository.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
+import type { VoiceRepositoryPort } from "../application/voicePorts.js";
+import { inspectVoiceAudio } from "../domain/audioInspection.js";
 import { WhatsAppInboundMediaDownloadStreamError, type WhatsAppInboundMediaDownloadResult, type WhatsAppInboundMediaProviderPort } from "../application/mediaPorts.js";
 import type { WhatsAppInboundMediaFailure } from "../domain/whatsappInboundMedia.js";
 
 export type WhatsAppInboundMediaRecoveryOutcome = { readonly kind: "idle" } | { readonly kind: "associated"; readonly ledgerId: string; readonly mediaAssetId: string } | { readonly kind: "retry_scheduled" | "terminal"; readonly ledgerId: string; readonly failureCode: WhatsAppInboundMediaFailure } | { readonly kind: "lease_lost"; readonly ledgerId: string } | { readonly kind: "conflict"; readonly ledgerId?: string };
+export type TestOnlyVoiceRecoveryCapability = { readonly kind:"unavailable" } | { readonly kind:"available"; readonly repository:VoiceRepositoryPort; readonly maximumDurationMilliseconds:number; createTranscriptionRequestId():string; };
+const productionVoiceRecoveryCapability:TestOnlyVoiceRecoveryCapability=Object.freeze({kind:"unavailable"});
 
 export class WhatsAppInboundMediaRecoveryService {
-  public constructor(private readonly ledger: WhatsAppInboundMediaRepository, private readonly provider: WhatsAppInboundMediaProviderPort, private readonly media: MediaService, private readonly gates: ChannelProviderEventRepository, private readonly clock: { now(): string }, private readonly leaseMilliseconds = 60_000) {}
+  public constructor(private readonly ledger: WhatsAppInboundMediaRepository, private readonly provider: WhatsAppInboundMediaProviderPort, private readonly media: MediaService, private readonly gates: ChannelProviderEventRepository, private readonly clock: { now(): string }, private readonly leaseMilliseconds = 60_000, private readonly voice:TestOnlyVoiceRecoveryCapability=productionVoiceRecoveryCapability) {}
 
   public async recoverNext(context: WorkspaceContext, companyId: number, connectionId: string, workerId: string): Promise<WhatsAppInboundMediaRecoveryOutcome> {
     const now = this.clock.now(), claimed = this.ledger.claimInboundMediaForRecovery(context, companyId, connectionId, workerId, now, new Date(Date.parse(now) + this.leaseMilliseconds).toISOString());
@@ -23,7 +27,7 @@ export class WhatsAppInboundMediaRecoveryService {
       const settled = this.ledger.markAssociated(context, companyId, connectionId, row.id, leaseToken, asset.id, this.clock.now());
       if (settled.kind === "lease_lost") return { kind: "lease_lost", ledgerId: row.id };
       if (settled.kind === "conflict" || settled.kind === "not_found") return { kind: "conflict", ledgerId: row.id };
-      return this.gate(context, companyId, connectionId, row.eventId, row.id, { kind: "associated", ledgerId: row.id, mediaAssetId: asset.id });
+        return row.descriptor.kind === "audio" ? await this.handleAudio(context, companyId, connectionId, row, asset.id, { kind: "associated", ledgerId: row.id, mediaAssetId: asset.id }) : this.gate(context, companyId, connectionId, row.eventId, row.id, { kind: "associated", ledgerId: row.id, mediaAssetId: asset.id });
     } catch (error: unknown) { return this.settleFailure(context, companyId, connectionId, row.id, row.eventId, leaseToken, row.attemptCount, mediaFailure(error)); }
   }
   public async recoverAvailable(workerId: string, limit = 25): Promise<readonly WhatsAppInboundMediaRecoveryOutcome[]> { const scopes = this.ledger.recoverableScopes(this.clock.now(), limit), outcomes = await Promise.all(scopes.map((scope) => this.recoverNext({ workspaceId: scope.workspaceId, workspaceKey: "whatsapp" }, scope.companyId, scope.connectionId, workerId))); for (const candidate of this.ledger.settledGateCandidates(limit)) { const context = { workspaceId: candidate.workspaceId, workspaceKey: "whatsapp" }, requestId = this.gates.findExecutionRequestIdForEvent(context, candidate.companyId, candidate.connectionId, candidate.eventId); if (requestId) this.gates.recomputeExecutionMediaGate(context, candidate.companyId, candidate.connectionId, requestId, this.clock.now()); } return outcomes; }
@@ -42,6 +46,8 @@ export class WhatsAppInboundMediaRecoveryService {
   }
 
   private gate(context: WorkspaceContext, companyId: number, connectionId: string, eventId: string, ledgerId: string, outcome: Exclude<WhatsAppInboundMediaRecoveryOutcome, { readonly kind: "idle" | "lease_lost" | "conflict" }>): WhatsAppInboundMediaRecoveryOutcome { const requestId = this.gates.findExecutionRequestIdForEvent(context, companyId, connectionId, eventId); if (!requestId) return { kind: "conflict", ledgerId }; const gate = this.gates.recomputeExecutionMediaGate(context, companyId, connectionId, requestId, this.clock.now()); return gate.kind === "conflict" || gate.kind === "not_found" ? { kind: "conflict", ledgerId } : outcome; }
+  private suppressUnavailableAudio(context: WorkspaceContext, companyId: number, connectionId: string, eventId: string, ledgerId: string, outcome: Exclude<WhatsAppInboundMediaRecoveryOutcome, { readonly kind: "idle" | "lease_lost" | "conflict" }>): WhatsAppInboundMediaRecoveryOutcome { const requestId = this.gates.findExecutionRequestIdForEvent(context, companyId, connectionId, eventId); return !requestId || !this.gates.suppressBlockedAudioExecution(context, companyId, connectionId, requestId, this.clock.now()) ? { kind: "conflict", ledgerId } : outcome; }
+  private async handleAudio(context:WorkspaceContext,companyId:number,connectionId:string,row:{readonly id:string;readonly eventId:string;readonly descriptor:{readonly declaredMime:string}},assetId:string,outcome:Extract<WhatsAppInboundMediaRecoveryOutcome,{readonly kind:"associated"}>):Promise<WhatsAppInboundMediaRecoveryOutcome>{if(this.voice.kind==="unavailable")return this.suppressUnavailableAudio(context,companyId,connectionId,row.eventId,row.id,outcome);const inspection=inspectVoiceAudio(await this.media.open(context,companyId,assetId),row.descriptor.declaredMime,this.voice.maximumDurationMilliseconds);if(inspection.kind==="unsupported"){const requestId=this.gates.findExecutionRequestIdForEvent(context,companyId,connectionId,row.eventId);return !requestId||!this.gates.markBlockedAudioExecutionUnsupported(context,companyId,connectionId,requestId,this.clock.now())?{kind:"conflict",ledgerId:row.id}:outcome;}const now=this.clock.now(),queued=this.voice.repository.enqueueTranscriptionAndBlockExecution(context,companyId,connectionId,row.eventId,{id:this.voice.createTranscriptionRequestId(),mediaAssetId:assetId,createdAt:now,updatedAt:now});return queued.kind==="created"||queued.kind==="replayed"?outcome:{kind:"conflict",ledgerId:row.id};}
 }
 
 function retryDelay(attempts: number): number { return attempts <= 1 ? 30_000 : attempts === 2 ? 120_000 : 600_000; }

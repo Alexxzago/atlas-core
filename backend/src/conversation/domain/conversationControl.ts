@@ -101,6 +101,8 @@ export interface ConversationDetailMessageProjection {
   readonly content: string;
   readonly createdAt: string;
   readonly delivery: WhatsAppOutboundDeliveryProjection | null;
+  /** Whether the scoped message has a durable Voice read model; no provider data is exposed. */
+  readonly voiceAvailable: boolean;
 }
 
 export interface WhatsAppOutboundDeliveryProjection {

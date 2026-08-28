@@ -1,4 +1,4 @@
-import { DeliveryLifecyclePolicy, ProviderDeliveryDomainError } from "../../transport/domain/providerDelivery.js";
+import { DeliveryLifecyclePolicy, providerExternalMessageId, ProviderDeliveryDomainError } from "../../transport/domain/providerDelivery.js";
 import type { OutboundDeliveryRepositoryPort, ProviderMessageRecordRepositoryPort } from "../../transport/application/ports.js";
 import type { WhatsAppMessageStatusEvent } from "./WhatsAppWebhookService.js";
 import { MetaDeliveryStatusMapper } from "./MetaDeliveryStatusMapper.js";
@@ -7,8 +7,13 @@ import type { WhatsAppConnectionService } from "./WhatsAppConnectionService.js";
 export class WhatsAppDeliveryStatusService {
   public constructor(private readonly messages: ProviderMessageRecordRepositoryPort, private readonly deliveries: OutboundDeliveryRepositoryPort, private readonly mapper: MetaDeliveryStatusMapper, private readonly policy: DeliveryLifecyclePolicy, private readonly clock: { now(): string }, private readonly connections?: WhatsAppConnectionService) {}
   public process(event: WhatsAppMessageStatusEvent): void {
-    const record = this.messages.findByTransportProviderAndExternalMessageId("meta_whatsapp_cloud", event.externalMessageId);
+    let externalMessageId: string;
+    try { externalMessageId = providerExternalMessageId(event.externalMessageId); }
+    catch (error: unknown) { if (error instanceof ProviderDeliveryDomainError) return; throw error; }
+    const connection = this.connections?.resolveActiveByPhoneNumberId(event.phoneNumberId);
+    const record = this.messages.findByTransportProviderAndExternalMessageId("meta_whatsapp_cloud", externalMessageId);
     if (!record || record.direction !== "outbound") return;
+    if (this.connections && (!connection || connection.id !== record.transportConnectionId)) return;
     const delivery = this.deliveries.findByProviderMessageRecordAndConnection(record.id, record.transportConnectionId);
     if (!delivery) return;
     const mapped = this.mapper.map(event);
