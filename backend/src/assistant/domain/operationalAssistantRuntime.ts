@@ -2,7 +2,7 @@ import type { AssistantProfile, AssistantProfileId, AssistantLanguage, Assistant
 import type { CompanyKnowledgeVersion } from "../../knowledge/domain/knowledge.js";
 
 export type AssistantExecutionRecordId = string & { readonly __brand: "AssistantExecutionRecordId" };
-export type AssistantRuntimePurpose = "preview" | "operational_execution";
+export type AssistantRuntimePurpose = "preview" | "operational_execution" | "proactive_execution";
 export type AssistantExecutionRecordState = "started" | "answered" | "safe_fallback" | "failed";
 
 export interface AssistantProfileRuntimeSnapshot {
@@ -22,7 +22,7 @@ export interface PublishedKnowledgeSnapshotReference {
 }
 
 export interface ImmutableExecutionSnapshot {
-  readonly version: "execution-snapshot-v1";
+  readonly version: "execution-snapshot-v1" | "execution-snapshot-v2";
   readonly workspaceId: number;
   readonly companyId: number;
   readonly assistantIdentifier: "default";
@@ -40,6 +40,8 @@ export interface ImmutableExecutionSnapshot {
   readonly runtimeVersion: "operational-runtime-v1";
   readonly configurationDigest: string;
   readonly createdAt: string;
+  /** Present only in the closed proactive v2 snapshot introduced by EPIC045 PASS4B. */
+  readonly proactiveActionId?: string;
 }
 
 export interface AssistantExecutionRecord {

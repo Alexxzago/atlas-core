@@ -1,5 +1,6 @@
 import type { AssistantCapabilityKey } from "./assistantCapability.js";
 import type { ConversationValue } from "../../conversationIntelligence/domain/conversationIntelligence.js";
+import type { AssistantRuntimePurpose } from "./operationalAssistantRuntime.js";
 
 export type ToolOperationClass = "read" | "write" | "sensitive_write";
 export type ToolConfirmationPolicy = "none" | "user" | "operator";
@@ -25,7 +26,7 @@ export interface ToolExecutionContext {
   readonly workspaceId: number; readonly companyId: number; readonly assistantProfileId: string;
   readonly assistantExecutionRecordId: string; readonly conversationId: string | null;
   readonly channel: "whatsapp" | "web_chat" | "internal"; readonly invocationId: string;
-  readonly idempotencyKey: string | null; readonly confirmation: ToolConfirmation | null; readonly toolTraceId?: string;
+  readonly idempotencyKey: string | null; readonly confirmation: ToolConfirmation | null; readonly purpose?: AssistantRuntimePurpose; readonly toolTraceId?: string;
 }
 export interface ToolDefinition {
   readonly name: string; readonly description: string; readonly inputSchema: ToolSchema; readonly outputSchema: ToolSchema;

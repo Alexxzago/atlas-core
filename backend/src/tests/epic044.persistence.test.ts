@@ -74,10 +74,13 @@ test("EPIC044 upgrades 0059 data without changing delivery order or event cursor
     assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
     database.close();
     const reopened = new DatabaseSync(path); reopened.exec("PRAGMA foreign_keys=ON"); runMigrations(reopened);
-    assert.deepEqual({ ...(reopened.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as Record<string, unknown>) }, { id: 62, name: "0062_voice_read_events" });
+    assert.deepEqual({ ...(reopened.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as Record<string, unknown>) }, { id: 65, name: "0065_proactive_operation_state_compatibility" });
     assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=60").get() as { count: number }).count, 1);
     assert.equal(reopened.prepare("SELECT id FROM schema_migrations WHERE id=61").get(), undefined);
     assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=62").get() as { count: number }).count, 1);
+    assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=63").get() as { count: number }).count, 1);
+    assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=64").get() as { count: number }).count, 1);
+    assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=65").get() as { count: number }).count, 1);
     assert.deepEqual((reopened.prepare("SELECT rowid FROM outbound_deliveries ORDER BY rowid").all() as Array<{ rowid: number }>).map((row) => row.rowid), value.legacyRowids);
     reopened.close();
   } finally { if (database.isOpen) database.close(); rmSync(directory, { recursive: true, force: true }); }

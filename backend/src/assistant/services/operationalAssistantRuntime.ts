@@ -21,6 +21,8 @@ export interface OperationalAssistantRuntimeContext {
   readonly attachments?: readonly SafeConversationAttachment[];
   /** Preview is provider-only and must not expose any capability or tool declaration. */
   readonly allowTools?: boolean;
+  /** Closed proactive correlation; it is never model input. */
+  readonly proactiveActionId?: string;
   readonly snapshotContext?: {
     readonly whatsAppConnectionId?: string;
     readonly whatsAppPhoneNumberId?: string;
@@ -72,7 +74,7 @@ export class OperationalAssistantRuntime {
           workspaceId: company.workspaceId, companyId: company.id, assistantProfileId: profile.id,
           assistantExecutionRecordId: started.id, conversationId: context.snapshotContext?.conversationId ?? null,
           channel: context.snapshotContext?.channelProvider === "whatsapp" ? "whatsapp" : context.snapshotContext?.channelProvider === "web_chat" ? "web_chat" : "internal",
-          invocationId: "", idempotencyKey: null, confirmation: null,
+           invocationId: "", idempotencyKey: null, confirmation: null, purpose: context.purpose,
         }) : null;
       const result = toolOutcome ? Object.freeze({ outcome: "answered" as const, answer: toolOutcome.answer }) : await this.execution.execute(request);
       const response = validResponse(result)
@@ -129,8 +131,9 @@ export class OperationalAssistantRuntime {
   }
 }
 function snapshot(company: Company, profile: AssistantProfile, knowledge: CompanyKnowledgeVersion, context: OperationalAssistantRuntimeContext, createdAt: string): ImmutableExecutionSnapshot {
+  if (context.purpose === "proactive_execution" && !/^pac_[0-9a-f]{32}$/.test(context.proactiveActionId ?? "")) throw new Error("Proactive execution action is invalid.");
   const value = {
-    version: "execution-snapshot-v1" as const,
+    version: (context.purpose === "proactive_execution" ? "execution-snapshot-v2" : "execution-snapshot-v1") as "execution-snapshot-v1" | "execution-snapshot-v2",
     workspaceId: company.workspaceId,
     companyId: company.id,
     assistantIdentifier: "default" as const,
@@ -148,6 +151,7 @@ function snapshot(company: Company, profile: AssistantProfile, knowledge: Compan
     runtimeVersion: "operational-runtime-v1" as const,
     configurationDigest: "",
     createdAt,
+    ...(context.purpose === "proactive_execution" ? { proactiveActionId: context.proactiveActionId! } : {}),
   };
   return Object.freeze({
     ...value,

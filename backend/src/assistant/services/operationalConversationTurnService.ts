@@ -200,7 +200,7 @@ function turnInput(value: unknown): { profileId: ReturnType<typeof assistantProf
   } catch { throw new OperationalConversationTurnValidationError("Turn input is invalid."); }
 }
 
-function historyFor(messages: readonly ConversationMessage[], limit: number, context?: WorkspaceContext, companyId?: number, semantic?: ConversationSemanticProjection): readonly AssistantConversationHistoryEntry[] {
+export function historyFor(messages: readonly ConversationMessage[], limit: number, context?: WorkspaceContext, companyId?: number, semantic?: ConversationSemanticProjection): readonly AssistantConversationHistoryEntry[] {
   const projected = context && companyId !== undefined && semantic ? messages.filter(message => semantic.includeHistory(context, companyId, message)).map(message => message.direction === "inbound" ? semantic.resolveInbound(context, companyId, message) : message) : messages;
   return Object.freeze(projected.slice(-limit).map(({ direction, content, createdAt }) => Object.freeze({ direction, content, createdAt })));
 }

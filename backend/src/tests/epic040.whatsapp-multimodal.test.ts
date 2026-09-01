@@ -143,12 +143,12 @@ function captureWebhook(fixture: ReturnType<typeof createEpic040MediaFixture>): 
 function capturedMedia(fixture: ReturnType<typeof createEpic040MediaFixture>, wamid: string): { provider_media_id: string; provider_kind: string; declared_mime: string; safe_filename: string | null; content: string; media_gate_state: string } { const row = fixture.db.prepare("SELECT m.provider_media_id,m.provider_kind,m.declared_mime,m.safe_filename,cm.content,r.media_gate_state FROM whatsapp_inbound_media m JOIN channel_provider_events e ON e.id=m.channel_provider_event_id JOIN conversation_messages cm ON cm.id=m.conversation_message_id JOIN channel_execution_requests r ON r.channel_provider_event_id=e.id WHERE e.external_event_id=?").get(wamid) as { provider_media_id: string; provider_kind: string; declared_mime: string; safe_filename: string | null; content: string; media_gate_state: string } | undefined; if (!row) throw new Error("Captured media was not found."); return { ...row }; }
 function readyAsset(fixture: ReturnType<typeof createEpic040MediaFixture>, id: string, kind: "image" | "document" | "audio", mediaType: string, filename: string | null): void { const context = { workspaceId: fixture.workspaceId, workspaceKey: "default" }, repository = new MediaRepository(fixture.db), reserved = repository.reserve(context, fixture.companyId, "ingest", `projection-${id}`, id.slice(-1).repeat(64), { id, workspaceId: fixture.workspaceId, companyId: fixture.companyId, kind, mediaType, sizeBytes: null, filename, metadata: {}, status: "pending", createdAt: fixtureNow, archivedAt: null, deletedAt: null }, fixtureNow); if (reserved.kind !== "reserved") throw new Error("Projection asset was not reserved."); if (!repository.complete(context, fixture.companyId, id, { id: `mbl_${id.slice(4)}`, workspaceId: fixture.workspaceId, companyId: fixture.companyId, digest: id.slice(-1).repeat(64), sizeBytes: 1, mediaType, storageReference: `private://${id}`, state: "active", createdAt: fixtureNow }, fixtureNow)) throw new Error("Projection asset was not completed."); }
 
-test("EPIC040 migrates a fresh database through the 0062 head", () => {
+test("EPIC040 migrates a fresh database through the current schema head", () => {
   const database = createDatabase(":memory:");
   try {
     const head = database.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as { id: number; name: string };
-    assert.equal(head.id, 62);
-    assert.equal(head.name, "0062_voice_read_events");
+    assert.equal(head.id, 65);
+    assert.equal(head.name, "0065_proactive_operation_state_compatibility");
   } finally {
     database.close();
   }
