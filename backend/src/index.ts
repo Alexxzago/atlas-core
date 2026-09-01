@@ -1,5 +1,5 @@
 import { createApp } from "./app.js";
-import { createProductionAppRouters, voiceDeferredSemanticRecoveryService, whatsAppInboundMediaRecoveryService, whatsAppOutboundDeliveryService, whatsAppWebhookService } from "./composition.js";
+import { createProductionAppRouters, proactiveDueWorkerService, proactiveSemanticRecoveryService, voiceDeferredSemanticRecoveryService, whatsAppInboundMediaRecoveryService, whatsAppOutboundDeliveryService, whatsAppWebhookService } from "./composition.js";
 import { database } from "./config/database.js";
 import { setShuttingDown } from "./routes/health.js";
 import { randomUUID } from "node:crypto";
@@ -12,7 +12,8 @@ const server = createApp(createProductionAppRouters(), { production: process.env
 });
 const dispatchOwner = `whatsapp-dispatch-${randomUUID()}`;
 const mediaRecoveryOwner = `whatsapp-media-recovery-${randomUUID()}`;
-async function recoverWhatsApp(): Promise<void> { try { await whatsAppInboundMediaRecoveryService.recoverAvailable(mediaRecoveryOwner); await whatsAppWebhookService.resumeIncomplete(); await whatsAppOutboundDeliveryService.dispatchReady(dispatchOwner); await voiceDeferredSemanticRecoveryService.recoverAvailable(); } catch { console.error("WhatsApp recovery cycle failed."); } }
+const proactiveWorkerOwner = `proactive-runtime-${randomUUID()}`;
+async function recoverWhatsApp(): Promise<void> { try { await proactiveDueWorkerService.executeAvailable(proactiveWorkerOwner); await whatsAppInboundMediaRecoveryService.recoverAvailable(mediaRecoveryOwner); await whatsAppWebhookService.resumeIncomplete(); await whatsAppOutboundDeliveryService.dispatchReady(dispatchOwner); await voiceDeferredSemanticRecoveryService.recoverAvailable(); await proactiveSemanticRecoveryService.recoverAvailable(); } catch { console.error("WhatsApp recovery cycle failed."); } }
 void recoverWhatsApp();
 const recoveryTimer = setInterval(() => { void recoverWhatsApp(); }, 5_000);
 recoveryTimer.unref();

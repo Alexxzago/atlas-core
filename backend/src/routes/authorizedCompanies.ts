@@ -50,6 +50,7 @@ interface ContextualWhatsAppConnectionControllers {
   deactivate?: (context: WorkspaceContext) => RequestHandler;
 }
 interface ContextualVoicePolicyControllers { get:(context:WorkspaceContext)=>RequestHandler; put:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler; }
+interface ContextualProactiveActionControllers { policy:(context:WorkspaceContext)=>RequestHandler; updatePolicy:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler; create:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler; list:(context:WorkspaceContext)=>RequestHandler; detail:(context:WorkspaceContext)=>RequestHandler; cancel:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler; }
 interface ContextualMetaEmbeddedSignupControllers { start:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; status:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; complete:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; reconnect:(context:WorkspaceContext,actorId:UserId)=>RequestHandler; }
 interface ContextualConversationReadControllers {
   list: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
@@ -74,6 +75,7 @@ interface AuthorizedCompanyDependencies {
   webChatConnectionControllers?: ContextualWebChatConnectionControllers;
   whatsAppConnectionControllers?: ContextualWhatsAppConnectionControllers;
   voicePolicyControllers?: ContextualVoicePolicyControllers;
+  proactiveActionControllers?: ContextualProactiveActionControllers;
   metaEmbeddedSignupControllers?: ContextualMetaEmbeddedSignupControllers;
   knowledgeControllers?: Record<string, (context: WorkspaceContext, actor: ActorContext) => RequestHandler>;
   conversationMessageController?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
@@ -92,6 +94,7 @@ let productionDefaultAssistantControllers: ContextualDefaultAssistantControllers
 let productionAssistantCapabilityControllers: ContextualAssistantCapabilityControllers | null = null;
 let productionCommercialControls: CommercialControlsRepository | null = null;
 let productionVoicePolicyControllers: ContextualVoicePolicyControllers | null = null;
+let productionProactiveActionControllers: ContextualProactiveActionControllers | null = null;
 export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
 export function configureProductionConversationReadControllers(controllers: ContextualConversationReadControllers): void { productionConversationReadControllers = controllers; }
 export function configureProductionConversationControlControllers(controllers: ContextualConversationControlControllers): void { productionConversationControlControllers = controllers; }
@@ -101,6 +104,7 @@ export function configureProductionDefaultAssistantControllers(controllers: Cont
 export function configureProductionAssistantCapabilityControllers(controllers: ContextualAssistantCapabilityControllers): void { productionAssistantCapabilityControllers = controllers; }
 export function configureProductionCommercialControls(controls: CommercialControlsRepository): void { productionCommercialControls = controls; }
 export function configureProductionVoicePolicyControllers(controllers: ContextualVoicePolicyControllers): void { productionVoicePolicyControllers = controllers; }
+export function configureProductionProactiveActionControllers(controllers: ContextualProactiveActionControllers): void { productionProactiveActionControllers = controllers; }
 
 function rawCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -256,6 +260,15 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
       voicePolicies.put(context,actor)(req,res,next);
     });
     router.put("/:workspaceId/companies/:companyId/whatsapp-connections/:connectionId/voice-policy",putVoicePolicy);
+  }
+  const proactive=dependencies.proactiveActionControllers??productionProactiveActionControllers;
+  if(proactive){
+    router.get("/:workspaceId/companies/:companyId/proactive-action-policy",authorize("company:read",false,(context)=>proactive.policy(context)));
+    router.put("/:workspaceId/companies/:companyId/proactive-action-policy",authorize("company:manage",true,(context,actor)=>proactive.updatePolicy(context,actor)));
+    router.post("/:workspaceId/companies/:companyId/conversations/:conversationId/proactive-actions",authorize("company:manage",true,(context,actor)=>proactive.create(context,actor)));
+    router.get("/:workspaceId/companies/:companyId/proactive-actions",authorize("company:read",false,(context)=>proactive.list(context)));
+    router.get("/:workspaceId/companies/:companyId/proactive-actions/:actionId",authorize("company:read",false,(context)=>proactive.detail(context)));
+    router.post("/:workspaceId/companies/:companyId/proactive-actions/:actionId/cancel",authorize("company:manage",true,(context,actor)=>proactive.cancel(context,actor)));
   }
   const embedded=dependencies.metaEmbeddedSignupControllers;
   if(embedded){

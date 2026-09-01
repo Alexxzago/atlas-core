@@ -10,7 +10,7 @@ export class AssistantToolOrchestrator {
   public async runOutcome(prompt:string,context:ToolExecutionContext):Promise<{ readonly answer: string; readonly conversationMemory: readonly { readonly traceId: string; readonly value: unknown; readonly facts: readonly { readonly key: string; readonly value: unknown }[]; readonly referenceGroups: readonly { readonly groupKind: string; readonly options: readonly { readonly referenceId: string; readonly label: string; readonly safePayload: unknown }[] }[] }[] }>{
     const assigned=new Set(await this.capabilities.listForProfile({workspaceId:context.workspaceId},context.companyId,context.assistantProfileId));
     const tools=[];
-    for(const tool of this.registry.list())if(tool.requiredCapabilities.every(capability=>assigned.has(capability))&&await this.availability.isAvailable(tool,context))tools.push(tool);
+    for(const tool of this.registry.list())if((context.purpose!=="proactive_execution"||tool.operationClass==="read")&&tool.requiredCapabilities.every(capability=>assigned.has(capability))&&await this.availability.isAvailable(tool,context))tools.push(tool);
     const results:ToolResult[]=[];
     const candidates: Array<{ readonly traceId: string; readonly value: unknown; readonly facts: readonly { readonly key: string; readonly value: unknown }[]; readonly referenceGroups: readonly { readonly groupKind: string; readonly options: readonly { readonly referenceId: string; readonly label: string; readonly safePayload: unknown }[] }[] }> = [];
     const session=this.model.createSession();

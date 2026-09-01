@@ -10,6 +10,7 @@ import type { WhatsAppConnectionRepositoryPort, WhatsAppConversationRepositoryPo
 import type { WhatsAppConnectionService } from "./WhatsAppConnectionService.js";
 import type { VoiceRepositoryPort } from "../application/voicePorts.js";
 import type { VoiceDeferredSemanticRecoveryService } from "./voiceDeferredSemanticRecoveryService.js";
+import type { ProactiveSemanticRecoveryService } from "../../proactive/services/proactiveSemanticRecoveryService.js";
 
 export class WhatsAppOutboundDeliveryValidationError extends Error {}
 
@@ -32,6 +33,7 @@ export class WhatsAppOutboundDeliveryService {
     private readonly bindings?: WhatsAppConversationRepositoryPort,
     private readonly voices?: Pick<VoiceRepositoryPort, "findUploadedProviderMediaId">,
     private readonly semanticRecovery?: VoiceDeferredSemanticRecoveryService,
+    private readonly proactiveSemanticRecovery?: ProactiveSemanticRecoveryService,
   ) {}
 
   public async deliverWhatsAppText(context: WorkspaceContext, companyId: number, input: { conversationId: ConversationId; conversationMessageId: ConversationMessageId; whatsAppConnectionId: WhatsAppConnectionId; recipientWaId: string }): Promise<WhatsAppOutboundDeliveryResult> {
@@ -83,6 +85,7 @@ export class WhatsAppOutboundDeliveryService {
       const externalMessageId = delivery.payloadKind === "audio" ? await (api.sendAudio?.(connection.phoneNumberId, binding.waId, providerMediaId!) ?? Promise.reject(new Error("WhatsApp audio sending is unavailable."))) : await api.sendText(connection.phoneNumberId, binding.waId, message.content);
       const accepted = this.deliveries.acceptSend ? this.deliveries.acceptSend(delivery.id, owner, externalMessageId, this.clock.now()) : (this.providerMessages.attachExternalMessageId(record.id, externalMessageId, this.clock.now()), this.deliveries.settleLease(delivery.id, owner, "accepted", null, null, this.clock.now()));
       if (accepted?.responsePolicy === "deferred_voice") await this.semanticRecovery?.recover(context, connection.companyId);
+      if (accepted) await this.proactiveSemanticRecovery?.recover(context, connection.companyId);
       this.operationalState?.recordProviderActivity(context, connection.companyId, connection.id);
     } catch (error: unknown) {
       this.logFailure(error, connection.id, delivery.id);

@@ -48,6 +48,12 @@ import { createGetVoicePolicyController, createPutVoicePolicyController } from "
 import { VoicePolicyService } from "./whatsapp/services/voicePolicyService.js";
 import { includeVoiceSemanticHistory, resolveVoiceSemanticMessage } from "./whatsapp/services/voiceSemanticContentResolver.js";
 import { VoiceDeferredSemanticRecoveryService } from "./whatsapp/services/voiceDeferredSemanticRecoveryService.js";
+import { ProactiveActionRepository } from "./repositories/proactiveActionRepository.js";
+import { ProactiveDueWorkerService } from "./proactive/services/proactiveDueWorkerService.js";
+import { ProactiveRuntimeService } from "./proactive/services/proactiveRuntimeService.js";
+import { ProactiveSemanticRecoveryService } from "./proactive/services/proactiveSemanticRecoveryService.js";
+import { ProactiveActionOperatorService } from "./proactive/services/proactiveActionOperatorService.js";
+import { createProactiveActionControllers } from "./controllers/proactiveActionController.js";
 import {createWorkspaceAdministrationControllers}from"./controllers/workspaceAdministrationController.js";
 import{createWorkspacesRouter}from"./routes/workspaces.js";
 import{SqliteWorkspaceAdministrationTransaction}from"./repositories/workspaceAdministrationTransaction.js";
@@ -56,7 +62,7 @@ import{DevelopmentInvitationDelivery,SecureInvitationProofProvider,UnavailableIn
 import{WorkspaceAdministrationService}from"./workspace/services/workspaceAdministrationService.js";
 import{AuthorizationService}from"./workspace/services/authorizationService.js";
 import{WorkspaceResolver}from"./workspace/services/workspaceResolver.js";
-import{configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
+import{configureProductionProactiveActionControllers,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
 import{UserRepository}from"./repositories/userRepository.js";
 import{AssistantProfileRepository}from"./repositories/assistantProfileRepository.js";
 import{AssistantProfileService}from"./assistant/services/assistantProfileService.js";
@@ -304,8 +310,14 @@ const voiceSemanticRepository = new WhatsAppVoiceRepository(database);
 const voicePolicyService = new VoicePolicyService(voiceSemanticRepository, identityClock);
 configureProductionVoicePolicyControllers({get:(context)=>createGetVoicePolicyController(voicePolicyService,context),put:(context,actor)=>createPutVoicePolicyController(voicePolicyService,context,actor)});
 export const voiceDeferredSemanticRecoveryService = new VoiceDeferredSemanticRecoveryService(voiceSemanticRepository, conversationIntelligenceService);
+const proactiveActions = new ProactiveActionRepository(database);
+const proactiveActionOperatorService = new ProactiveActionOperatorService(proactiveActions, identityClock);
+configureProductionProactiveActionControllers(createProactiveActionControllers(proactiveActionOperatorService));
+export const proactiveSemanticRecoveryService = new ProactiveSemanticRecoveryService(proactiveActions, conversationIntelligenceService);
+const productionOperationalAssistantRuntime = new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock, productionAssistantTools);
+export const proactiveDueWorkerService = new ProactiveDueWorkerService(proactiveActions, identityClock, new ProactiveRuntimeService(proactiveActions, companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, productionOperationalAssistantRuntime, identityClock, conversationIntelligenceService, knowledgeRetrievalService));
 const voiceSemanticProjection = { resolveInbound: (context: WorkspaceContext, companyId: number, message: import("./conversation/domain/conversation.js").ConversationMessage) => resolveVoiceSemanticMessage(voiceSemanticRepository, context, companyId, message), includeHistory: (context: WorkspaceContext, companyId: number, message: import("./conversation/domain/conversation.js").ConversationMessage) => includeVoiceSemanticHistory(voiceSemanticRepository, context, companyId, message), applyAssistant: (context: WorkspaceContext, companyId: number, message: import("./conversation/domain/conversation.js").ConversationMessage) => includeVoiceSemanticHistory(voiceSemanticRepository, context, companyId, message) };
-export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock, productionAssistantTools), new InMemoryConversationTurnLock(), "gemini", 20, conversationIntelligenceService, conversationToolMemory, knowledgeRetrievalService, new SafeConversationAttachmentService(new SafeConversationAttachmentRepository(database)), new ConversationRepository(database), voiceSemanticProjection);
+export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, productionOperationalAssistantRuntime, new InMemoryConversationTurnLock(), "gemini", 20, conversationIntelligenceService, conversationToolMemory, knowledgeRetrievalService, new SafeConversationAttachmentService(new SafeConversationAttachmentRepository(database)), new ConversationRepository(database), voiceSemanticProjection);
 const publicWebChatConversationService = new PublicWebChatConversationService(publicWebChatSessionService, operationalConversationTurnService, conversationService);
 const knowledgeIndexingService=new KnowledgeIndexingService(new KnowledgeRetrievalRepository(database));
 const companyKnowledgeService=new FrozenKnowledgeService(companyRepository,new CompanyKnowledgeRepository(database),new SecurePublicUrlProvider(),new WorkerPdfTextExtractor(),new ManualTextKnowledgeFactExtractor(new GeminiKnowledgeFactExtractor(geminiProvider)),identityClock,undefined,knowledgeIndexingService);
@@ -333,7 +345,7 @@ export const identityRouter = createIdentityRouter({
   ...authenticationControllers,
 });
 export const publicWebChatRouter = createPublicWebChatRouter(publicWebChatSessionService, publicWebChatConversationService, production);
-export const whatsAppOutboundDeliveryService = new WhatsAppOutboundDeliveryService(new ConversationRepository(database), whatsAppConnections, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), whatsAppCredentialResolver, (accessToken) => new WhatsAppCloudApiProvider(accessToken, process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0"), identityClock, whatsAppConnectionService, new WhatsAppConversationRepository(database), voiceSemanticRepository, voiceDeferredSemanticRecoveryService);
+export const whatsAppOutboundDeliveryService = new WhatsAppOutboundDeliveryService(new ConversationRepository(database), whatsAppConnections, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), whatsAppCredentialResolver, (accessToken) => new WhatsAppCloudApiProvider(accessToken, process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0"), identityClock, whatsAppConnectionService, new WhatsAppConversationRepository(database), voiceSemanticRepository, voiceDeferredSemanticRecoveryService, proactiveSemanticRecoveryService);
 const whatsAppDeliveryStatusService = new WhatsAppDeliveryStatusService(new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), new MetaDeliveryStatusMapper(), new DeliveryLifecyclePolicy(), identityClock, whatsAppConnectionService);
 const operatorConversationMessagingService = new OperatorConversationMessagingService(conversationService, new ConversationRepository(database), new ConversationRepository(database), new WhatsAppConversationRepository(database), whatsAppOutboundDeliveryService, identityClock, conversationIntelligenceService);
 configureProductionConversationMessageController((context, actor) => createOperatorConversationMessageController(operatorConversationMessagingService, context, actor));
