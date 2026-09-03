@@ -1,0 +1,43 @@
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import type { BillingProviderKind } from "../domain/billing.js";
+import { BillingWebhookRepository } from "../../repositories/billingWebhookRepository.js";
+
+export interface BillingWebhookSecrets { readonly stripe: string; readonly mercadopago: string; }
+type Json = Record<string, unknown>;
+
+export class BillingWebhookService {
+  public constructor(private readonly secrets: BillingWebhookSecrets, private readonly repository: BillingWebhookRepository, private readonly now: () => string = () => new Date().toISOString()) {}
+  public receive(provider: BillingProviderKind, raw: Buffer, headers: Record<string, string | string[] | undefined>): "accepted" | "duplicate" | "ignored" | "invalid" {
+    if (!this.validSignature(provider, raw, headers)) return "invalid";
+    const event = normalize(provider, raw);
+    if (!event) return "invalid";
+    return this.repository.accept({ ...event, providerKind: provider, payloadDigest: createHash("sha256").update(raw).digest("hex") }, this.now());
+  }
+
+  private validSignature(provider: BillingProviderKind, raw: Buffer, headers: Record<string, string | string[] | undefined>): boolean {
+    const secret = provider === "stripe" ? this.secrets.stripe : this.secrets.mercadopago;
+    if (!secret) return false;
+    const header = headerValue(headers, provider === "stripe" ? "stripe-signature" : "x-signature");
+    if (!header) return false;
+    const expected = provider === "stripe" ? stripeSignature(secret, raw, header) : mercadoPagoSignature(secret, raw, headers, header);
+    return expected !== null && safeEqual(expected.digest, expected.signature);
+  }
+}
+
+function normalize(provider: BillingProviderKind, raw: Buffer): Omit<import("../../repositories/billingWebhookRepository.js").BillingWebhookEvent, "providerKind" | "payloadDigest"> | null {
+  let payload: Json; try { payload = JSON.parse(raw.toString("utf8")) as Json; } catch { return null; }
+  const eventId = text(payload.id), eventType = text(provider === "stripe" ? payload.type : payload.type ?? payload.action);
+  const data = object(provider === "stripe" ? object(payload.data)?.object : payload.data) ?? object(payload);
+  const objectId = text(data?.id), customerId = text(data?.customer ?? data?.payer_id), subscriptionId = text(data?.subscription ?? (eventType && isSubscriptionType(eventType) ? data?.id : undefined)), correlationToken=text(data?.client_reference_id ?? data?.external_reference);
+  if (!bounded(eventId) || !bounded(eventType) || (provider === "stripe" && eventType !== "checkout.session.completed" && !eventType.startsWith("customer.subscription."))) return null;
+  if (provider === "stripe" && eventType === "checkout.session.completed" && (!bounded(objectId) || !bounded(subscriptionId))) return null;
+  return { providerEventId: eventId, eventType, providerObjectId: bounded(objectId) ? objectId : null, providerCustomerId: bounded(customerId) ? customerId : null, providerSubscriptionId: bounded(subscriptionId) ? subscriptionId : null, correlationToken:bounded(correlationToken)?correlationToken:null };
+}
+function stripeSignature(secret: string, raw: Buffer, header: string): { digest: Buffer; signature: Buffer } | null { const timestamp = header.split(",").find(value => value.startsWith("t="))?.slice(2), signature = header.split(",").find(value => value.startsWith("v1="))?.slice(3); if (!timestamp || !signature || !/^\d+$/.test(timestamp) || !/^[0-9a-f]{64}$/i.test(signature)) return null; return { digest: createHmac("sha256", secret).update(`${timestamp}.`).update(raw).digest(), signature: Buffer.from(signature, "hex") }; }
+function mercadoPagoSignature(secret: string, raw: Buffer, headers: Record<string, string | string[] | undefined>, header: string): { digest: Buffer; signature: Buffer } | null { const values = Object.fromEntries(header.split(",").map(part => { const [key, value] = part.trim().split("=", 2); return [key, value]; })), timestamp = values.ts, signature = values.v1, requestId = headerValue(headers, "x-request-id"); if (!timestamp || !signature || !requestId || !/^\d+$/.test(timestamp) || !/^[0-9a-f]{64}$/i.test(signature)) return null; let id = ""; try { id = text(object((JSON.parse(raw.toString("utf8")) as Json).data)?.id) ?? ""; } catch { return null; } return { digest: createHmac("sha256", secret).update(`id:${id};request-id:${requestId};ts:${timestamp};`).digest(), signature: Buffer.from(signature, "hex") }; }
+function safeEqual(left: Buffer, right: Buffer): boolean { return left.length === right.length && timingSafeEqual(left, right); }
+function headerValue(headers: Record<string, string | string[] | undefined>, name: string): string | null { const value = headers[name]; return typeof value === "string" && value.length <= 2048 ? value : null; }
+function object(value: unknown): Json | null { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Json : null; }
+function text(value: unknown): string | null { return typeof value === "string" && value.trim() === value ? value : null; }
+function bounded(value: string | null): value is string { return value !== null && value.length > 0 && value.length <= 200; }
+function isSubscriptionType(type: string): boolean { return /subscription|preapproval/i.test(type); }

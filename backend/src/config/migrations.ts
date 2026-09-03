@@ -1990,6 +1990,156 @@ const migrations: Migration[] = [
     CREATE TRIGGER proactive_action_operations_no_delete BEFORE DELETE ON proactive_action_operations WHEN OLD.teardown_authorized=0 BEGIN SELECT RAISE(ABORT,'Proactive action operations are append-only'); END;
     CREATE TRIGGER companies_authorize_proactive_action_teardown BEFORE DELETE ON companies BEGIN UPDATE proactive_actions SET teardown_authorized=1 WHERE company_id=OLD.id; UPDATE proactive_action_operations SET teardown_authorized=1 WHERE company_id=OLD.id; UPDATE proactive_action_audit_events SET teardown_authorized=1 WHERE company_id=OLD.id; UPDATE proactive_action_visibility SET teardown_authorized=1 WHERE company_id=OLD.id; END;
   `);}},
+  { id:66,name:"0066_billing_workspace_account_catalog",checksumSource:"billing-workspace-account-v2|versioned-local-catalog-v1|immutable-historical-prices|workspace-default-account",apply(database):void{database.exec(`
+    CREATE TABLE billing_accounts(
+      id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 80),
+      workspace_id INTEGER NOT NULL UNIQUE REFERENCES workspaces(id) ON DELETE CASCADE,
+      rollout_mode TEXT NOT NULL CHECK(rollout_mode IN ('unmanaged','managed')),
+       provider_kind TEXT CHECK(provider_kind IS NULL OR provider_kind IN ('stripe','mercadopago')),
+      provider_customer_id TEXT CHECK(provider_customer_id IS NULL OR length(provider_customer_id) BETWEEN 1 AND 200),
+      billing_payer_identity_id TEXT REFERENCES authentication_identities(id) ON DELETE SET NULL,
+      version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CHECK((rollout_mode='unmanaged' AND provider_kind IS NULL AND provider_customer_id IS NULL) OR (rollout_mode='managed' AND provider_kind IS NOT NULL))
+    );
+    CREATE UNIQUE INDEX uq_billing_accounts_provider_customer ON billing_accounts(provider_kind,provider_customer_id) WHERE provider_customer_id IS NOT NULL;
+    CREATE TABLE billing_catalog_entries(
+      id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 80),
+      plan_key TEXT NOT NULL CHECK(length(plan_key) BETWEEN 1 AND 80),
+      catalog_version INTEGER NOT NULL CHECK(catalog_version>0),
+      display_name TEXT NOT NULL CHECK(length(display_name) BETWEEN 1 AND 160),
+      billing_interval TEXT NOT NULL CHECK(billing_interval IN ('month','year')),
+      currency TEXT NOT NULL CHECK(currency GLOB '[A-Z][A-Z][A-Z]'),
+      amount_minor INTEGER NOT NULL CHECK(typeof(amount_minor)='integer' AND amount_minor>=0),
+      lifecycle_state TEXT NOT NULL CHECK(lifecycle_state IN ('active','retired')),
+      entitlement_max_companies INTEGER CHECK(entitlement_max_companies IS NULL OR entitlement_max_companies>=0),
+      entitlement_max_assistant_profiles INTEGER CHECK(entitlement_max_assistant_profiles IS NULL OR entitlement_max_assistant_profiles>=0),
+      entitlement_max_active_channels INTEGER CHECK(entitlement_max_active_channels IS NULL OR entitlement_max_active_channels>=0),
+      entitlement_mutation_eligible INTEGER NOT NULL CHECK(entitlement_mutation_eligible IN (0,1)),
+      entitlement_definition_version INTEGER NOT NULL CHECK(entitlement_definition_version>0),
+       provider_kind TEXT CHECK(provider_kind IS NULL OR provider_kind IN ('stripe','mercadopago')),
+      provider_price_id TEXT CHECK(provider_price_id IS NULL OR length(provider_price_id) BETWEEN 1 AND 200),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(plan_key,catalog_version),
+      CHECK((provider_kind IS NULL)=(provider_price_id IS NULL))
+    );
+    CREATE UNIQUE INDEX uq_billing_catalog_provider_price ON billing_catalog_entries(provider_kind,provider_price_id) WHERE provider_price_id IS NOT NULL;
+    CREATE TRIGGER billing_catalog_entries_immutable BEFORE UPDATE OF plan_key,catalog_version,display_name,billing_interval,currency,amount_minor,entitlement_max_companies,entitlement_max_assistant_profiles,entitlement_max_active_channels,entitlement_mutation_eligible,entitlement_definition_version,provider_kind,provider_price_id,created_at ON billing_catalog_entries BEGIN SELECT RAISE(ABORT,'Billing catalog historical fields are immutable'); END;
+    CREATE TRIGGER billing_catalog_entries_no_reactivate BEFORE UPDATE OF lifecycle_state ON billing_catalog_entries WHEN OLD.lifecycle_state='retired' AND NEW.lifecycle_state!='retired' BEGIN SELECT RAISE(ABORT,'Retired billing catalog entries cannot be reactivated'); END;
+    INSERT INTO billing_accounts(id,workspace_id,rollout_mode,provider_kind,provider_customer_id,version,created_at,updated_at)
+      SELECT 'bac_' || lower(hex(randomblob(16))),id,'unmanaged',NULL,NULL,1,created_at,created_at FROM workspaces;
+    CREATE TRIGGER workspaces_seed_billing_account AFTER INSERT ON workspaces BEGIN
+      INSERT INTO billing_accounts(id,workspace_id,rollout_mode,provider_kind,provider_customer_id,version,created_at,updated_at)
+      VALUES('bac_' || lower(hex(randomblob(16))),NEW.id,'unmanaged',NULL,NULL,1,NEW.created_at,NEW.created_at);
+    END;
+    CREATE TRIGGER workspaces_prevent_managed_billing_delete BEFORE DELETE ON workspaces
+      WHEN EXISTS(SELECT 1 FROM billing_accounts WHERE workspace_id=OLD.id AND (rollout_mode='managed' OR provider_customer_id IS NOT NULL))
+      BEGIN SELECT RAISE(ABORT,'Managed Workspace billing requires deprovisioning'); END;
+  `);}},
+  { id:67,name:"0067_billing_subscription_entitlements",checksumSource:"billing-subscription-v1|versioned-entitlement-snapshot-v1|unmanaged-workspace-rollout|commercial-control-compatible",apply(database):void{database.exec(`
+    CREATE TABLE billing_subscriptions(
+      id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 80),
+      billing_account_id TEXT NOT NULL REFERENCES billing_accounts(id) ON DELETE CASCADE,
+      catalog_entry_id TEXT REFERENCES billing_catalog_entries(id) ON DELETE RESTRICT,
+       provider_kind TEXT CHECK(provider_kind IS NULL OR provider_kind IN ('stripe','mercadopago')),
+      provider_subscription_id TEXT CHECK(provider_subscription_id IS NULL OR length(provider_subscription_id) BETWEEN 1 AND 200),
+       provider_evidence_state TEXT CHECK(provider_evidence_state IS NULL OR provider_evidence_state IN ('checkout_pending','trialing','active','past_due','paused','canceled','unpaid','incomplete','incomplete_expired','unknown')),
+       effective_state TEXT NOT NULL CHECK(effective_state IN ('unmanaged','trial','active','canceling_at_period_end','grace','paused','payment_required','canceled','reconciliation_required')),
+      current_period_start TEXT,
+      current_period_end TEXT,
+      trial_ends_at TEXT,
+      grace_ends_at TEXT,
+      cancel_at_period_end INTEGER NOT NULL DEFAULT 0 CHECK(cancel_at_period_end IN (0,1)),
+      is_current INTEGER NOT NULL DEFAULT 1 CHECK(is_current IN (0,1)),
+      version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CHECK((provider_kind IS NULL)=(provider_subscription_id IS NULL)),
+      CHECK(effective_state!='unmanaged' OR provider_kind IS NULL),
+      CHECK(current_period_end IS NULL OR current_period_start IS NULL OR current_period_end>=current_period_start),
+      CHECK(trial_ends_at IS NULL OR current_period_start IS NULL OR trial_ends_at>=current_period_start),
+      CHECK(grace_ends_at IS NULL OR current_period_end IS NULL OR grace_ends_at>=current_period_end),
+      CHECK(cancel_at_period_end=0 OR effective_state='canceling_at_period_end')
+    );
+    CREATE UNIQUE INDEX uq_billing_subscriptions_current_account ON billing_subscriptions(billing_account_id) WHERE is_current=1;
+    CREATE UNIQUE INDEX uq_billing_subscriptions_provider_subscription ON billing_subscriptions(provider_kind,provider_subscription_id) WHERE provider_subscription_id IS NOT NULL;
+    CREATE TABLE billing_entitlement_snapshots(
+      id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 80),
+      billing_account_id TEXT NOT NULL REFERENCES billing_accounts(id) ON DELETE CASCADE,
+      billing_subscription_id TEXT NOT NULL REFERENCES billing_subscriptions(id) ON DELETE RESTRICT,
+      entitlement_state TEXT NOT NULL CHECK(entitlement_state IN ('enabled','grace_enabled','restricted','suspended','unavailable')),
+      max_companies INTEGER CHECK(max_companies IS NULL OR max_companies>=0),
+      max_assistant_profiles INTEGER CHECK(max_assistant_profiles IS NULL OR max_assistant_profiles>=0),
+      max_active_channels INTEGER CHECK(max_active_channels IS NULL OR max_active_channels>=0),
+      mutation_eligible INTEGER NOT NULL CHECK(mutation_eligible IN (0,1)),
+      is_current INTEGER NOT NULL DEFAULT 1 CHECK(is_current IN (0,1)),
+      version INTEGER NOT NULL CHECK(version>0),
+      evaluated_at TEXT NOT NULL,
+      effective_at TEXT NOT NULL,
+      expires_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CHECK(expires_at IS NULL OR expires_at>=effective_at)
+    );
+    CREATE UNIQUE INDEX uq_billing_entitlement_snapshots_current_account ON billing_entitlement_snapshots(billing_account_id) WHERE is_current=1;
+    CREATE TRIGGER billing_subscriptions_account_scope_insert BEFORE INSERT ON billing_subscriptions
+      WHEN NEW.catalog_entry_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing_catalog_entries WHERE id=NEW.catalog_entry_id)
+      BEGIN SELECT RAISE(ABORT,'Billing catalog entry is invalid'); END;
+    INSERT INTO billing_subscriptions(id,billing_account_id,catalog_entry_id,provider_kind,provider_subscription_id,provider_evidence_state,effective_state,current_period_start,current_period_end,trial_ends_at,grace_ends_at,cancel_at_period_end,is_current,version,created_at,updated_at)
+      SELECT 'bsub_' || lower(hex(randomblob(16))),a.id,NULL,NULL,NULL,NULL,'unmanaged',NULL,NULL,NULL,NULL,0,1,1,a.created_at,a.updated_at FROM billing_accounts a;
+    INSERT INTO billing_entitlement_snapshots(id,billing_account_id,billing_subscription_id,entitlement_state,max_companies,max_assistant_profiles,max_active_channels,mutation_eligible,is_current,version,evaluated_at,effective_at,expires_at,created_at)
+      SELECT 'bes_' || lower(hex(randomblob(16))),a.id,s.id,'enabled',NULL,NULL,NULL,1,1,1,a.updated_at,a.updated_at,NULL,a.created_at
+      FROM billing_accounts a JOIN billing_subscriptions s ON s.billing_account_id=a.id AND s.is_current=1;
+    CREATE TRIGGER billing_accounts_seed_unmanaged_subscription AFTER INSERT ON billing_accounts BEGIN
+      INSERT INTO billing_subscriptions(id,billing_account_id,catalog_entry_id,provider_kind,provider_subscription_id,provider_evidence_state,effective_state,current_period_start,current_period_end,trial_ends_at,grace_ends_at,cancel_at_period_end,is_current,version,created_at,updated_at)
+      VALUES('bsub_' || lower(hex(randomblob(16))),NEW.id,NULL,NULL,NULL,NULL,'unmanaged',NULL,NULL,NULL,NULL,0,1,1,NEW.created_at,NEW.updated_at);
+      INSERT INTO billing_entitlement_snapshots(id,billing_account_id,billing_subscription_id,entitlement_state,max_companies,max_assistant_profiles,max_active_channels,mutation_eligible,is_current,version,evaluated_at,effective_at,expires_at,created_at)
+      SELECT 'bes_' || lower(hex(randomblob(16))),NEW.id,id,'enabled',NULL,NULL,NULL,1,1,1,NEW.updated_at,NEW.updated_at,NULL,NEW.created_at FROM billing_subscriptions WHERE billing_account_id=NEW.id AND is_current=1;
+    END;
+    DROP TRIGGER commercial_company_limit; DROP TRIGGER commercial_company_restore_limit; DROP TRIGGER commercial_profile_limit; DROP TRIGGER commercial_profile_restore_limit; DROP TRIGGER commercial_web_chat_active_limit_insert; DROP TRIGGER commercial_web_chat_active_limit_update; DROP TRIGGER commercial_whatsapp_active_limit_insert; DROP TRIGGER commercial_whatsapp_active_limit_update;
+    CREATE TRIGGER billing_company_limit BEFORE INSERT ON companies WHEN NOT EXISTS(SELECT 1 FROM workspace_commercial_controls cc JOIN billing_accounts a ON a.workspace_id=NEW.workspace_id JOIN billing_entitlement_snapshots s ON s.billing_account_id=a.id AND s.is_current=1 WHERE cc.workspace_id=NEW.workspace_id AND cc.status='active' AND s.entitlement_state IN ('enabled','grace_enabled') AND s.mutation_eligible=1 AND ((CASE WHEN s.max_companies IS NULL THEN cc.max_companies WHEN cc.max_companies IS NULL THEN s.max_companies WHEN s.max_companies<cc.max_companies THEN s.max_companies ELSE cc.max_companies END) IS NULL OR (SELECT COUNT(*) FROM companies WHERE workspace_id=NEW.workspace_id AND lifecycle_state!='archived')<(CASE WHEN s.max_companies IS NULL THEN cc.max_companies WHEN cc.max_companies IS NULL THEN s.max_companies WHEN s.max_companies<cc.max_companies THEN s.max_companies ELSE cc.max_companies END))) BEGIN SELECT RAISE(ABORT,'workspace company creation is unavailable'); END;
+    CREATE TRIGGER billing_profile_limit BEFORE INSERT ON assistant_profiles WHEN NOT EXISTS(SELECT 1 FROM workspace_commercial_controls cc JOIN companies c ON c.workspace_id=cc.workspace_id JOIN billing_accounts a ON a.workspace_id=cc.workspace_id JOIN billing_entitlement_snapshots s ON s.billing_account_id=a.id AND s.is_current=1 WHERE c.id=NEW.company_id AND cc.status='active' AND s.entitlement_state IN ('enabled','grace_enabled') AND s.mutation_eligible=1 AND ((CASE WHEN s.max_assistant_profiles IS NULL THEN cc.max_assistant_profiles WHEN cc.max_assistant_profiles IS NULL THEN s.max_assistant_profiles WHEN s.max_assistant_profiles<cc.max_assistant_profiles THEN s.max_assistant_profiles ELSE cc.max_assistant_profiles END) IS NULL OR (SELECT COUNT(*) FROM assistant_profiles p JOIN companies co ON co.id=p.company_id WHERE co.workspace_id=c.workspace_id AND p.status!='archived')<(CASE WHEN s.max_assistant_profiles IS NULL THEN cc.max_assistant_profiles WHEN cc.max_assistant_profiles IS NULL THEN s.max_assistant_profiles WHEN s.max_assistant_profiles<cc.max_assistant_profiles THEN s.max_assistant_profiles ELSE cc.max_assistant_profiles END))) BEGIN SELECT RAISE(ABORT,'workspace assistant profile creation is unavailable'); END;
+    CREATE TRIGGER billing_web_chat_limit BEFORE INSERT ON web_chat_connections WHEN NEW.status='active' AND NOT EXISTS(SELECT 1 FROM workspace_commercial_controls cc JOIN billing_accounts a ON a.workspace_id=NEW.workspace_id JOIN billing_entitlement_snapshots s ON s.billing_account_id=a.id AND s.is_current=1 WHERE cc.workspace_id=NEW.workspace_id AND cc.status='active' AND s.entitlement_state IN ('enabled','grace_enabled') AND s.mutation_eligible=1 AND ((CASE WHEN s.max_active_channels IS NULL THEN cc.max_active_channels WHEN cc.max_active_channels IS NULL THEN s.max_active_channels WHEN s.max_active_channels<cc.max_active_channels THEN s.max_active_channels ELSE cc.max_active_channels END) IS NULL OR ((SELECT COUNT(*) FROM web_chat_connections WHERE workspace_id=NEW.workspace_id AND status='active')+(SELECT COUNT(*) FROM whatsapp_connections WHERE workspace_id=NEW.workspace_id AND status='active'))<(CASE WHEN s.max_active_channels IS NULL THEN cc.max_active_channels WHEN cc.max_active_channels IS NULL THEN s.max_active_channels WHEN s.max_active_channels<cc.max_active_channels THEN s.max_active_channels ELSE cc.max_active_channels END))) BEGIN SELECT RAISE(ABORT,'workspace active channel creation is unavailable'); END;
+    CREATE TRIGGER billing_whatsapp_limit BEFORE INSERT ON whatsapp_connections WHEN NEW.status='active' AND NOT EXISTS(SELECT 1 FROM workspace_commercial_controls cc JOIN billing_accounts a ON a.workspace_id=NEW.workspace_id JOIN billing_entitlement_snapshots s ON s.billing_account_id=a.id AND s.is_current=1 WHERE cc.workspace_id=NEW.workspace_id AND cc.status='active' AND s.entitlement_state IN ('enabled','grace_enabled') AND s.mutation_eligible=1 AND ((CASE WHEN s.max_active_channels IS NULL THEN cc.max_active_channels WHEN cc.max_active_channels IS NULL THEN s.max_active_channels WHEN s.max_active_channels<cc.max_active_channels THEN s.max_active_channels ELSE cc.max_active_channels END) IS NULL OR ((SELECT COUNT(*) FROM web_chat_connections WHERE workspace_id=NEW.workspace_id AND status='active')+(SELECT COUNT(*) FROM whatsapp_connections WHERE workspace_id=NEW.workspace_id AND status='active'))<(CASE WHEN s.max_active_channels IS NULL THEN cc.max_active_channels WHEN cc.max_active_channels IS NULL THEN s.max_active_channels WHEN s.max_active_channels<cc.max_active_channels THEN s.max_active_channels ELSE cc.max_active_channels END))) BEGIN SELECT RAISE(ABORT,'workspace active channel creation is unavailable'); END;
+    CREATE TRIGGER billing_company_restore_limit BEFORE UPDATE OF lifecycle_state ON companies WHEN OLD.lifecycle_state='archived' AND NEW.lifecycle_state!='archived' AND NOT EXISTS(SELECT 1 FROM workspace_commercial_controls cc JOIN billing_accounts a ON a.workspace_id=NEW.workspace_id JOIN billing_entitlement_snapshots s ON s.billing_account_id=a.id AND s.is_current=1 WHERE cc.workspace_id=NEW.workspace_id AND cc.status='active' AND s.entitlement_state IN ('enabled','grace_enabled') AND s.mutation_eligible=1 AND ((CASE WHEN s.max_companies IS NULL THEN cc.max_companies WHEN cc.max_companies IS NULL THEN s.max_companies WHEN s.max_companies<cc.max_companies THEN s.max_companies ELSE cc.max_companies END) IS NULL OR (SELECT COUNT(*) FROM companies WHERE workspace_id=NEW.workspace_id AND lifecycle_state!='archived')<(CASE WHEN s.max_companies IS NULL THEN cc.max_companies WHEN cc.max_companies IS NULL THEN s.max_companies WHEN s.max_companies<cc.max_companies THEN s.max_companies ELSE cc.max_companies END))) BEGIN SELECT RAISE(ABORT,'workspace company restore is unavailable'); END;
+    CREATE TRIGGER billing_profile_restore_limit BEFORE UPDATE OF status ON assistant_profiles WHEN OLD.status='archived' AND NEW.status!='archived' AND NOT EXISTS(SELECT 1 FROM workspace_commercial_controls cc JOIN companies c ON c.workspace_id=cc.workspace_id JOIN billing_accounts a ON a.workspace_id=cc.workspace_id JOIN billing_entitlement_snapshots s ON s.billing_account_id=a.id AND s.is_current=1 WHERE c.id=NEW.company_id AND cc.status='active' AND s.entitlement_state IN ('enabled','grace_enabled') AND s.mutation_eligible=1 AND ((CASE WHEN s.max_assistant_profiles IS NULL THEN cc.max_assistant_profiles WHEN cc.max_assistant_profiles IS NULL THEN s.max_assistant_profiles WHEN s.max_assistant_profiles<cc.max_assistant_profiles THEN s.max_assistant_profiles ELSE cc.max_assistant_profiles END) IS NULL OR (SELECT COUNT(*) FROM assistant_profiles p JOIN companies co ON co.id=p.company_id WHERE co.workspace_id=c.workspace_id AND p.status!='archived')<(CASE WHEN s.max_assistant_profiles IS NULL THEN cc.max_assistant_profiles WHEN cc.max_assistant_profiles IS NULL THEN s.max_assistant_profiles WHEN s.max_assistant_profiles<cc.max_assistant_profiles THEN s.max_assistant_profiles ELSE cc.max_assistant_profiles END))) BEGIN SELECT RAISE(ABORT,'workspace assistant profile restore is unavailable'); END;
+    CREATE TRIGGER billing_web_chat_active_limit_update BEFORE UPDATE OF status ON web_chat_connections WHEN NEW.status='active' AND OLD.status!='active' AND NOT EXISTS(SELECT 1 FROM workspace_commercial_controls cc JOIN billing_accounts a ON a.workspace_id=NEW.workspace_id JOIN billing_entitlement_snapshots s ON s.billing_account_id=a.id AND s.is_current=1 WHERE cc.workspace_id=NEW.workspace_id AND cc.status='active' AND s.entitlement_state IN ('enabled','grace_enabled') AND s.mutation_eligible=1 AND ((CASE WHEN s.max_active_channels IS NULL THEN cc.max_active_channels WHEN cc.max_active_channels IS NULL THEN s.max_active_channels WHEN s.max_active_channels<cc.max_active_channels THEN s.max_active_channels ELSE cc.max_active_channels END) IS NULL OR ((SELECT COUNT(*) FROM web_chat_connections WHERE workspace_id=NEW.workspace_id AND status='active')+(SELECT COUNT(*) FROM whatsapp_connections WHERE workspace_id=NEW.workspace_id AND status='active'))<(CASE WHEN s.max_active_channels IS NULL THEN cc.max_active_channels WHEN cc.max_active_channels IS NULL THEN s.max_active_channels WHEN s.max_active_channels<cc.max_active_channels THEN s.max_active_channels ELSE cc.max_active_channels END))) BEGIN SELECT RAISE(ABORT,'workspace active channel creation is unavailable'); END;
+    CREATE TRIGGER billing_whatsapp_active_limit_update BEFORE UPDATE OF status ON whatsapp_connections WHEN NEW.status='active' AND OLD.status!='active' AND NOT EXISTS(SELECT 1 FROM workspace_commercial_controls cc JOIN billing_accounts a ON a.workspace_id=NEW.workspace_id JOIN billing_entitlement_snapshots s ON s.billing_account_id=a.id AND s.is_current=1 WHERE cc.workspace_id=NEW.workspace_id AND cc.status='active' AND s.entitlement_state IN ('enabled','grace_enabled') AND s.mutation_eligible=1 AND ((CASE WHEN s.max_active_channels IS NULL THEN cc.max_active_channels WHEN cc.max_active_channels IS NULL THEN s.max_active_channels WHEN s.max_active_channels<cc.max_active_channels THEN s.max_active_channels ELSE cc.max_active_channels END) IS NULL OR ((SELECT COUNT(*) FROM web_chat_connections WHERE workspace_id=NEW.workspace_id AND status='active')+(SELECT COUNT(*) FROM whatsapp_connections WHERE workspace_id=NEW.workspace_id AND status='active'))<(CASE WHEN s.max_active_channels IS NULL THEN cc.max_active_channels WHEN cc.max_active_channels IS NULL THEN s.max_active_channels WHEN s.max_active_channels<cc.max_active_channels THEN s.max_active_channels ELSE cc.max_active_channels END))) BEGIN SELECT RAISE(ABORT,'workspace active channel creation is unavailable'); END;
+  `);}},
+  { id:68,name:"0068_billing_operations_provider_events_reconciliation",checksumSource:"billing-durable-operations-v1|provider-event-envelope-v2|reconciliation-work-coalesced-wake-generation-v1|checkout-enrollment-v1",apply(database):void{database.exec(`
+    CREATE TABLE billing_operations(
+      id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 80),billing_account_id TEXT NOT NULL REFERENCES billing_accounts(id) ON DELETE CASCADE,
+      operation_kind TEXT NOT NULL CHECK(operation_kind IN ('checkout_session_create','subscription_cancel_at_period_end','subscription_reactivate')),
+      operation_id TEXT NOT NULL CHECK(length(operation_id) BETWEEN 1 AND 200),request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+      provider_kind TEXT NOT NULL CHECK(provider_kind IN ('stripe','mercadopago')),provider_idempotency_key TEXT NOT NULL CHECK(length(provider_idempotency_key) BETWEEN 1 AND 200),
+      status TEXT NOT NULL CHECK(status IN ('pending','request_started','succeeded','failed','uncertain')),request_started_at TEXT,provider_object_id TEXT CHECK(provider_object_id IS NULL OR length(provider_object_id) BETWEEN 1 AND 200),safe_result_json TEXT CHECK(safe_result_json IS NULL OR (json_valid(safe_result_json) AND length(safe_result_json)<=4096)),failure_code TEXT CHECK(failure_code IS NULL OR length(failure_code) BETWEEN 1 AND 100),attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count>=0),catalog_entry_id TEXT REFERENCES billing_catalog_entries(id) ON DELETE RESTRICT,success_target TEXT CHECK(success_target IS NULL OR length(success_target) BETWEEN 1 AND 2000),cancel_target TEXT CHECK(cancel_target IS NULL OR length(cancel_target) BETWEEN 1 AND 2000),target_subscription_id TEXT REFERENCES billing_subscriptions(id) ON DELETE RESTRICT,recovery_correlation_token TEXT UNIQUE CHECK(recovery_correlation_token IS NULL OR length(recovery_correlation_token) BETWEEN 1 AND 100),recovery_attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(recovery_attempt_count>=0),recovery_next_attempt_at TEXT,recovery_lease_token TEXT CHECK(recovery_lease_token IS NULL OR length(recovery_lease_token) BETWEEN 1 AND 200),recovery_lease_expires_at TEXT,recovery_safe_failure_code TEXT CHECK(recovery_safe_failure_code IS NULL OR length(recovery_safe_failure_code) BETWEEN 1 AND 100),version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,settled_at TEXT,
+      UNIQUE(billing_account_id,operation_kind,operation_id),CHECK((status='pending' AND request_started_at IS NULL AND settled_at IS NULL) OR (status IN ('request_started','uncertain') AND request_started_at IS NOT NULL AND settled_at IS NULL) OR (status IN ('succeeded','failed') AND request_started_at IS NOT NULL AND settled_at IS NOT NULL)),CHECK(status!='succeeded' OR provider_object_id IS NOT NULL)
+    );
+    CREATE INDEX idx_billing_operations_recovery ON billing_operations(status,recovery_next_attempt_at,request_started_at,id);
+    CREATE TABLE billing_provider_events(
+      id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 80),provider_kind TEXT NOT NULL CHECK(provider_kind IN ('stripe','mercadopago')),provider_event_id TEXT NOT NULL CHECK(length(provider_event_id) BETWEEN 1 AND 200),event_type TEXT NOT NULL CHECK(length(event_type) BETWEEN 1 AND 200),provider_object_id TEXT CHECK(provider_object_id IS NULL OR length(provider_object_id) BETWEEN 1 AND 200),provider_customer_id TEXT CHECK(provider_customer_id IS NULL OR length(provider_customer_id) BETWEEN 1 AND 200),provider_subscription_id TEXT CHECK(provider_subscription_id IS NULL OR length(provider_subscription_id) BETWEEN 1 AND 200),payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64 AND payload_digest NOT GLOB '*[^0-9a-f]*'),status TEXT NOT NULL CHECK(status IN ('received','processed','ignored','failed')),version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),received_at TEXT NOT NULL,processed_at TEXT,UNIQUE(provider_kind,provider_event_id)
+    );
+    CREATE TABLE billing_reconciliation_work(
+      id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 80),billing_account_id TEXT NOT NULL REFERENCES billing_accounts(id) ON DELETE CASCADE,provider_kind TEXT CHECK(provider_kind IS NULL OR provider_kind IN ('stripe','mercadopago')),reason TEXT NOT NULL CHECK(length(reason) BETWEEN 1 AND 100),provider_object_id TEXT CHECK(provider_object_id IS NULL OR length(provider_object_id) BETWEEN 1 AND 200),coalesce_key TEXT NOT NULL UNIQUE CHECK(length(coalesce_key) BETWEEN 1 AND 200),status TEXT NOT NULL CHECK(status IN ('pending','leased','succeeded','failed')),attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count>=0),lease_owner TEXT CHECK(lease_owner IS NULL OR length(lease_owner) BETWEEN 1 AND 100),lease_token TEXT CHECK(lease_token IS NULL OR length(lease_token) BETWEEN 1 AND 200),lease_expires_at TEXT,next_attempt_at TEXT NOT NULL,safe_failure_code TEXT CHECK(safe_failure_code IS NULL OR length(safe_failure_code) BETWEEN 1 AND 100),version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      wake_generation INTEGER NOT NULL DEFAULT 1 CHECK(wake_generation>0),
+      CHECK((status='leased')=(lease_owner IS NOT NULL AND lease_token IS NOT NULL AND lease_expires_at IS NOT NULL))
+    );
+    CREATE TABLE billing_checkout_enrollments(
+      id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 80),
+      billing_account_id TEXT NOT NULL REFERENCES billing_accounts(id) ON DELETE CASCADE,
+      catalog_entry_id TEXT NOT NULL REFERENCES billing_catalog_entries(id) ON DELETE RESTRICT,
+      checkout_operation_id TEXT NOT NULL UNIQUE REFERENCES billing_operations(id) ON DELETE RESTRICT,
+      provider_kind TEXT NOT NULL CHECK(provider_kind IN ('stripe','mercadopago')),
+      provider_checkout_object_id TEXT NOT NULL CHECK(length(provider_checkout_object_id) BETWEEN 1 AND 200),
+      provider_subscription_id TEXT CHECK(provider_subscription_id IS NULL OR length(provider_subscription_id) BETWEEN 1 AND 200),
+      provider_customer_id TEXT CHECK(provider_customer_id IS NULL OR length(provider_customer_id) BETWEEN 1 AND 200),
+      status TEXT NOT NULL CHECK(status IN ('pending','ready','consumed','conflict')),
+      version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      UNIQUE(provider_kind,provider_checkout_object_id),
+      UNIQUE(provider_kind,provider_subscription_id),
+      CHECK((status='pending' AND provider_subscription_id IS NULL) OR (status IN ('ready','consumed','conflict') AND provider_subscription_id IS NOT NULL))
+    );
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

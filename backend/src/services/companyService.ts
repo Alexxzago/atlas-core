@@ -1,10 +1,12 @@
 import type { CompanyRepositoryPort } from "../application/ports/repositories.js";
 import type { Company } from "../types/company.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
+import { assertBillingEntitlement, BillingEntitlementDeniedError, type BillingEntitlementPort } from "../billing/services/billingEntitlementService.js";
 import {
   CompanyNotFoundError,
   CompanyValidationError,
   DuplicateWebsiteError,
+  CompanyCapacityError,
   normalizeWebsiteUrl,
   parseCompanyId,
 } from "./companyValidation.js";
@@ -17,7 +19,7 @@ interface CompanyUpdate {
 }
 
 export class CompanyService {
-  public constructor(private readonly companies: CompanyRepositoryPort) {}
+  public constructor(private readonly companies: CompanyRepositoryPort, private readonly entitlements?: BillingEntitlementPort) {}
   public list(context: WorkspaceContext): Company[] { return this.companies.list(context); }
 
   public get(context: WorkspaceContext, companyIdValue: unknown): Company {
@@ -32,7 +34,13 @@ export class CompanyService {
     if (input.website !== null && this.companies.findByWebsite(context, input.website)) {
       throw new DuplicateWebsiteError("A company already uses this website.");
     }
+    try { this.assertCompanyCapacity(context); }
+    catch (error: unknown) { if (error instanceof BillingEntitlementDeniedError) throw new CompanyCapacityError(error.message); throw error; }
     return this.companies.create(context, input);
+  }
+
+  private assertCompanyCapacity(context: WorkspaceContext): void {
+    if (this.entitlements) assertBillingEntitlement(this.entitlements.mayCreateCompany(context.workspaceId));
   }
 
   public update(context: WorkspaceContext, companyIdValue: unknown, value: unknown): Company {
