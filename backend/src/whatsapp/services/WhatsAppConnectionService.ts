@@ -10,6 +10,7 @@ import type { KnowledgeRepositoryPort } from "../../knowledge/application/ports.
 import { reconstructWhatsAppConnection, whatsAppConnectionId, whatsAppConnectionStatus, type WhatsAppConnection, type WhatsAppConnectionId, type WhatsAppConnectionStatus } from "../domain/whatsappConnection.js";
 import { reconstructEncryptedWhatsAppConnectionCredentials, reconstructWhatsAppConnectionOperationalState, type WhatsAppConnectionOperationalState } from "../domain/whatsappConnectionOnboarding.js";
 import type { AssistantReadinessService } from "../../assistant/services/assistantReadinessService.js";
+import { assertBillingEntitlement, BillingEntitlementDeniedError, type BillingEntitlementPort } from "../../billing/services/billingEntitlementService.js";
 
 export class WhatsAppConnectionValidationError extends Error {}
 export class WhatsAppConnectionNotFoundError extends Error {}
@@ -22,7 +23,7 @@ export interface WhatsAppConnectionClock { now(): string; }
 
 export class WhatsAppConnectionService {
   private readonly executionPolicy = new AssistantProfileExecutionPolicy();
-  public constructor(private readonly companies: CompanyRepositoryPort, private readonly profiles: AssistantProfileRepositoryPort, private readonly connections: WhatsAppConnectionRepositoryPort, private readonly clock: WhatsAppConnectionClock, private readonly onboarding?: { credentials: WhatsAppConnectionCredentialRepositoryPort; states: WhatsAppConnectionOperationalStateRepositoryPort; cipher: WhatsAppCredentialCipherPort; resolver: WhatsAppCredentialResolverPort; validator: WhatsAppConnectionProviderValidationPort; knowledge: KnowledgeRepositoryPort }, private readonly readiness?: AssistantReadinessService) {}
+  public constructor(private readonly companies: CompanyRepositoryPort, private readonly profiles: AssistantProfileRepositoryPort, private readonly connections: WhatsAppConnectionRepositoryPort, private readonly clock: WhatsAppConnectionClock, private readonly onboarding?: { credentials: WhatsAppConnectionCredentialRepositoryPort; states: WhatsAppConnectionOperationalStateRepositoryPort; cipher: WhatsAppCredentialCipherPort; resolver: WhatsAppCredentialResolverPort; validator: WhatsAppConnectionProviderValidationPort; knowledge: KnowledgeRepositoryPort }, private readonly readiness?: AssistantReadinessService, private readonly entitlements?: BillingEntitlementPort) {}
   public create(context: WorkspaceContext, companyIdValue: unknown, value: unknown): WhatsAppConnection {
     const companyId = parseCompanyId(companyIdValue), input = createInput(value); this.company(context, companyId);
     const profile = this.profiles.findById(context, companyId, input.assistantProfileId);
@@ -45,7 +46,7 @@ export class WhatsAppConnectionService {
         const profile = this.profiles.findById(context, current.companyId, current.assistantProfileId);
         try { if (!profile) throw new AssistantProfilePolicyError(); this.executionPolicy.assert(profile); } catch { throw new WhatsAppConnectionProfileNotExecutableError("Assistant Profile is not executable."); }
 
-        if (!this.onboarding) return this.updateStoredStatus(context, current, input.status);
+        if (!this.onboarding) { if (current.status !== "active") this.assertCapacity(context); return this.updateStoredStatus(context, current, input.status); }
         throw new WhatsAppConnectionConflictError("Use the activation endpoint to activate a WhatsApp Connection.");
       }
 
@@ -146,7 +147,7 @@ export class WhatsAppConnectionService {
       const profile = this.profiles.findById(context, connection.companyId, connection.assistantProfileId);
       try { if (!profile) throw new AssistantProfilePolicyError(); this.executionPolicy.assert(profile); } catch { throw new WhatsAppConnectionProfileNotExecutableError("Assistant Profile is not executable."); }
     }
-    if (connection.status === "inactive") { try { const updated = this.connections.updateStatus(context, connection.companyId, connection.id, connection.updatedAt, "active", next(connection.updatedAt, this.clock.now())); if (!updated) this.changed(context, connection); } catch (error: unknown) { if (unique(error)) throw new WhatsAppConnectionConflictError("Company already has an active WhatsApp Connection."); throw error; } }
+    if (connection.status === "inactive") { this.assertCapacity(context); try { const updated = this.connections.updateStatus(context, connection.companyId, connection.id, connection.updatedAt, "active", next(connection.updatedAt, this.clock.now())); if (!updated) this.changed(context, connection); } catch (error: unknown) { if (unique(error)) throw new WhatsAppConnectionConflictError("Company already has an active WhatsApp Connection."); throw error; } }
     return this.status(context, connection.companyId, connection.id);
   }
   public deactivate(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): WhatsAppConnectionOperationalStatus {
@@ -186,6 +187,7 @@ export class WhatsAppConnectionService {
     const updated = this.connections.updateStatus(context, current.companyId, current.id, current.updatedAt, status, next(current.updatedAt, this.clock.now()));
     return updated ?? this.changed(context, current);
   }
+  private assertCapacity(context: WorkspaceContext): void { try { if (this.entitlements) assertBillingEntitlement(this.entitlements.mayActivateChannel(context.workspaceId)); } catch (error: unknown) { if (error instanceof BillingEntitlementDeniedError) throw new WhatsAppConnectionConflictError(error.message); throw error; } }
   private changed(context: WorkspaceContext, current: WhatsAppConnection): never { if (!this.connections.findById(context, current.companyId, current.id)) throw new WhatsAppConnectionNotFoundError("WhatsApp Connection was not found."); throw new WhatsAppConnectionConflictError("WhatsApp Connection changed. Try again."); }
   private company(context: WorkspaceContext, id: number): void { if (!this.companies.findById(context, id)) throw new WhatsAppConnectionNotFoundError("Company was not found."); }
   private requiredOnboarding() { if (!this.onboarding) throw new WhatsAppConnectionCredentialsNotConfiguredError("WhatsApp credential configuration is unavailable."); return this.onboarding; }

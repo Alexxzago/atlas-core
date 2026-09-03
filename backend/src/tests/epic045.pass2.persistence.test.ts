@@ -174,7 +174,7 @@ test("EPIC045 PASS2 preserves outbound rowids on 0062 upgrade and restart", () =
     const before = (db.prepare("SELECT rowid FROM outbound_deliveries").get() as { rowid: number }).rowid;
     runMigrations(db);
     assert.equal((db.prepare("SELECT rowid FROM outbound_deliveries").get() as { rowid: number }).rowid, before);
-    assert.equal((db.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as { id: number; name: string }).name, "0065_proactive_operation_state_compatibility");
+    assert.equal((db.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as { id: number; name: string }).name, "0068_billing_operations_provider_events_reconciliation");
     assert.equal((db.prepare("SELECT enabled,version FROM proactive_action_policies WHERE company_id=?").get(company.id) as { enabled: number; version: number }).version, 1);
     const next = new CompanyRepository(db).create(context, { name: "Upgrade next", website: "https://upgrade-next.test" });
     assert.equal((db.prepare("SELECT enabled,version FROM proactive_action_policies WHERE company_id=?").get(next.id) as { enabled: number; version: number }).version, 1);

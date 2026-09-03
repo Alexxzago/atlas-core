@@ -6,6 +6,7 @@ import {
   CompanyNotFoundError,
   CompanyValidationError,
   DuplicateWebsiteError,
+  CompanyCapacityError,
 } from "../services/companyValidation.js";
 
 export function createListCompaniesController(service: CompanyService, context: WorkspaceContext): RequestHandler {
@@ -68,6 +69,10 @@ export function respondToCompanyError(res: Response, error: unknown): void {
     return;
   }
   if (error instanceof DuplicateWebsiteError) {
+    res.status(409).json({ error: error.message });
+    return;
+  }
+  if (error instanceof CompanyCapacityError) {
     res.status(409).json({ error: error.message });
     return;
   }

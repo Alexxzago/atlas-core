@@ -4,12 +4,14 @@ import type { AssistantProfileRepositoryPort } from "../../assistant/application
 import { assistantProfileId } from "../../assistant/domain/assistantProfile.js";
 import { AssistantProfileExecutionPolicy, AssistantProfilePolicyError } from "../../assistant/domain/assistantProfilePolicies.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
+import { assertBillingEntitlement, BillingEntitlementDeniedError, type BillingEntitlementPort } from "../../billing/services/billingEntitlementService.js";
 import type { WebChatConnectionRepositoryPort } from "../application/ports.js";
 import { reconstructWebChatConnection, webChatConnectionId, webChatConnectionPublicId, webChatConnectionStatus, type WebChatConnection, type WebChatConnectionStatus } from "../domain/webChatConnection.js";
 
 export class WebChatConnectionValidationError extends Error {}
 export class WebChatConnectionNotFoundError extends Error {}
 export class WebChatConnectionProfileNotExecutableError extends Error {}
+export class WebChatConnectionCapacityError extends Error {}
 
 export interface WebChatConnectionClock { now(): string; }
 
@@ -21,6 +23,7 @@ export class WebChatConnectionService {
     private readonly profiles: AssistantProfileRepositoryPort,
     private readonly connections: WebChatConnectionRepositoryPort,
     private readonly clock: WebChatConnectionClock,
+    private readonly entitlements?: BillingEntitlementPort,
   ) {}
 
   public create(context: WorkspaceContext, companyIdValue: unknown, value: unknown): WebChatConnection {
@@ -29,6 +32,7 @@ export class WebChatConnectionService {
     const profile = this.profiles.findById(context, companyId, profileId);
     if (!profile) throw new WebChatConnectionNotFoundError("Assistant Profile was not found.");
     this.assertExecutable(profile);
+    this.assertCapacity(context);
     const now = this.clock.now();
     const created = this.connections.create(context, reconstructWebChatConnection({
       id: webChatConnectionId(`wcc_${randomUUID().replaceAll("-", "")}`),
@@ -59,6 +63,7 @@ export class WebChatConnectionService {
       this.assertExecutable(profile);
     }
     if (current.status === status) return current;
+    if (current.status !== "active" && status === "active") this.assertCapacity(context);
     const updated = this.connections.updateStatus(context, current.companyId, current.id, status, this.clock.now());
     if (!updated) throw new WebChatConnectionNotFoundError("Web Chat Connection was not found.");
     return updated;
@@ -94,6 +99,10 @@ export class WebChatConnectionService {
       if (error instanceof AssistantProfilePolicyError) throw new WebChatConnectionProfileNotExecutableError("Assistant Profile is not executable.");
       throw error;
     }
+  }
+  private assertCapacity(context: WorkspaceContext): void {
+    try { if (this.entitlements) assertBillingEntitlement(this.entitlements.mayActivateChannel(context.workspaceId)); }
+    catch (error: unknown) { if (error instanceof BillingEntitlementDeniedError) throw new WebChatConnectionCapacityError(error.message); throw error; }
   }
 }
 

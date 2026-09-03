@@ -1,6 +1,7 @@
 export class CompanyValidationError extends Error {}
 export class CompanyNotFoundError extends Error {}
 export class DuplicateWebsiteError extends Error {}
+export class CompanyCapacityError extends Error {}
 
 export function parseCompanyId(value: unknown): number {
   const companyId = typeof value === "number" ? value : Number(value);

@@ -21,10 +21,12 @@ import {
 } from "../domain/company.js";
 import type { CompanyDomainRepositoryPort, CompanyEvent, CompanyEventType } from "./ports.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
+import { type BillingEntitlementPort } from "../../billing/services/billingEntitlementService.js";
 
 export interface CompanyApplicationDependencies {
   readonly clock?: { now(): string };
   readonly eventIds?: { next(): string };
+  readonly entitlements?: BillingEntitlementPort;
 }
 
 interface CompanyCommand {
@@ -110,6 +112,7 @@ const unavailableReadinessPolicy: CompanyReadinessPolicy = {
 export class CompanyApplicationService {
   private readonly clock: { now(): string };
   private readonly eventIds: { next(): string };
+  private readonly entitlements: BillingEntitlementPort | undefined;
 
   public constructor(
     private readonly companies: CompanyDomainRepositoryPort,
@@ -118,10 +121,12 @@ export class CompanyApplicationService {
   ) {
     this.clock = dependencies.clock ?? { now: () => new Date().toISOString() };
     this.eventIds = dependencies.eventIds ?? { next: () => randomUUID() };
+    this.entitlements = dependencies.entitlements;
   }
 
   public createCompany(context: WorkspaceContext, command: CreateCompanyCommand): CompanyCommandResult {
     try {
+      if (!this.mayCreateCompany(context)) return { status: "commercial_limit_reached" };
       const company = createCompany({ id: command.id, workspaceId: context.workspaceId, identity: command.identity, ...(command.branding === undefined ? {} : { branding: command.branding }), createdAt: this.clock.now() });
       const persisted = this.companies.createWithEvents(context, company, this.events(company, command.actorId, [{ type: "CompanyCreated", payload: { companyId: company.id } }]));
       if (persisted.status === "created") return { status: "success", company: persisted.company };
@@ -133,6 +138,7 @@ export class CompanyApplicationService {
 
   public createOnboardingCompany(context: WorkspaceContext, command: CreateOnboardingCompanyCommand): CompanyCommandResult {
     try {
+      if (!this.mayCreateCompany(context)) return { status: "commercial_limit_reached" };
       const baseSlug = this.onboardingSlug(command.name);
       for (let suffix = 1; suffix <= 100; suffix += 1) {
         const slug = suffix === 1 ? baseSlug : `${baseSlug.slice(0, 80 - String(suffix).length - 1)}-${suffix}`;
@@ -250,6 +256,10 @@ export class CompanyApplicationService {
     } catch (error: unknown) {
       return this.failure(error);
     }
+  }
+
+  private mayCreateCompany(context: WorkspaceContext): boolean {
+    return this.entitlements?.mayCreateCompany(context.workspaceId).allowed ?? true;
   }
 
   private events(company: Company, actorId: string | null | undefined, definitions: readonly { readonly type: CompanyEventType; readonly payload: Readonly<Record<string, unknown>> }[]): readonly CompanyEvent[] {

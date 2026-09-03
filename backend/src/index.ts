@@ -1,5 +1,5 @@
 import { createApp } from "./app.js";
-import { createProductionAppRouters, proactiveDueWorkerService, proactiveSemanticRecoveryService, voiceDeferredSemanticRecoveryService, whatsAppInboundMediaRecoveryService, whatsAppOutboundDeliveryService, whatsAppWebhookService } from "./composition.js";
+import { billingReconciliationRuntime, createProductionAppRouters, proactiveDueWorkerService, proactiveSemanticRecoveryService, voiceDeferredSemanticRecoveryService, whatsAppInboundMediaRecoveryService, whatsAppOutboundDeliveryService, whatsAppWebhookService } from "./composition.js";
 import { database } from "./config/database.js";
 import { setShuttingDown } from "./routes/health.js";
 import { randomUUID } from "node:crypto";
@@ -9,6 +9,7 @@ if (!Number.isSafeInteger(portValue) || portValue < 1 || portValue > 65_535) thr
 
 const server = createApp(createProductionAppRouters(), { production: process.env.NODE_ENV === "production" }).listen(portValue, "0.0.0.0", () => {
   console.log(`Atlas listening on port ${portValue}`);
+  billingReconciliationRuntime.start();
 });
 const dispatchOwner = `whatsapp-dispatch-${randomUUID()}`;
 const mediaRecoveryOwner = `whatsapp-media-recovery-${randomUUID()}`;
@@ -54,13 +55,15 @@ function gracefulShutdown(reason: string, exitCode: number): void {
   }, timeoutMs);
   forceTimeout.unref();
 
-  server.close((err) => {
-    clearTimeout(forceTimeout);
+  server.close(async (err) => {
     if (err) {
       console.error("Error during HTTP server shutdown:", err);
     } else {
       console.log("HTTP server closed successfully.");
     }
+
+    await billingReconciliationRuntime.stop();
+    clearTimeout(forceTimeout);
 
     try {
       database.close();

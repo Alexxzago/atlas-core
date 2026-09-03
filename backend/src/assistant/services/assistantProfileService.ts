@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Clock } from "../../identity/application/ports.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
+import { assertBillingEntitlement, BillingEntitlementDeniedError, type BillingEntitlementPort } from "../../billing/services/billingEntitlementService.js";
 import type { AssistantProfileRepositoryPort } from "../application/ports.js";
 import {
   assistantLanguage,
@@ -38,7 +39,7 @@ export class AssistantProfileService {
   private readonly readyPolicy = new AssistantProfileReadyPolicy();
   private readonly lifecyclePolicy = new AssistantProfileLifecyclePolicy();
 
-  public constructor(private readonly profiles: AssistantProfileRepositoryPort, private readonly clock: Clock) {}
+  public constructor(private readonly profiles: AssistantProfileRepositoryPort, private readonly clock: Clock, private readonly entitlements?: BillingEntitlementPort) {}
 
   public list(context: WorkspaceContext, companyIdValue: unknown): AssistantProfile[] {
     const result = this.profiles.listActive(context, parseCompanyId(companyIdValue));
@@ -76,6 +77,7 @@ export class AssistantProfileService {
       updatedAt: now,
       archivedAt: null,
     });
+    this.assertCapacity(context);
     const result = this.profiles.create(context, companyId, profile);
     if (result.status === "company_not_found") throw new AssistantProfileNotFoundError("Company was not found.");
     if (result.status === "name_conflict") throw new AssistantProfileConflictError("An Assistant Profile already uses this name.");
@@ -105,7 +107,9 @@ export class AssistantProfileService {
     try { target = assistantProfileStatus(requiredString(targetValue, "Target status")); }
     catch { throw new AssistantProfileValidationError("Target status is invalid."); }
     try {
-      return this.persist(context, current.companyId, this.lifecyclePolicy.transition(current, target, this.clock.now()));
+      const updated = this.lifecyclePolicy.transition(current, target, this.clock.now());
+      if (current.status === "archived" && updated.status !== "archived") this.assertCapacity(context);
+      return this.persist(context, current.companyId, updated);
     } catch (error: unknown) {
       if (error instanceof AssistantProfilePolicyError) throw new AssistantProfileConflictError(error.message);
       throw error;
@@ -117,6 +121,11 @@ export class AssistantProfileService {
     if (result.status === "not_found") throw new AssistantProfileNotFoundError("Assistant Profile was not found.");
     if (result.status === "name_conflict") throw new AssistantProfileConflictError("An Assistant Profile already uses this name.");
     return result.profile;
+  }
+
+  private assertCapacity(context: WorkspaceContext): void {
+    try { if (this.entitlements) assertBillingEntitlement(this.entitlements.mayCreateAssistantProfile(context.workspaceId)); }
+    catch (error: unknown) { if (error instanceof BillingEntitlementDeniedError) throw new AssistantProfileConflictError(error.message); throw error; }
   }
 }
 

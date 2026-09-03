@@ -1,0 +1,76 @@
+import { randomUUID } from "node:crypto";
+import type { BillingReconciliationWorker } from "./billingReconciliationWorker.js";
+import type { BillingOperationRecoveryWorker } from "./billingOperationRecoveryWorker.js";
+
+const defaultIntervalMilliseconds = 5_000;
+const minimumIntervalMilliseconds = 1_000;
+const maximumIntervalMilliseconds = 60_000;
+const defaultBatchSize = 25;
+
+export interface BillingReconciliationRuntimeConfiguration {
+  readonly intervalMilliseconds: number;
+  readonly batchSize: number;
+}
+
+export interface BillingReconciliationRuntimeDependencies {
+  readonly schedule?: (callback: () => void, milliseconds: number) => { unref(): void };
+  readonly clear?: (timer: { unref(): void }) => void;
+  readonly reportError?: (message: string) => void;
+}
+
+type Timer = { unref(): void };
+
+export function billingReconciliationRuntimeConfiguration(environment: NodeJS.ProcessEnv = process.env): BillingReconciliationRuntimeConfiguration {
+  return Object.freeze({
+    intervalMilliseconds: boundedInteger(environment.BILLING_RECONCILIATION_INTERVAL_MS, defaultIntervalMilliseconds, minimumIntervalMilliseconds, maximumIntervalMilliseconds, "BILLING_RECONCILIATION_INTERVAL_MS"),
+    batchSize: boundedInteger(environment.BILLING_RECONCILIATION_BATCH_SIZE, defaultBatchSize, 1, defaultBatchSize, "BILLING_RECONCILIATION_BATCH_SIZE"),
+  });
+}
+
+/** Wakes durable reconciliation work without making process scheduling authoritative. */
+export class BillingReconciliationRuntime {
+  private timer: Timer | null = null;
+  private running: Promise<void> | null = null;
+  private started = false;
+  private readonly ownerPrefix = `billing-reconciliation-runtime-${randomUUID()}`;
+  private readonly schedule: (callback: () => void, milliseconds: number) => Timer;
+  private readonly clear: (timer: Timer) => void;
+  private readonly reportError: (message: string) => void;
+
+  public constructor(private readonly worker: BillingReconciliationWorker, private readonly configuration: BillingReconciliationRuntimeConfiguration, dependencies: BillingReconciliationRuntimeDependencies = {}, private readonly operationRecovery:BillingOperationRecoveryWorker|null=null) {
+    this.schedule = dependencies.schedule ?? ((callback, milliseconds) => setInterval(callback, milliseconds));
+    this.clear = dependencies.clear ?? ((timer) => clearInterval(timer as ReturnType<typeof setInterval>));
+    this.reportError = dependencies.reportError ?? ((message) => console.error(message));
+  }
+
+  public start(): void {
+    if (this.started) return;
+    this.started = true;
+    this.timer = this.schedule(() => { this.run(); }, this.configuration.intervalMilliseconds);
+    this.timer.unref();
+    this.run();
+  }
+
+  public async stop(): Promise<void> {
+    if (!this.started && !this.running) return;
+    this.started = false;
+    if (this.timer) { this.clear(this.timer); this.timer = null; }
+    await this.running;
+  }
+
+  private run(): void {
+    if (!this.started || this.running) return;
+    const cycle = (this.operationRecovery ? this.operationRecovery.runBatch(this.configuration.batchSize, `${this.ownerPrefix}-operations`).then(()=>this.worker.runBatch(this.configuration.batchSize, this.ownerPrefix)) : this.worker.runBatch(this.configuration.batchSize, this.ownerPrefix))
+      .then(() => undefined)
+      .catch(() => { this.reportError("Billing reconciliation cycle failed."); })
+      .finally(() => { if (this.running === cycle) this.running = null; });
+    this.running = cycle;
+  }
+}
+
+function boundedInteger(value: string | undefined, fallback: number, minimum: number, maximum: number, name: string): number {
+  if (value === undefined || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) throw new Error(`${name} must be an integer between ${minimum} and ${maximum}.`);
+  return parsed;
+}

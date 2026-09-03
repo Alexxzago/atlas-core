@@ -1,7 +1,7 @@
 import express, { type Router } from "express";
 import healthRouter from "./routes/health.js";
 
-export interface AppRouters { readonly authorizedCompaniesRouter: Router; readonly chatRouter: Router; readonly companiesRouter: Router; readonly identityRouter: Router; readonly knowledgeRouter: Router; readonly publicWebChatRouter: Router; readonly scrapeRouter: Router; readonly whatsAppWebhookRouter?: Router; readonly workspacesRouter: Router; readonly platformAdminRouter?: Router; }
+export interface AppRouters { readonly authorizedCompaniesRouter: Router; readonly billingRouter?: Router; readonly chatRouter: Router; readonly companiesRouter: Router; readonly identityRouter: Router; readonly knowledgeRouter: Router; readonly publicWebChatRouter: Router; readonly scrapeRouter: Router; readonly whatsAppWebhookRouter?: Router; readonly billingWebhookRouter?: Router; readonly workspacesRouter: Router; readonly platformAdminRouter?: Router; }
 export interface AppOptions { readonly production?: boolean; readonly trustedLocalMode?: boolean; }
 
 function operationalPath(url: string): boolean { return /^\/workspaces\/[^/]+\/companies\/[^/]+\/assistant\/executions\/?(?:\?.*)?$/i.test(url); }
@@ -11,17 +11,19 @@ export function createApp(routers: AppRouters, options: AppOptions = {}): expres
   const app = express();
   if (options.production) app.set("trust proxy", 1);
   app.set("etag", false);
-  app.use(express.json({ type: (req) => !(req.method === "POST" && (operationalPath(req.url ?? "") || publicMessagePath(req.url ?? "") || /^\/webhooks\/whatsapp\/?$/i.test(req.url ?? ""))) }));
+  app.use(express.json({ type: (req) => !(req.method === "POST" && (operationalPath(req.url ?? "") || publicMessagePath(req.url ?? "") || /^\/webhooks\/(whatsapp|billing\/(stripe|mercadopago))\/?$/i.test(req.url ?? ""))) }));
   app.get("/", (_req, res) => { res.send("Atlas Core is running."); });
   app.use(healthRouter);
   app.use(routers.scrapeRouter);
   if (routers.whatsAppWebhookRouter) app.use("/webhooks", routers.whatsAppWebhookRouter);
+  if (routers.billingWebhookRouter) app.use("/webhooks", routers.billingWebhookRouter);
   app.use("/public/web-chat", routers.publicWebChatRouter);
   const trustedLocalMode = options.trustedLocalMode ?? (!Boolean(options.production) && process.env.ATLAS_TRUSTED_LOCAL_MODE === "true");
   if (trustedLocalMode) { app.use(routers.knowledgeRouter); app.use(routers.chatRouter); app.use("/companies", routers.companiesRouter); }
   app.use("/identity", routers.identityRouter);
   if (routers.platformAdminRouter) app.use("/admin", routers.platformAdminRouter);
   app.use("/workspaces", routers.workspacesRouter);
+  if (routers.billingRouter) app.use("/workspaces", routers.billingRouter);
   app.use("/workspaces", routers.authorizedCompaniesRouter);
   app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction): void => {
     if (typeof error === "object" && error !== null && "type" in error && (error as { type?: unknown }).type === "entity.parse.failed") { res.status(400).json({ error: { code: "validation_failed", message: "Request body must be valid JSON." } }); return; }
