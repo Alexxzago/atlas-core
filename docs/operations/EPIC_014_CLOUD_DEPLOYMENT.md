@@ -51,9 +51,9 @@ The import includes `schema_migrations`, tenant records, Knowledge versions/publ
 
 Render free services can sleep after inactivity and their local filesystem is ephemeral. Atlas production data is therefore only in Turso. The first request after sleep can be slow.
 
-## Media Durability Blocker
+## Optional Media Durability
 
-Production media uses private S3-compatible object storage. Set `ATLAS_MEDIA_STORAGE_PROVIDER=s3`, `ATLAS_S3_ENDPOINT` to the account-specific Cloudflare R2 S3 endpoint, `ATLAS_S3_REGION=auto`, `ATLAS_S3_BUCKET`, `ATLAS_S3_ACCESS_KEY_ID`, and `ATLAS_S3_SECRET_ACCESS_KEY` in Render. `ATLAS_MEDIA_ROOT` is not used in production. Do not configure a filesystem path, public bucket, public object URLs, or Render Persistent Disk as a substitute. Atlas retains media metadata and authorization in Turso; R2 holds bytes only.
+Production media is unavailable unless durable S3-compatible storage is explicitly configured. When none of `ATLAS_MEDIA_STORAGE_PROVIDER`, `ATLAS_S3_ENDPOINT`, `ATLAS_S3_REGION`, `ATLAS_S3_BUCKET`, `ATLAS_S3_ACCESS_KEY_ID`, or `ATLAS_S3_SECRET_ACCESS_KEY` are set, startup and readiness remain healthy but media operations fail safely as unavailable. When any one is set, all must be valid: use `ATLAS_MEDIA_STORAGE_PROVIDER=s3`, `ATLAS_S3_ENDPOINT` with the account-specific Cloudflare R2 S3 endpoint, `ATLAS_S3_REGION=auto`, `ATLAS_S3_BUCKET`, `ATLAS_S3_ACCESS_KEY_ID`, and `ATLAS_S3_SECRET_ACCESS_KEY` in Render. `ATLAS_MEDIA_ROOT` is not used in production. Do not configure a filesystem path, public bucket, public object URLs, or Render Persistent Disk as a substitute. Atlas retains media metadata and authorization in Turso; R2 holds bytes only.
 
 ## Vercel
 

@@ -20,7 +20,7 @@ npm test
 
 ## Environment Checklist
 
-Render-managed values contain secrets; `render.yaml` contains names only. Core service startup requires production libSQL/Turso, verification origin, bootstrap secret, and private live-media S3 configuration. Configure email, WhatsApp, integration, Meta, billing, and AI values only when their capabilities are enabled.
+Render-managed values contain secrets; `render.yaml` contains names only. Core service startup requires production libSQL/Turso, verification origin, and bootstrap secret. Durable media is unavailable when all live-media S3 variables are absent; when any live-media S3 variable is configured, the complete private S3 configuration is required. Configure email, WhatsApp, integration, Meta, billing, and AI values only when their capabilities are enabled.
 
 DR maintenance additionally requires private backup and restore-target S3 configurations, Turso organization/platform/database/group values, and bounded retention values. Live, backup, and restore-target buckets must be distinct. Voice remains unavailable and requires no production voice provider configuration.
 

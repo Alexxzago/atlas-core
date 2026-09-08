@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { runMigrations } from "./migrations.js";
 import { createLibsqlDatabase, type SqlDatabase } from "./sqlDatabase.js";
 import { SynchronousLibsqlDatabase, type SynchronousDatabase } from "./synchronousDatabase.js";
-import { productionDatabaseConfiguration, type ProductionDatabaseConfiguration } from "./productionConfiguration.js";
+import { productionConfiguration, productionDatabaseConfiguration, type ProductionConfiguration, type ProductionDatabaseConfiguration } from "./productionConfiguration.js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const databasePath = resolve(projectRoot, "database/atlas.sqlite");
@@ -30,13 +30,22 @@ export async function createProductionDatabase(environment: NodeJS.ProcessEnv = 
   return createLibsqlDatabase(configuration.url, configuration.authToken);
 }
 
-// The synchronous export is intentionally test/development-only. Production composition must use createProductionDatabase.
-function createRuntimeDatabase(): SynchronousDatabase {
-  if (process.env.NODE_ENV !== "production") return createDatabase(databasePath);
-  const configuration = productionDatabaseConfiguration();
-  const instance = new SynchronousLibsqlDatabase(configuration.url, configuration.authToken);
-  try { runMigrations(instance); return instance; }
+export interface ProductionRuntimeDatabase { readonly database: SynchronousDatabase; readonly configuration: ProductionConfiguration; }
+
+/** Validates every production dependency before opening the runtime database or applying migrations. */
+export function createProductionRuntimeDatabase(environment: NodeJS.ProcessEnv, factory: (configuration: ProductionDatabaseConfiguration) => SynchronousDatabase): ProductionRuntimeDatabase {
+  const configuration = productionConfiguration(environment);
+  const instance = factory(configuration.database);
+  try { runMigrations(instance); return Object.freeze({ database: instance, configuration }); }
   catch (error: unknown) { instance.close(); throw error; }
 }
 
-export const database = createRuntimeDatabase();
+function createRuntimeDatabase(): { readonly database: SynchronousDatabase; readonly configuration: ProductionConfiguration | null } {
+  if (process.env.NODE_ENV !== "production") return Object.freeze({ database: createDatabase(databasePath), configuration: null });
+  const runtime = createProductionRuntimeDatabase(process.env, (configuration) => new SynchronousLibsqlDatabase(configuration.url, configuration.authToken));
+  return Object.freeze(runtime);
+}
+
+const runtime = createRuntimeDatabase();
+export const database = runtime.database;
+export const runtimeProductionConfiguration = runtime.configuration;
