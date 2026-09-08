@@ -13,7 +13,7 @@ import { createKnowledgeController } from "./controllers/knowledgeController.js"
 import { createOnboardingController } from "./controllers/onboarding.js";
 import { createScrapeController } from "./controllers/scrapeController.js";
 import { createAuthenticationControllers, createPasswordResetControllers, createPlatformBootstrapControllers, createRegistrationController, createResendVerificationController, createVerifyEmailController } from "./controllers/identityController.js";
-import { database } from "./config/database.js";
+import { database, runtimeProductionConfiguration } from "./config/database.js";
 import { DevelopmentVerificationDelivery, UnavailableVerificationDelivery } from "./identity/infrastructure/developmentVerificationDelivery.js";
 import { ScryptPasswordProvider, SecureRandomProvider, Sha256CredentialEnrollmentHashProvider, Sha256SessionIdentifierProvider, Sha256VerificationHashProvider } from "./identity/infrastructure/securityProviders.js";
 import { SystemClock } from "./identity/infrastructure/systemClock.js";
@@ -178,6 +178,7 @@ import { BookingQueryService } from "./scheduling/services/bookingQueryService.j
 import { schedulingBookingToolDefinitions } from "./scheduling/application/bookingToolDefinitions.js";
 import { createLocalMediaCore, createMediaCore } from "./media/composition.js";
 import { S3MediaStorage } from "./media/infrastructure/s3MediaStorage.js";
+import { UnavailableMediaStorage } from "./media/infrastructure/unavailableMediaStorage.js";
 import { SafeConversationAttachmentService } from "./media/services/safeConversationAttachmentService.js";
 import { SafeConversationAttachmentRepository } from "./repositories/safeConversationAttachmentRepository.js";
 import { WhatsAppInboundMediaRecoveryService } from "./whatsapp/services/WhatsAppInboundMediaRecoveryService.js";
@@ -214,7 +215,6 @@ import { createBillingWebhookRouter } from "./routes/billingWebhook.js";
 import { BillingApplicationService } from "./billing/application/billingApplicationService.js";
 import { createBillingControllers } from "./controllers/billingController.js";
 import { createBillingRouter } from "./routes/billing.js";
-import { productionConfiguration } from "./config/productionConfiguration.js";
 
 import { MetaEmbeddedSignupAttemptRepository } from "./repositories/metaEmbeddedSignupAttemptRepository.js";
 import { HmacMetaEmbeddedSignupDigestProvider, MetaEmbeddedSignupAttemptService, metaEmbeddedSignupStateHmacKeyFromEnvironment } from "./whatsapp/application/metaEmbeddedSignupAttemptService.js";
@@ -227,7 +227,7 @@ import { createMetaEmbeddedSignupControllers } from "./controllers/metaEmbeddedS
 import { CompanyOperationalStatusService } from "./company/services/companyOperationalStatusService.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const runtimeConfiguration = process.env.NODE_ENV === "production" ? productionConfiguration() : null;
+const runtimeConfiguration = runtimeProductionConfiguration;
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
 const agent = new AtlasAgent(geminiProvider);
 const chatService = new ChatService(companyRepository, knowledgeRepository, agent);
@@ -249,7 +249,7 @@ export const billingOperationRecoveryWorker = new BillingOperationRecoveryWorker
 export const billingReconciliationRuntime = new BillingReconciliationRuntime(billingReconciliationWorker, billingReconciliationRuntimeConfiguration(),{},billingOperationRecoveryWorker);
 const production=process.env.NODE_ENV==="production";
 export const mediaCore = runtimeConfiguration
-  ? createMediaCore(database, new S3MediaStorage(runtimeConfiguration.mediaStorage), identityClock)
+  ? createMediaCore(database, runtimeConfiguration.mediaStorage ? new S3MediaStorage(runtimeConfiguration.mediaStorage) : new UnavailableMediaStorage(), identityClock)
   : createLocalMediaCore(database, resolve(repositoryRoot, "media"), identityClock);
 const deliveryMode = runtimeConfiguration?.emailDeliveryMode ?? emailDeliveryMode(process.env.EMAIL_PROVIDER ?? process.env.ATLAS_VERIFICATION_DELIVERY, production);
 const providerDelivery = deliveryMode === "smtp"

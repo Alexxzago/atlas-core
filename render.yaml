@@ -21,18 +21,6 @@ services:
         value: resend
       - key: ATLAS_BOOTSTRAP_SECRET
         sync: false
-      - key: ATLAS_MEDIA_STORAGE_PROVIDER
-        value: s3
-      - key: ATLAS_S3_ENDPOINT
-        sync: false
-      - key: ATLAS_S3_REGION
-        value: auto
-      - key: ATLAS_S3_BUCKET
-        sync: false
-      - key: ATLAS_S3_ACCESS_KEY_ID
-        sync: false
-      - key: ATLAS_S3_SECRET_ACCESS_KEY
-        sync: false
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT

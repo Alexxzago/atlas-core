@@ -14,7 +14,7 @@ export const productionConfigurationInventory: readonly ProductionConfigurationI
   { name: "NODE_ENV, DATABASE_PROVIDER, TURSO_DATABASE_URL, TURSO_AUTH_TOKEN", classification: "CORE_REQUIRED" },
   { name: "ATLAS_VERIFICATION_ORIGIN", classification: "CORE_REQUIRED" },
   { name: "ATLAS_BOOTSTRAP_SECRET", classification: "CORE_REQUIRED" },
-  { name: "ATLAS_MEDIA_STORAGE_PROVIDER, ATLAS_S3_ENDPOINT, ATLAS_S3_REGION, ATLAS_S3_BUCKET, ATLAS_S3_ACCESS_KEY_ID, ATLAS_S3_SECRET_ACCESS_KEY", classification: "CORE_REQUIRED" },
+  { name: "ATLAS_MEDIA_STORAGE_PROVIDER, ATLAS_S3_ENDPOINT, ATLAS_S3_REGION, ATLAS_S3_BUCKET, ATLAS_S3_ACCESS_KEY_ID, ATLAS_S3_SECRET_ACCESS_KEY", classification: "REQUIRED_WHEN_ENABLED", enabledBy: "any durable media S3 variable is configured" },
   { name: "EMAIL_PROVIDER, ATLAS_VERIFICATION_DELIVERY, SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASSWORD, SMTP_FROM, SMTP_REPLY_TO, RESEND_API_KEY, RESEND_FROM, RESEND_REPLY_TO, GOOGLE_APPS_SCRIPT_URL, GOOGLE_APPS_SCRIPT_TOKEN, EMAIL_TIMEOUT", classification: "REQUIRED_WHEN_ENABLED", enabledBy: "selected email delivery mode" },
   { name: "WHATSAPP_PLATFORM_ENCRYPTION_KEY, WHATSAPP_PLATFORM_ENCRYPTION_ACTIVE_KEY_ID, WHATSAPP_PLATFORM_ENCRYPTION_ACTIVE_KEY, WHATSAPP_PLATFORM_ENCRYPTION_PREVIOUS_KEY_ID, WHATSAPP_PLATFORM_ENCRYPTION_PREVIOUS_KEY, WHATSAPP_APP_SECRET, WHATSAPP_WEBHOOK_VERIFY_TOKEN, WHATSAPP_ACCESS_TOKEN, WHATSAPP_GRAPH_API_VERSION", classification: "REQUIRED_WHEN_ENABLED", enabledBy: "WhatsApp credentials or webhook are configured" },
   { name: "ATLAS_INTEGRATION_SECRET_KEY, ATLAS_INTEGRATION_SECRET_ACTIVE_KEY_ID, ATLAS_INTEGRATION_SECRET_ACTIVE_KEY, ATLAS_INTEGRATION_SECRET_PREVIOUS_KEY_ID, ATLAS_INTEGRATION_SECRET_PREVIOUS_KEY, GOOGLE_CALENDAR_OAUTH_CLIENT_ID, GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET", classification: "REQUIRED_WHEN_ENABLED", enabledBy: "integration encryption or Google Calendar is configured" },
@@ -27,7 +27,7 @@ export const productionConfigurationInventory: readonly ProductionConfigurationI
 ]);
 
 export interface ProductionDatabaseConfiguration { readonly provider: "libsql"; readonly url: string; readonly authToken: string; }
-export interface ProductionConfiguration { readonly database: ProductionDatabaseConfiguration; readonly verificationOrigin: string; readonly mediaStorage: S3MediaStorageConfiguration; readonly emailDeliveryMode: EmailDeliveryMode; readonly whatsAppWebhookEnabled: boolean; }
+export interface ProductionConfiguration { readonly database: ProductionDatabaseConfiguration; readonly verificationOrigin: string; readonly mediaStorage: S3MediaStorageConfiguration | null; readonly mediaCapability: "available" | "unavailable"; readonly emailDeliveryMode: EmailDeliveryMode; readonly whatsAppWebhookEnabled: boolean; }
 export class ProductionConfigurationError extends Error {}
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
@@ -40,6 +40,12 @@ function httpsOrigin(environment: NodeJS.ProcessEnv, name: string): string {
   const value = required(environment, name);
   try { const url = new URL(value); if (url.protocol !== "https:" || url.origin !== value) throw new Error(); return url.origin; }
   catch { throw new ProductionConfigurationError(`Production configuration is invalid for ${name}.`); }
+}
+
+const mediaConfigurationNames = Object.freeze(["ATLAS_MEDIA_STORAGE_PROVIDER", "ATLAS_S3_ENDPOINT", "ATLAS_S3_REGION", "ATLAS_S3_BUCKET", "ATLAS_S3_ACCESS_KEY_ID", "ATLAS_S3_SECRET_ACCESS_KEY"] as const);
+
+function mediaConfigurationEnabled(environment: NodeJS.ProcessEnv): boolean {
+  return mediaConfigurationNames.some((name) => environment[name] !== undefined);
 }
 
 export function productionDatabaseConfiguration(environment: NodeJS.ProcessEnv = process.env): ProductionDatabaseConfiguration {
@@ -72,13 +78,15 @@ function validateOptionalConfiguration(environment: NodeJS.ProcessEnv, emailMode
 export function productionConfiguration(environment: NodeJS.ProcessEnv = process.env): ProductionConfiguration {
   const database = productionDatabaseConfiguration(environment);
   const verificationOrigin = httpsOrigin(environment, "ATLAS_VERIFICATION_ORIGIN");
-  let mediaStorage: S3MediaStorageConfiguration;
-  try { mediaStorage = s3MediaStorageConfiguration(environment); }
-  catch { throw new ProductionConfigurationError("Production configuration is invalid for durable media storage."); }
+  let mediaStorage: S3MediaStorageConfiguration | null = null;
+  if (mediaConfigurationEnabled(environment)) {
+    try { mediaStorage = s3MediaStorageConfiguration(environment); }
+    catch { throw new ProductionConfigurationError("Production configuration is invalid for durable media storage."); }
+  }
   if ((environment.ATLAS_BOOTSTRAP_SECRET?.length ?? 0) < 32) throw new ProductionConfigurationError("Production configuration is invalid for ATLAS_BOOTSTRAP_SECRET.");
   let mode: EmailDeliveryMode;
   try { mode = emailDeliveryMode(environment.EMAIL_PROVIDER ?? environment.ATLAS_VERIFICATION_DELIVERY, true, environment); }
   catch { throw new ProductionConfigurationError("Production configuration is invalid for email delivery."); }
   validateOptionalConfiguration(environment, mode);
-  return Object.freeze({ database, verificationOrigin, mediaStorage, emailDeliveryMode: mode, whatsAppWebhookEnabled: Boolean(environment.WHATSAPP_APP_SECRET?.trim() && environment.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim()) });
+  return Object.freeze({ database, verificationOrigin, mediaStorage, mediaCapability: mediaStorage ? "available" : "unavailable", emailDeliveryMode: mode, whatsAppWebhookEnabled: Boolean(environment.WHATSAPP_APP_SECRET?.trim() && environment.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim()) });
 }
