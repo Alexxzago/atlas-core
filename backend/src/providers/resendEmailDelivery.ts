@@ -1,6 +1,7 @@
 import type { CredentialEnrollmentDeliveryPort, EmailVerificationDeliveryPort, PasswordResetDeliveryPort, VerificationDeliveryOutcome } from "../identity/application/ports.js";
 import type { InvitationDeliveryPort } from "../workspace/application/ports.js";
 import { emailContent, emailDeliveryPurpose, type EmailDeliveryPurpose, type EmailDeliveryRequest } from "./emailDeliveryContent.js";
+import { operationalLogger } from "../observability/operationalLogger.js";
 
 export interface ResendConfiguration { readonly apiKey: string; readonly from: string; readonly replyTo: string | null; }
 interface ResendFailureLogEntry { readonly event: "email_delivery_failed"; readonly provider: "resend"; readonly purpose: EmailDeliveryPurpose; readonly outcome: Exclude<VerificationDeliveryOutcome, "accepted">; readonly httpStatus: number | null; readonly providerCode: string | null; readonly timestamp: string; }
@@ -19,7 +20,7 @@ function classifyNetwork(error: unknown): Exclude<VerificationDeliveryOutcome, "
 async function providerCode(response: Response): Promise<string | null> { try { const body = await response.json() as { name?: unknown }; return safeCode(body.name); } catch { return null; } }
 
 export class ResendEmailDelivery implements EmailVerificationDeliveryPort, CredentialEnrollmentDeliveryPort, PasswordResetDeliveryPort, InvitationDeliveryPort {
-  public constructor(private readonly configuration: ResendConfiguration, private readonly fetcher: typeof fetch = fetch, private readonly logFailure: ResendFailureLogger = (entry) => console.error(JSON.stringify(entry))) {}
+  public constructor(private readonly configuration: ResendConfiguration, private readonly fetcher: typeof fetch = fetch, private readonly logFailure: ResendFailureLogger = (entry) => operationalLogger.warn("provider_call_failed", { provider: "resend", operation: "email_delivery", outcome: entry.outcome, ...(entry.httpStatus === null ? {} : { httpStatus: entry.httpStatus }), safeErrorCategory: entry.outcome === "temporary_failure" ? "provider_unavailable" : "provider_rejected" })) {}
   public async deliver(request: EmailDeliveryRequest): Promise<VerificationDeliveryOutcome> {
     const content = emailContent(request);
     try {

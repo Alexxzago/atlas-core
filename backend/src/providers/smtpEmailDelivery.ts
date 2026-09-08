@@ -2,6 +2,7 @@ import nodemailer, { type Transporter } from "nodemailer";
 import type { CredentialEnrollmentDeliveryPort, CredentialEnrollmentDeliveryRequest, EmailVerificationDeliveryPort, EmailVerificationDeliveryRequest, PasswordResetDeliveryPort, PasswordResetDeliveryRequest, VerificationDeliveryOutcome } from "../identity/application/ports.js";
 import type { InvitationDeliveryPort, InvitationDeliveryRequest } from "../workspace/application/ports.js";
 import { emailContent, emailDeliveryPurpose, type EmailDeliveryPurpose, type EmailDeliveryRequest } from "./emailDeliveryContent.js";
+import { operationalLogger } from "../observability/operationalLogger.js";
 
 export interface SmtpConfiguration {
   readonly host: string;
@@ -51,7 +52,7 @@ function safeResponseCode(value: unknown): number | null { return typeof value =
 export class SmtpEmailDelivery implements EmailVerificationDeliveryPort, CredentialEnrollmentDeliveryPort, PasswordResetDeliveryPort, InvitationDeliveryPort {
   private readonly transport: SmtpTransport;
 
-  public constructor(private readonly configuration: SmtpConfiguration, transport?: SmtpTransport, private readonly logFailure: SmtpFailureLogger = (entry) => console.error(JSON.stringify(entry))) {
+  public constructor(private readonly configuration: SmtpConfiguration, transport?: SmtpTransport, private readonly logFailure: SmtpFailureLogger = (entry) => operationalLogger.error("provider_call_failed", { provider: "smtp", operation: entry.purpose, outcome: entry.outcome, safeErrorCategory: entry.errorCode ?? "internal_failure", ...(entry.responseCode === null ? {} : { httpStatus: entry.responseCode }) })) {
     this.transport = transport ?? nodemailer.createTransport({
       host: configuration.host, port: configuration.port, secure: configuration.secure,
       auth: { user: configuration.user, pass: configuration.password }, connectionTimeout: 10_000, socketTimeout: 20_000,

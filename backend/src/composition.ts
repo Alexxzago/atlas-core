@@ -62,7 +62,7 @@ import{DevelopmentInvitationDelivery,SecureInvitationProofProvider,UnavailableIn
 import{WorkspaceAdministrationService}from"./workspace/services/workspaceAdministrationService.js";
 import{AuthorizationService}from"./workspace/services/authorizationService.js";
 import{WorkspaceResolver}from"./workspace/services/workspaceResolver.js";
-import{configureProductionProactiveActionControllers,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
+import{configureProductionCompanyOperationalStatusService,configureProductionProactiveActionControllers,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
 import{UserRepository}from"./repositories/userRepository.js";
 import{AssistantProfileRepository}from"./repositories/assistantProfileRepository.js";
 import{AssistantProfileService}from"./assistant/services/assistantProfileService.js";
@@ -78,7 +78,9 @@ import { SecurePublicUrlProvider } from "./knowledge/infrastructure/publicUrlPro
 import { WorkerPdfTextExtractor } from "./knowledge/infrastructure/pdfTextExtractor.js";
 import { createCompanyKnowledgeControllers } from "./controllers/companyKnowledgeController.js";
 import { createOperationalAssistantExecutionController } from "./controllers/operationalAssistantExecutionController.js";
-import { InMemoryOperationalExecutionBudget } from "./assistant/application/operationalExecutionBudget.js";
+import { SharedOperationalExecutionBudget } from "./assistant/application/operationalExecutionBudget.js";
+import { RateLimitService } from "./abuse/rateLimitService.js";
+import { SharedRateLimitRepository } from "./abuse/sharedRateLimitRepository.js";
 import { OperationalAssistantExecutionService } from "./assistant/services/operationalAssistantExecutionService.js";
 import type { AssistantExecutionPort } from "./assistant/application/assistantExecutionPort.js";
 import type { AppRouters } from "./app.js";
@@ -109,7 +111,7 @@ import { ProviderMessageRecordRepository } from "./repositories/providerMessageR
 import { OutboundDeliveryRepository } from "./repositories/outboundDeliveryRepository.js";
 import { WhatsAppCloudApiProvider } from "./whatsapp/providers/WhatsAppCloudApiProvider.js";
 import { MetaInboundMediaProvider } from "./whatsapp/providers/MetaInboundMediaProvider.js";
-import { AesGcmWhatsAppCredentialCipher } from "./whatsapp/infrastructure/aesGcmWhatsAppCredentialCipher.js";
+import { whatsAppCredentialCipherFromEnvironment } from "./whatsapp/infrastructure/aesGcmWhatsAppCredentialCipher.js";
 import { WhatsAppCredentialResolver } from "./whatsapp/services/WhatsAppCredentialResolver.js";
 import { WhatsAppConnectionRepository } from "./repositories/whatsappConnectionRepository.js";
 import { WhatsAppInboundMediaRepository } from "./repositories/whatsappInboundMediaRepository.js";
@@ -156,7 +158,7 @@ import { ToolRegistry } from "./assistant/application/toolRegistry.js";
 import { NoIntegrationToolAvailabilityPolicy } from "./assistant/application/toolContracts.js";
 import { IntegrationToolAvailabilityPolicy } from "./integrations/services/integrationToolAvailabilityPolicy.js";
 import { IntegrationConnectionRepository } from "./repositories/integrationConnectionRepository.js";
-import { integrationSecretCipherFromEnvironment } from "./integrations/infrastructure/aesGcmIntegrationSecretCipher.js";
+import { integrationSecretCipherRingFromEnvironment } from "./integrations/infrastructure/aesGcmIntegrationSecretCipher.js";
 import { googleCalendarAccessTokenProviderFromEnvironment } from "./integrations/providers/googleCalendarAccessTokenProvider.js";
 import { AssistantToolOrchestrator } from "./assistant/services/assistantToolOrchestrator.js";
 import { ToolExecutionService } from "./assistant/services/toolExecutionService.js";
@@ -174,7 +176,8 @@ import { BookingRepository } from "./repositories/bookingRepository.js";
 import { BookingCommandService } from "./scheduling/services/bookingCommandService.js";
 import { BookingQueryService } from "./scheduling/services/bookingQueryService.js";
 import { schedulingBookingToolDefinitions } from "./scheduling/application/bookingToolDefinitions.js";
-import { createMediaCore } from "./media/composition.js";
+import { createLocalMediaCore, createMediaCore } from "./media/composition.js";
+import { S3MediaStorage } from "./media/infrastructure/s3MediaStorage.js";
 import { SafeConversationAttachmentService } from "./media/services/safeConversationAttachmentService.js";
 import { SafeConversationAttachmentRepository } from "./repositories/safeConversationAttachmentRepository.js";
 import { WhatsAppInboundMediaRecoveryService } from "./whatsapp/services/WhatsAppInboundMediaRecoveryService.js";
@@ -211,6 +214,7 @@ import { createBillingWebhookRouter } from "./routes/billingWebhook.js";
 import { BillingApplicationService } from "./billing/application/billingApplicationService.js";
 import { createBillingControllers } from "./controllers/billingController.js";
 import { createBillingRouter } from "./routes/billing.js";
+import { productionConfiguration } from "./config/productionConfiguration.js";
 
 import { MetaEmbeddedSignupAttemptRepository } from "./repositories/metaEmbeddedSignupAttemptRepository.js";
 import { HmacMetaEmbeddedSignupDigestProvider, MetaEmbeddedSignupAttemptService, metaEmbeddedSignupStateHmacKeyFromEnvironment } from "./whatsapp/application/metaEmbeddedSignupAttemptService.js";
@@ -220,8 +224,10 @@ import { SqlMetaEmbeddedSignupCompletionFinalizer } from "./whatsapp/application
 import { MetaWhatsAppReadinessService } from "./whatsapp/application/metaWhatsAppReadinessService.js";
 import { MetaEmbeddedSignupHttpService, embeddedSignupPublicConfig } from "./whatsapp/application/metaEmbeddedSignupHttpService.js";
 import { createMetaEmbeddedSignupControllers } from "./controllers/metaEmbeddedSignupController.js";
+import { CompanyOperationalStatusService } from "./company/services/companyOperationalStatusService.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const runtimeConfiguration = process.env.NODE_ENV === "production" ? productionConfiguration() : null;
 const workspaceContext = createWorkspaceContext(workspaceRepository.resolveDefault());
 const agent = new AtlasAgent(geminiProvider);
 const chatService = new ChatService(companyRepository, knowledgeRepository, agent);
@@ -234,6 +240,7 @@ const identityTransaction = new SqliteIdentityTransaction(database);
 const randomProvider = new SecureRandomProvider();
 const verificationHashProvider = new Sha256VerificationHashProvider();
 const identityClock = new SystemClock();
+const rateLimits = new RateLimitService(new SharedRateLimitRepository(database), () => identityClock.now());
 export const billingProviderRegistry = billingProviderRegistryFromEnvironment();
 export const billingOperationService = new BillingOperationService(new BillingAccountRepository(database),new BillingCatalogRepository(database),new BillingSubscriptionRepository(database),new BillingOperationRepository(database),billingProviderRegistry,()=>identityClock.now(),new BillingPayerIdentityResolver(database));
 export const billingWebhookService = new BillingWebhookService({stripe:process.env.STRIPE_WEBHOOK_SIGNING_SECRET?.trim() ?? "",mercadopago:process.env.MERCADOPAGO_WEBHOOK_SECRET?.trim() ?? ""},new BillingWebhookRepository(database),()=>identityClock.now());
@@ -241,11 +248,10 @@ export const billingReconciliationWorker = new BillingReconciliationWorker(new B
 export const billingOperationRecoveryWorker = new BillingOperationRecoveryWorker(new BillingOperationRepository(database),billingProviderRegistry,()=>identityClock.now());
 export const billingReconciliationRuntime = new BillingReconciliationRuntime(billingReconciliationWorker, billingReconciliationRuntimeConfiguration(),{},billingOperationRecoveryWorker);
 const production=process.env.NODE_ENV==="production";
-const mediaRoot = process.env.ATLAS_MEDIA_ROOT?.trim() || (production ? (() => { throw new Error("Production requires ATLAS_MEDIA_ROOT."); })() : resolve(repositoryRoot, "media"));
-export const mediaCore = createMediaCore(database, mediaRoot, identityClock);
-if (production && (process.env.ATLAS_BOOTSTRAP_SECRET?.length ?? 0) < 32) throw new Error("Production requires ATLAS_BOOTSTRAP_SECRET with at least 32 characters.");
-if (production && (!(process.env.WHATSAPP_APP_SECRET?.trim()) || !(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim()))) throw new Error("Production requires WhatsApp webhook credentials.");
-const deliveryMode = emailDeliveryMode(process.env.EMAIL_PROVIDER ?? process.env.ATLAS_VERIFICATION_DELIVERY, production);
+export const mediaCore = runtimeConfiguration
+  ? createMediaCore(database, new S3MediaStorage(runtimeConfiguration.mediaStorage), identityClock)
+  : createLocalMediaCore(database, resolve(repositoryRoot, "media"), identityClock);
+const deliveryMode = runtimeConfiguration?.emailDeliveryMode ?? emailDeliveryMode(process.env.EMAIL_PROVIDER ?? process.env.ATLAS_VERIFICATION_DELIVERY, production);
 const providerDelivery = deliveryMode === "smtp"
   ? new SmtpEmailDelivery(smtpConfiguration())
   : deliveryMode === "resend"
@@ -256,7 +262,7 @@ const providerDelivery = deliveryMode === "smtp"
 const verificationDelivery = deliveryMode === "development"
   ? new DevelopmentVerificationDelivery(process.env.NODE_ENV ?? "development", (message) => console.info(message))
   : providerDelivery ?? new UnavailableVerificationDelivery();
-const verificationOrigin = process.env.ATLAS_VERIFICATION_ORIGIN ?? "http://localhost:3000";
+const verificationOrigin = runtimeConfiguration?.verificationOrigin ?? process.env.ATLAS_VERIFICATION_ORIGIN ?? "http://localhost:3000";
 const billingReturnOrigin = process.env.ATLAS_BILLING_RETURN_ORIGIN?.trim() || verificationOrigin;
 const billingReturnUrl = (path:string):string => new URL(path, billingReturnOrigin).toString();
 const billingApplicationService = new BillingApplicationService(database, billingOperationService, { checkoutSuccess:billingReturnUrl("/billing/checkout/success"), checkoutCancel:billingReturnUrl("/billing/checkout/cancel"), portalReturn:billingReturnUrl("/billing/portal/return") },()=>identityClock.now());
@@ -273,11 +279,11 @@ const authenticationTransaction = new SqliteAuthenticationTransaction(database);
 const platformAdministrators = new PlatformAdministratorRepository(database);
 const platformAuthorizationService = new PlatformAuthorizationService(platformAdministrators);
 const authenticationService=new AuthenticationService(authenticationTransaction,randomProvider,new Sha256CredentialEnrollmentHashProvider(),passwordProvider,new Sha256SessionIdentifierProvider(),identityClock,verificationDelivery,verificationOrigin,process.env.NODE_ENV==="production",platformAdministrators);
-const passwordResetControllers = createPasswordResetControllers(new PasswordResetService(authenticationTransaction, randomProvider, verificationHashProvider, passwordProvider, identityClock, verificationDelivery, verificationOrigin));
+const passwordResetControllers = createPasswordResetControllers(new PasswordResetService(authenticationTransaction, randomProvider, verificationHashProvider, passwordProvider, identityClock, verificationDelivery, verificationOrigin), rateLimits);
 const requestOriginPolicy=new ExactRequestOriginPolicy(production?[verificationOrigin]:[verificationOrigin,"http://localhost:5173"],production);
-const authenticationControllers=createAuthenticationControllers(authenticationService,requestOriginPolicy);
+const authenticationControllers=createAuthenticationControllers(authenticationService,requestOriginPolicy,rateLimits);
 const invitationDelivery=deliveryMode==="development"?new DevelopmentInvitationDelivery(process.env.NODE_ENV??"development",message=>console.info(message)):providerDelivery??new UnavailableInvitationDelivery();
-const workspaceAdministrationService=new WorkspaceAdministrationService(new SqliteWorkspaceAdministrationTransaction(database),new SecureInvitationProofProvider(),identityClock,invitationDelivery,verificationOrigin);
+const workspaceAdministrationService=new WorkspaceAdministrationService(new SqliteWorkspaceAdministrationTransaction(database),new SecureInvitationProofProvider(),identityClock,invitationDelivery,verificationOrigin,undefined,rateLimits);
 configureProductionCommercialControls(new CommercialControlsRepository(database));
 const platformBootstrapService = new PlatformBootstrapService(new SqlitePlatformBootstrapTransaction(database), randomProvider,
   new ScryptPasswordProvider(), new Sha256SessionIdentifierProvider(), identityClock, process.env.ATLAS_BOOTSTRAP_SECRET ?? "");
@@ -289,7 +295,7 @@ const assistantCapabilityRepository=new AssistantCapabilityRepository(new Synchr
 const assistantCapabilityService=new AssistantCapabilityService(productionAssistantCapabilityCatalog,assistantCapabilityRepository,identityClock);
 configureProductionAssistantCapabilityControllers({list:context=>createListAssistantCapabilitiesController(assistantCapabilityService,context),replace:(context,actor)=>createReplaceAssistantCapabilitiesController(assistantCapabilityService,context,actor)});
 const integrationConnections = new IntegrationConnectionRepository(new SynchronousSqlDatabaseAdapter(database));
-export const integrationSecretCipher = integrationSecretCipherFromEnvironment(process.env.ATLAS_INTEGRATION_SECRET_KEY);
+export const integrationSecretCipher = integrationSecretCipherRingFromEnvironment();
 export const googleCalendarAccessTokenProvider = googleCalendarAccessTokenProviderFromEnvironment(process.env.GOOGLE_CALENDAR_OAUTH_CLIENT_ID, process.env.GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET);
 export const metaEmbeddedSignupProvider = metaEmbeddedSignupProviderFromEnvironment();
 export const providerAdapterRegistry = new ProviderAdapterRegistry();
@@ -314,20 +320,22 @@ export const schedulingBookingRouter = new SchedulingBookingRouter(bookingComman
 const productionAssistantTools=new AssistantToolOrchestrator(geminiProvider.toolModel(),new ToolRegistry(productionAssistantCapabilityCatalog,[liveDataReadToolDefinition(liveDataService),...schedulingBookingToolDefinitions(bookingCommands,bookingQueries)]),assistantCapabilityRepository,new LiveDataToolAvailabilityPolicy(new IntegrationToolAvailabilityPolicy(new NoIntegrationToolAvailabilityPolicy(),integrationConnections),integrationConnections),new ToolExecutionService(new AssistantToolExecutionTraceRepository(new SynchronousSqlDatabaseAdapter(database)),identityClock),identityClock);
 const webChatConnectionService = new WebChatConnectionService(companyRepository, new AssistantProfileRepository(database), new WebChatConnectionRepository(database), identityClock, billingEntitlements);
 const whatsAppConnections = new WhatsAppConnectionRepository(database);
-const whatsAppCredentialCipher = new AesGcmWhatsAppCredentialCipher(whatsAppPlatformEncryptionKey(process.env.WHATSAPP_PLATFORM_ENCRYPTION_KEY));
+export const whatsAppCredentialCipher = whatsAppCredentialCipherFromEnvironment();
 const whatsAppCredentialResolver = new WhatsAppCredentialResolver(whatsAppConnections, whatsAppCredentialCipher, process.env.WHATSAPP_ACCESS_TOKEN ?? "", integrationSecretCipher ? { repository: whatsAppConnections, cipher: integrationSecretCipher } : undefined);
 export const whatsAppInboundMediaProvider = new MetaInboundMediaProvider(whatsAppConnections, whatsAppCredentialResolver, { graphVersion: process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0" });
 export const whatsAppInboundMediaRecoveryService = new WhatsAppInboundMediaRecoveryService(new WhatsAppInboundMediaRepository(database), whatsAppInboundMediaProvider, mediaCore.service, new ChannelProviderEventRepository(database), identityClock);
 const defaultAssistantService = new DefaultAssistantService(new AssistantProfileRepository(database), new DefaultAssistantRepository(database), identityClock);
 configureProductionDefaultAssistantControllers({get:(context)=>createGetDefaultAssistantController(defaultAssistantService,context),put:(context,actor)=>createPutDefaultAssistantController(defaultAssistantService,context,actor.userId)});
 const assistantReadinessService = new AssistantReadinessService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), whatsAppConnections, new AssistantReadinessAssessmentRepository(database), defaultAssistantService, identityClock);
+configureProductionCompanyOperationalStatusService(new CompanyOperationalStatusService(companyRepository, new AssistantReadinessAssessmentRepository(database), whatsAppConnections));
 configureProductionAssistantReadinessControllers({ get: (context) => createGetAssistantReadinessController(assistantReadinessService, context), refresh: (context) => createRefreshAssistantReadinessController(assistantReadinessService, context) });
 const whatsAppConnectionService = new WhatsAppConnectionService(companyRepository, new AssistantProfileRepository(database), whatsAppConnections, identityClock, { credentials: whatsAppConnections, states: whatsAppConnections, cipher: whatsAppCredentialCipher, resolver: whatsAppCredentialResolver, validator: new WhatsAppCloudApiProvider("", process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0"), knowledge: new CompanyKnowledgeRepository(database) }, assistantReadinessService, billingEntitlements);
+whatsAppConnectionService.setRateLimiter(rateLimits);
 const metaEmbeddedSignupAudit = new StructuredMetaEmbeddedSignupAudit();
 const embeddedAttempts = metaEmbeddedSignupProvider && integrationConnectionService && process.env.META_EMBEDDED_SIGNUP_STATE_HMAC_KEY ? new MetaEmbeddedSignupAttemptService(new MetaEmbeddedSignupAttemptRepository(new SynchronousSqlDatabaseAdapter(database)),new HmacMetaEmbeddedSignupDigestProvider(metaEmbeddedSignupStateHmacKeyFromEnvironment()),identityClock,600_000,metaEmbeddedSignupAudit) : null;
 const embeddedCompletion = embeddedAttempts && metaEmbeddedSignupProvider && integrationConnectionService ? new MetaEmbeddedSignupCompletionService(embeddedAttempts,metaEmbeddedSignupProvider,integrationConnectionService,new SqlMetaEmbeddedSignupCompletionFinalizer(new SynchronousSqlDatabaseAdapter(database)),identityClock,process.env.META_GRAPH_API_VERSION ?? "v26.0",metaEmbeddedSignupAudit) : null;
 const embeddedReadiness = metaEmbeddedSignupProvider && integrationConnectionService ? new MetaWhatsAppReadinessService(whatsAppConnections,whatsAppCredentialResolver,integrationConnectionService,whatsAppConnectionService,metaEmbeddedSignupProvider,metaEmbeddedSignupAudit,identityClock): null;
-const metaEmbeddedSignupControllers=createMetaEmbeddedSignupControllers(new MetaEmbeddedSignupHttpService(embeddedAttempts,embeddedCompletion,embeddedReadiness,assistantProfileService,whatsAppConnectionService,whatsAppConnections,embeddedAttempts ? embeddedSignupPublicConfig() : {available:false}));
+const metaEmbeddedSignupControllers=createMetaEmbeddedSignupControllers(new MetaEmbeddedSignupHttpService(embeddedAttempts,embeddedCompletion,embeddedReadiness,assistantProfileService,whatsAppConnectionService,whatsAppConnections,embeddedAttempts ? embeddedSignupPublicConfig() : {available:false},rateLimits));
 export const conversationService = new ConversationService(new ConversationRepository(database), identityClock);
 const publicWebChatSessionService = new PublicWebChatSessionService(webChatConnectionService, conversationService, new WebChatSessionRepository(database), identityClock);
 const conversationIntelligenceService = new ConversationIntelligenceService(new ConversationIntelligenceRepository(database), new GeminiConversationIntelligenceDerivation(geminiProvider), identityClock);
@@ -338,18 +346,18 @@ const voicePolicyService = new VoicePolicyService(voiceSemanticRepository, ident
 configureProductionVoicePolicyControllers({get:(context)=>createGetVoicePolicyController(voicePolicyService,context),put:(context,actor)=>createPutVoicePolicyController(voicePolicyService,context,actor)});
 export const voiceDeferredSemanticRecoveryService = new VoiceDeferredSemanticRecoveryService(voiceSemanticRepository, conversationIntelligenceService);
 const proactiveActions = new ProactiveActionRepository(database);
-const proactiveActionOperatorService = new ProactiveActionOperatorService(proactiveActions, identityClock);
+const proactiveActionOperatorService = new ProactiveActionOperatorService(proactiveActions, identityClock, rateLimits);
 configureProductionProactiveActionControllers(createProactiveActionControllers(proactiveActionOperatorService));
 export const proactiveSemanticRecoveryService = new ProactiveSemanticRecoveryService(proactiveActions, conversationIntelligenceService);
 const productionOperationalAssistantRuntime = new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock, productionAssistantTools);
 export const proactiveDueWorkerService = new ProactiveDueWorkerService(proactiveActions, identityClock, new ProactiveRuntimeService(proactiveActions, companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, productionOperationalAssistantRuntime, identityClock, conversationIntelligenceService, knowledgeRetrievalService));
 const voiceSemanticProjection = { resolveInbound: (context: WorkspaceContext, companyId: number, message: import("./conversation/domain/conversation.js").ConversationMessage) => resolveVoiceSemanticMessage(voiceSemanticRepository, context, companyId, message), includeHistory: (context: WorkspaceContext, companyId: number, message: import("./conversation/domain/conversation.js").ConversationMessage) => includeVoiceSemanticHistory(voiceSemanticRepository, context, companyId, message), applyAssistant: (context: WorkspaceContext, companyId: number, message: import("./conversation/domain/conversation.js").ConversationMessage) => includeVoiceSemanticHistory(voiceSemanticRepository, context, companyId, message) };
 export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, productionOperationalAssistantRuntime, new InMemoryConversationTurnLock(), "gemini", 20, conversationIntelligenceService, conversationToolMemory, knowledgeRetrievalService, new SafeConversationAttachmentService(new SafeConversationAttachmentRepository(database)), new ConversationRepository(database), voiceSemanticProjection);
-const publicWebChatConversationService = new PublicWebChatConversationService(publicWebChatSessionService, operationalConversationTurnService, conversationService);
+const publicWebChatConversationService = new PublicWebChatConversationService(publicWebChatSessionService, operationalConversationTurnService, conversationService, rateLimits);
 const knowledgeIndexingService=new KnowledgeIndexingService(new KnowledgeRetrievalRepository(database));
 const companyKnowledgeService=new FrozenKnowledgeService(companyRepository,new CompanyKnowledgeRepository(database),new SecurePublicUrlProvider(),new WorkerPdfTextExtractor(),new ManualTextKnowledgeFactExtractor(new GeminiKnowledgeFactExtractor(geminiProvider)),identityClock,undefined,knowledgeIndexingService);
-const companyKnowledgeControllers=createCompanyKnowledgeControllers(companyKnowledgeService);
-const onboardingService = new OnboardingService(companyRepository,knowledgeRepository,firecrawlProvider,geminiProvider,cleanMarkdown,new FileMarkdownDebugStore(resolve(repositoryRoot,"knowledge")),companyKnowledgeService);
+const companyKnowledgeControllers=createCompanyKnowledgeControllers(companyKnowledgeService,rateLimits);
+const onboardingService = new OnboardingService(companyRepository,knowledgeRepository,firecrawlProvider,geminiProvider,cleanMarkdown,new FileMarkdownDebugStore(resolve(repositoryRoot,"knowledge")),companyKnowledgeService,rateLimits);
 
 export const chatRouter = createChatRouter(createChatController(chatService, workspaceContext));
 export const companiesRouter = createCompaniesRouter({
@@ -358,13 +366,13 @@ export const companiesRouter = createCompaniesRouter({
   get: createGetCompanyController(companyService, workspaceContext),
   update: createUpdateCompanyController(companyService, workspaceContext),
   delete: createDeleteCompanyController(companyService, workspaceContext),
-  onboard: createOnboardingController(onboardingService, workspaceContext),
+  onboard: createOnboardingController(onboardingService, workspaceContext, undefined, rateLimits),
 });
 export const knowledgeRouter = createKnowledgeRouter(createKnowledgeController(knowledgeService, workspaceContext));
 export const scrapeRouter = createScrapeRouter(createScrapeController(scrapeService));
 export const identityRouter = createIdentityRouter({
-  register: createRegistrationController(registrationService),
-  resend: createResendVerificationController(resendVerificationService),
+  register: createRegistrationController(registrationService, rateLimits),
+  resend: createResendVerificationController(resendVerificationService, rateLimits),
   verify: createVerifyEmailController(verifyEmailService),
   bootstrapStatus: platformBootstrapControllers.status,
   platformBootstrap: platformBootstrapControllers.bootstrap,
@@ -374,7 +382,7 @@ export const identityRouter = createIdentityRouter({
 export const publicWebChatRouter = createPublicWebChatRouter(publicWebChatSessionService, publicWebChatConversationService, production);
 export const whatsAppOutboundDeliveryService = new WhatsAppOutboundDeliveryService(new ConversationRepository(database), whatsAppConnections, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), whatsAppCredentialResolver, (accessToken) => new WhatsAppCloudApiProvider(accessToken, process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0"), identityClock, whatsAppConnectionService, new WhatsAppConversationRepository(database), voiceSemanticRepository, voiceDeferredSemanticRecoveryService, proactiveSemanticRecoveryService);
 const whatsAppDeliveryStatusService = new WhatsAppDeliveryStatusService(new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), new MetaDeliveryStatusMapper(), new DeliveryLifecyclePolicy(), identityClock, whatsAppConnectionService);
-const operatorConversationMessagingService = new OperatorConversationMessagingService(conversationService, new ConversationRepository(database), new ConversationRepository(database), new WhatsAppConversationRepository(database), whatsAppOutboundDeliveryService, identityClock, conversationIntelligenceService);
+const operatorConversationMessagingService = new OperatorConversationMessagingService(conversationService, new ConversationRepository(database), new ConversationRepository(database), new WhatsAppConversationRepository(database), whatsAppOutboundDeliveryService, identityClock, conversationIntelligenceService, rateLimits);
 configureProductionConversationMessageController((context, actor) => createOperatorConversationMessageController(operatorConversationMessagingService, context, actor));
   const conversationEventFeedService = new ConversationEventFeedService(new ConversationRepository(database));
   const voiceReadService = new VoiceReadService(voiceSemanticRepository, mediaCore.service);
@@ -382,28 +390,21 @@ configureProductionConversationMessageController((context, actor) => createOpera
 const conversationControlService = new ConversationControlService(conversationService, new ConversationRepository(database), identityClock);
 configureProductionConversationControlControllers({ takeover: (context, actor) => createConversationControlController(conversationControlService, context, actor, "takeover"), release: (context, actor) => createConversationControlController(conversationControlService, context, actor, "release"), resolve: (context, actor) => createConversationControlController(conversationControlService, context, actor, "resolve") });
 export const whatsAppWebhookService = new WhatsAppWebhookService({ appSecret: process.env.WHATSAPP_APP_SECRET ?? "", verifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? "" }, whatsAppConnectionService, new WhatsAppConversationRepository(database), new ChannelProviderEventRepository(database), conversationService, operationalConversationTurnService, identityClock, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), undefined, whatsAppCredentialResolver, (accessToken) => new WhatsAppCloudApiProvider(accessToken, process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0"), new ConversationRepository(database), whatsAppOutboundDeliveryService, whatsAppDeliveryStatusService);
-const whatsAppWebhookRouter = createWhatsAppWebhookRouter(createWhatsAppWebhookControllers(whatsAppWebhookService));
+const whatsAppWebhookRouter = runtimeConfiguration && !runtimeConfiguration.whatsAppWebhookEnabled ? undefined : createWhatsAppWebhookRouter(createWhatsAppWebhookControllers(whatsAppWebhookService));
 const billingWebhookRouter = createBillingWebhookRouter({stripe:createBillingWebhookController(billingWebhookService,"stripe"),mercadoPago:createBillingWebhookController(billingWebhookService,"mercadopago")});
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));
-const billingRouter=createBillingRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,originPolicy:requestOriginPolicy,controllers:createBillingControllers(billingApplicationService)});
+const billingRouter=createBillingRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,originPolicy:requestOriginPolicy,controllers:createBillingControllers(billingApplicationService,rateLimits)});
 export const platformAdminRouter=createPlatformAdminRouter(authenticationService,platformAuthorizationService,createPlatformAdminControllers(new PlatformAdministrationService(new PlatformAdministrationRepository(database),new CommercialControlsRepository(database))),requestOriginPolicy);
 function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
   const runtime = new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), identityClock, execution===agent?productionAssistantTools:undefined);
-  const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, "gemini", knowledgeRetrievalService);
-  const operational = new OperationalAssistantExecutionService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, new InMemoryOperationalExecutionBudget(), "gemini", knowledgeRetrievalService);
+const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, "gemini", knowledgeRetrievalService, rateLimits);
+  const operational = new OperationalAssistantExecutionService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, new SharedOperationalExecutionBudget(new RateLimitService(new SharedRateLimitRepository(database), () => identityClock.now())), "gemini", knowledgeRetrievalService);
   return createAuthorizedCompaniesRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,controllers:{list:context=>createListCompaniesController(companyService,context),create:context=>createCompanyController(companyService,context),get:context=>createGetCompanyController(companyService,context),update:context=>createUpdateCompanyController(companyService,context),delete:context=>createDeleteCompanyController(companyService,context),onboard:(context,actor)=>createOnboardingController(onboardingService,context,actor)},assistantControllers:{list:context=>createListAssistantProfilesController(assistantProfileService,context),create:context=>createAssistantProfileController(assistantProfileService,context),get:context=>createGetAssistantProfileController(assistantProfileService,context),update:context=>createUpdateAssistantProfileController(assistantProfileService,context),transition:context=>createTransitionAssistantProfileController(assistantProfileService,context),preview:context=>createAssistantPreviewController(preview,context),execution:context=>createOperationalAssistantExecutionController(operational,context)},webChatConnectionControllers:{list:context=>createListWebChatConnectionsController(webChatConnectionService,context),create:context=>createWebChatConnectionController(webChatConnectionService,context),get:context=>createGetWebChatConnectionController(webChatConnectionService,context),update:context=>createUpdateWebChatConnectionController(webChatConnectionService,context)},metaEmbeddedSignupControllers,whatsAppConnectionControllers:{list:context=>createListWhatsAppConnectionsController(whatsAppConnectionService,context),create:context=>createWhatsAppConnectionController(whatsAppConnectionService,context),get:context=>createGetWhatsAppConnectionController(whatsAppConnectionService,context),update:context=>createUpdateWhatsAppConnectionController(whatsAppConnectionService,context),status:context=>createGetWhatsAppConnectionStatusController(whatsAppConnectionService,context),configureCredentials:context=>createConfigureWhatsAppCredentialsController(whatsAppConnectionService,context),validate:context=>createValidateWhatsAppConnectionController(whatsAppConnectionService,context),activate:context=>createActivateWhatsAppConnectionController(whatsAppConnectionService,context),deactivate:context=>createDeactivateWhatsAppConnectionController(whatsAppConnectionService,context)},knowledgeControllers:companyKnowledgeControllers});
 }
 
-function whatsAppPlatformEncryptionKey(value: string | undefined): Uint8Array {
-  const normalized = value?.trim() ?? "";
-  if (!normalized) { if (production) throw new Error("Production requires WHATSAPP_PLATFORM_ENCRYPTION_KEY."); return Buffer.alloc(32); }
-  const key = /^[0-9a-f]{64}$/i.test(normalized) ? Buffer.from(normalized, "hex") : Buffer.from(normalized, "base64url");
-  if (key.byteLength !== 32) throw new Error("WHATSAPP_PLATFORM_ENCRYPTION_KEY must encode exactly 32 bytes.");
-  return key;
-}
 
 export const authorizedCompaniesRouter = createProductionAuthorizedCompaniesRouter(agent);
 
 export function createProductionAppRouters(execution: AssistantExecutionPort = agent): AppRouters {
-  return { authorizedCompaniesRouter: createProductionAuthorizedCompaniesRouter(execution), billingRouter, chatRouter, companiesRouter, identityRouter, knowledgeRouter, publicWebChatRouter, scrapeRouter, whatsAppWebhookRouter, billingWebhookRouter, workspacesRouter, platformAdminRouter };
+  return { authorizedCompaniesRouter: createProductionAuthorizedCompaniesRouter(execution), billingRouter, chatRouter, companiesRouter, identityRouter, knowledgeRouter, publicWebChatRouter, scrapeRouter, ...(whatsAppWebhookRouter ? { whatsAppWebhookRouter } : {}), billingWebhookRouter, workspacesRouter, platformAdminRouter };
 }

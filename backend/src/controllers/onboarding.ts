@@ -6,13 +6,18 @@ import {
   CompanyNotFoundError,
   CompanyValidationError,
 } from "../services/companyValidation.js";
+import { abuseScope } from "../abuse/sharedRateLimitRepository.js";
+import { AbuseLimitExceededError, companyOnboardingActorLimit, companyOnboardingCompanyLimit, type RateLimitService } from "../abuse/rateLimitService.js";
 
-export function createOnboardingController(service: OnboardingService, context: WorkspaceContext, actor?: ActorContext): RequestHandler {
+export function createOnboardingController(service: OnboardingService, context: WorkspaceContext, actor?: ActorContext, limits?: RateLimitService): RequestHandler {
   return async (req, res): Promise<void> => {
     try {
+      service.validateTarget(context, req.params.companyId, req.body?.url);
+      if (actor && limits) { const companyId = Number(req.params.companyId); limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actor.userId), "actor", companyOnboardingActorLimit); limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", companyOnboardingCompanyLimit); }
       const result = await service.onboard(context, req.params.companyId, req.body?.url, actor);
       res.json(result);
     } catch (error: unknown) {
+      if (error instanceof AbuseLimitExceededError) { res.setHeader("Retry-After", String(error.retryAfterSeconds)); res.status(429).json({ error: { code: "rate_limited", message: "Request is temporarily unavailable." } }); return; }
       if (error instanceof CompanyValidationError) {
         res.status(400).json({ error: error.message });
         return;

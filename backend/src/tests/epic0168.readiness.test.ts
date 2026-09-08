@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import express from "express";
 import { createApp } from "../app.js";
 import { setShuttingDown } from "../routes/health.js";
+import { markRuntimeReady, registerRuntimeWorker } from "../config/runtimeReadiness.js";
 
 test("EPIC-016.8 /health and /ready return 200/503 based on shuttingDown state", async () => {
   const empty = express.Router();
@@ -25,6 +26,9 @@ test("EPIC-016.8 /health and /ready return 200/503 based on shuttingDown state",
   try {
     // 1. Initial State: Healthy
     setShuttingDown(false);
+    registerRuntimeWorker("billing_reconciliation");
+    registerRuntimeWorker("whatsapp_recovery");
+    markRuntimeReady();
 
     const healthOk = await fetch(`${origin}/health`);
     assert.equal(healthOk.status, 200);

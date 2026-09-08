@@ -2,6 +2,8 @@ import { OperationalConversationTurnInProgressError, type OperationalConversatio
 import type { ConversationService } from "../../conversation/services/conversationService.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import type { PublicWebChatSessionService } from "./publicWebChatSessionService.js";
+import { abuseScope } from "../../abuse/sharedRateLimitRepository.js";
+import { publicWebChatCompanyLimit, publicWebChatSessionLimit, type RateLimitService } from "../../abuse/rateLimitService.js";
 
 export class PublicWebChatConversationUnavailableError extends Error {}
 export class PublicWebChatConversationValidationError extends Error {}
@@ -12,12 +14,14 @@ export interface PublicWebChatConversationResult { readonly message: string; }
 export interface PublicWebChatHistoryResult { readonly messages: readonly { readonly direction: "inbound" | "outbound"; readonly content: string; readonly createdAt: string; }[]; }
 
 export class PublicWebChatConversationService {
-  public constructor(private readonly sessions: PublicWebChatSessionService, private readonly turns: OperationalConversationTurnService, private readonly conversations: ConversationService) {}
+  public constructor(private readonly sessions: PublicWebChatSessionService, private readonly turns: OperationalConversationTurnService, private readonly conversations: ConversationService, private readonly limits?: RateLimitService) {}
 
   public history(connectionPublicId: unknown, rawSessionToken: string | null): PublicWebChatHistoryResult {
     const session = this.sessions.resolveSessionForConnection(connectionPublicId, rawSessionToken);
     if (!session) throw new PublicWebChatConversationUnavailableError();
     const context: WorkspaceContext = { workspaceId: session.workspaceId, workspaceKey: "public" };
+    this.limits?.enforce(abuseScope("workspace", session.workspaceId, "company", session.companyId, "conversation", session.conversationId), "actor", publicWebChatSessionLimit);
+    this.limits?.enforce(abuseScope("workspace", session.workspaceId, "company", session.companyId), "company", publicWebChatCompanyLimit);
     return Object.freeze({ messages: Object.freeze(this.conversations.listMessages(context, session.companyId, session.conversationId)
       .map(({ direction, content, createdAt }) => Object.freeze({ direction, content, createdAt }))) });
   }

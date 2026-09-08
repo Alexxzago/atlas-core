@@ -9,19 +9,21 @@ import {
   AssistantProfileNotExecutableError,
 } from "../assistant/services/assistantPreviewService.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
+import { AbuseLimitExceededError } from "../abuse/rateLimitService.js";
 
 export function createAssistantPreviewController(service: AssistantPreviewService, context: WorkspaceContext): RequestHandler {
   return async (req, res): Promise<void> => {
     res.setHeader("Cache-Control", "no-store, private");
     res.setHeader("Pragma", "no-cache");
     try {
-      const result = await service.preview(context, req.params.companyId, req.params.assistantProfileId, req.body);
+      const result = await service.preview(context, req.params.companyId, req.params.assistantProfileId, req.body, typeof res.locals.actorId === "string" ? res.locals.actorId : undefined);
       res.json({ status: result.outcome, answer: result.answer });
     } catch (error: unknown) { respond(res, error); }
   };
 }
 
 function respond(res: Response, error: unknown): void {
+  if (error instanceof AbuseLimitExceededError) { res.setHeader("Retry-After", String(error.retryAfterSeconds)); res.status(429).json({ error: { code: "rate_limited", message: "Request is temporarily unavailable." } }); return; }
   if (error instanceof AssistantPreviewValidationError) {
     res.status(400).json({ error: { code: "invalid_preview_request", message: "A valid preview message is required." } }); return;
   }

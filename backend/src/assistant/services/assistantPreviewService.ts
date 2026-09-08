@@ -7,6 +7,8 @@ import type { AssistantProfileRepositoryPort } from "../application/ports.js";
 import type { AssistantExecutionResult } from "../application/assistantExecution.js";
 import type { OperationalAssistantRuntime } from "./operationalAssistantRuntime.js";
 import type { LexicalKnowledgeRetrievalService } from "../../knowledgeV2/services/knowledgeRetrievalService.js";
+import { abuseScope } from "../../abuse/sharedRateLimitRepository.js";
+import { assistantPreviewActorLimit, assistantPreviewCompanyLimit, type RateLimitService } from "../../abuse/rateLimitService.js";
 
 export class AssistantPreviewValidationError extends Error {}
 export class AssistantPreviewNotFoundError extends Error {}
@@ -24,13 +26,14 @@ export class AssistantPreviewService {
     private readonly runtime: OperationalAssistantRuntime,
     private readonly provider: string,
     private readonly retrieval?: LexicalKnowledgeRetrievalService,
+    private readonly limits?: RateLimitService,
   ) {}
 
   public async preview(
     context: WorkspaceContext,
     companyIdValue: unknown,
     profileIdValue: unknown,
-    input: unknown,
+    input: unknown, actorId?: string,
   ): Promise<AssistantExecutionResult> {
     const companyId = parseCompanyId(companyIdValue);
     const profileId = parseProfileId(profileIdValue);
@@ -47,6 +50,7 @@ export class AssistantPreviewService {
     if (company.status !== "ready") throw new AssistantPreviewCompanyNotReadyError();
     const knowledge = this.knowledge.loadCurrentVersion(context, companyId);
     if (!knowledge) throw new AssistantPreviewKnowledgeUnavailableError();
+    if (actorId) { this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actorId), "actor", assistantPreviewActorLimit); this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", assistantPreviewCompanyLimit); }
     return (await this.runtime.execute(company, profile, knowledge, message, [], {
       purpose: "preview", provider: this.provider, fallbackOnUnavailable: false, allowTools: false,
       ...(this.retrieval ? { retrieval: this.retrieval.context(context, companyId, knowledge.sourceRevisionIds, message) } : {}),

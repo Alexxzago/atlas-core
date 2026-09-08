@@ -2140,6 +2140,17 @@ const migrations: Migration[] = [
       CHECK((status='pending' AND provider_subscription_id IS NULL) OR (status IN ('ready','consumed','conflict') AND provider_subscription_id IS NOT NULL))
     );
   `);}},
+  { id:69,name:"0069_shared_rate_limit_windows",checksumSource:"shared-fixed-window-abuse-limits-v1|hashed-scope-action-keys|atomic-upsert-bounded-expiry-cleanup",apply(database):void{database.exec(`
+    CREATE TABLE shared_rate_limit_windows(
+      scope_key TEXT NOT NULL CHECK(length(scope_key)=64 AND scope_key NOT GLOB '*[^0-9a-f]*'),
+      action_key TEXT NOT NULL CHECK(length(action_key)=64 AND action_key NOT GLOB '*[^0-9a-f]*'),
+      window_start TEXT NOT NULL,
+      count INTEGER NOT NULL CHECK(count>0),
+      expires_at TEXT NOT NULL,
+      PRIMARY KEY(scope_key,action_key,window_start)
+    );
+    CREATE INDEX idx_shared_rate_limit_windows_expiry ON shared_rate_limit_windows(expires_at);
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

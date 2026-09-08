@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { runMigrations } from "./migrations.js";
 import { createLibsqlDatabase, type SqlDatabase } from "./sqlDatabase.js";
 import { SynchronousLibsqlDatabase, type SynchronousDatabase } from "./synchronousDatabase.js";
+import { productionDatabaseConfiguration, type ProductionDatabaseConfiguration } from "./productionConfiguration.js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const databasePath = resolve(projectRoot, "database/atlas.sqlite");
@@ -22,29 +23,7 @@ export function createDatabase(path: string): DatabaseSync {
   }
 }
 
-export interface ProductionDatabaseConfiguration {
-  readonly provider: "libsql";
-  readonly url: string;
-  readonly authToken: string;
-}
-
-export function productionDatabaseConfiguration(environment: NodeJS.ProcessEnv = process.env): ProductionDatabaseConfiguration {
-  if (environment.NODE_ENV !== "production") {
-    throw new Error("Production database configuration is only available when NODE_ENV=production.");
-  }
-  if (environment.DATABASE_PROVIDER !== "libsql") {
-    throw new Error("Production requires DATABASE_PROVIDER=libsql; local SQLite is not permitted.");
-  }
-  const url = environment.TURSO_DATABASE_URL?.trim();
-  const authToken = environment.TURSO_AUTH_TOKEN?.trim();
-  if (!url || !authToken) {
-    throw new Error("Production requires TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.");
-  }
-  if (!/^libsqls?:\/\//i.test(url) && !/^https:\/\//i.test(url)) {
-    throw new Error("TURSO_DATABASE_URL must be a libsql or HTTPS URL.");
-  }
-  return { provider: "libsql", url, authToken };
-}
+export { productionDatabaseConfiguration, type ProductionDatabaseConfiguration };
 
 export async function createProductionDatabase(environment: NodeJS.ProcessEnv = process.env): Promise<SqlDatabase> {
   const configuration = productionDatabaseConfiguration(environment);

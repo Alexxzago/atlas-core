@@ -2,6 +2,7 @@ import express, { Router, type Request, type Response } from "express";
 import type { PublicWebChatSessionService } from "../webChat/services/publicWebChatSessionService.js";
 import { PublicWebChatSessionUnavailableError } from "../webChat/services/publicWebChatSessionService.js";
 import { PublicWebChatConversationInProgressError, PublicWebChatConversationRuntimeError, PublicWebChatConversationUnavailableError, PublicWebChatConversationValidationError, type PublicWebChatConversationService } from "../webChat/services/publicWebChatConversationService.js";
+import { AbuseLimitExceededError } from "../abuse/rateLimitService.js";
 
 const developmentCookie = "atlas_web_chat_session";
 const productionCookie = "__Host-atlas_web_chat_session";
@@ -42,6 +43,7 @@ export function createPublicWebChatRouter(service: PublicWebChatSessionService, 
       .catch((error: unknown) => {
         if (error instanceof PublicWebChatConversationValidationError) invalidMessage(response);
         else if (error instanceof PublicWebChatConversationUnavailableError) unavailable(response);
+        else if (error instanceof AbuseLimitExceededError) { response.setHeader("Retry-After", String(error.retryAfterSeconds)); response.status(429).json({ error: { code: "rate_limited", message: "Request is temporarily unavailable." } }); }
         else if (error instanceof PublicWebChatConversationInProgressError) response.status(409).json({ error: { code: "conversation_busy", message: "Message cannot be sent right now." } });
         else if (error instanceof PublicWebChatConversationRuntimeError) response.status(503).json({ error: "Message cannot be sent right now." });
         else response.status(503).json({ error: "Message cannot be sent right now." });

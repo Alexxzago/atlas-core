@@ -2,19 +2,24 @@ import { createApp } from "./app.js";
 import { billingReconciliationRuntime, createProductionAppRouters, proactiveDueWorkerService, proactiveSemanticRecoveryService, voiceDeferredSemanticRecoveryService, whatsAppInboundMediaRecoveryService, whatsAppOutboundDeliveryService, whatsAppWebhookService } from "./composition.js";
 import { database } from "./config/database.js";
 import { setShuttingDown } from "./routes/health.js";
+import { markRuntimeReady, markRuntimeShuttingDown, registerRuntimeWorker } from "./config/runtimeReadiness.js";
 import { randomUUID } from "node:crypto";
+import { createRunId, normalizeOperationalError, operationalLogger, withRunContext } from "./observability/operationalLogger.js";
 
 const portValue = Number(process.env.PORT ?? "3000");
 if (!Number.isSafeInteger(portValue) || portValue < 1 || portValue > 65_535) throw new Error("PORT must be a valid TCP port.");
 
 const server = createApp(createProductionAppRouters(), { production: process.env.NODE_ENV === "production" }).listen(portValue, "0.0.0.0", () => {
-  console.log(`Atlas listening on port ${portValue}`);
+  operationalLogger.info("process_started", { subsystem: "http", outcome: "started", migrationHead: "0069", deploymentVersion: process.env.ATLAS_DEPLOYMENT_VERSION ?? "unknown" });
+  registerRuntimeWorker("billing_reconciliation");
   billingReconciliationRuntime.start();
+  registerRuntimeWorker("whatsapp_recovery");
+  markRuntimeReady();
 });
 const dispatchOwner = `whatsapp-dispatch-${randomUUID()}`;
 const mediaRecoveryOwner = `whatsapp-media-recovery-${randomUUID()}`;
 const proactiveWorkerOwner = `proactive-runtime-${randomUUID()}`;
-async function recoverWhatsApp(): Promise<void> { try { await proactiveDueWorkerService.executeAvailable(proactiveWorkerOwner); await whatsAppInboundMediaRecoveryService.recoverAvailable(mediaRecoveryOwner); await whatsAppWebhookService.resumeIncomplete(); await whatsAppOutboundDeliveryService.dispatchReady(dispatchOwner); await voiceDeferredSemanticRecoveryService.recoverAvailable(); await proactiveSemanticRecoveryService.recoverAvailable(); } catch { console.error("WhatsApp recovery cycle failed."); } }
+async function recoverWhatsApp(): Promise<void> { const runId = createRunId(), started = performance.now(); try { await withRunContext(runId, async () => { operationalLogger.info("worker_cycle_started", { worker: "whatsapp_recovery" }); await proactiveDueWorkerService.executeAvailable(proactiveWorkerOwner); await whatsAppInboundMediaRecoveryService.recoverAvailable(mediaRecoveryOwner); await whatsAppWebhookService.resumeIncomplete(); await whatsAppOutboundDeliveryService.dispatchReady(dispatchOwner); await voiceDeferredSemanticRecoveryService.recoverAvailable(); await proactiveSemanticRecoveryService.recoverAvailable(); operationalLogger.info("worker_cycle_completed", { worker: "whatsapp_recovery", durationMs: Math.round(performance.now() - started), outcome: "completed" }); }); } catch (error: unknown) { operationalLogger.error("worker_cycle_failed", { worker: "whatsapp_recovery", runId, safeErrorCategory: normalizeOperationalError(error) }); } }
 void recoverWhatsApp();
 const recoveryTimer = setInterval(() => { void recoverWhatsApp(); }, 5_000);
 recoveryTimer.unref();
@@ -24,9 +29,10 @@ let isShuttingDown = false;
 function gracefulShutdown(reason: string, exitCode: number): void {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  console.log(`Initiating graceful shutdown. Reason: ${reason}`);
+  operationalLogger.info("process_shutdown_started", { subsystem: "process", outcome: reason });
 
   setShuttingDown(true);
+  markRuntimeShuttingDown();
   clearInterval(recoveryTimer);
 
   if (typeof server.closeIdleConnections === "function") {
@@ -44,12 +50,12 @@ function gracefulShutdown(reason: string, exitCode: number): void {
   }
 
   const forceTimeout = setTimeout(() => {
-    console.error("Graceful shutdown timed out. Forcing termination.");
+    operationalLogger.error("process_shutdown_timeout", { subsystem: "process", safeErrorCategory: "internal_failure" });
     try {
       database.close();
-      console.log("Database closed under timeout force-close.");
-    } catch (err) {
-      console.error("Error closing database during timeout force-close:", err);
+      operationalLogger.info("database_closed", { subsystem: "database", outcome: "forced" });
+    } catch (error: unknown) {
+      operationalLogger.error("database_close_failed", { subsystem: "database", safeErrorCategory: normalizeOperationalError(error) });
     }
     process.exit(exitCode);
   }, timeoutMs);
@@ -57,9 +63,9 @@ function gracefulShutdown(reason: string, exitCode: number): void {
 
   server.close(async (err) => {
     if (err) {
-      console.error("Error during HTTP server shutdown:", err);
+      operationalLogger.error("http_server_close_failed", { subsystem: "http", safeErrorCategory: normalizeOperationalError(err) });
     } else {
-      console.log("HTTP server closed successfully.");
+      operationalLogger.info("http_server_closed", { subsystem: "http", outcome: "completed" });
     }
 
     await billingReconciliationRuntime.stop();
@@ -67,9 +73,9 @@ function gracefulShutdown(reason: string, exitCode: number): void {
 
     try {
       database.close();
-      console.log("Database closed cleanly.");
-    } catch (dbErr) {
-      console.error("Error closing database cleanly:", dbErr);
+      operationalLogger.info("database_closed", { subsystem: "database", outcome: "completed" });
+    } catch (dbErr: unknown) {
+      operationalLogger.error("database_close_failed", { subsystem: "database", safeErrorCategory: normalizeOperationalError(dbErr) });
     }
 
     process.exit(exitCode);
@@ -80,11 +86,11 @@ process.on("SIGTERM", () => gracefulShutdown("SIGTERM", 0));
 process.on("SIGINT", () => gracefulShutdown("SIGINT", 0));
 
 process.on("uncaughtException", (error) => {
-  console.error("Uncaught Exception:", error);
+  operationalLogger.error("process_uncaught_exception", { subsystem: "process", safeErrorCategory: normalizeOperationalError(error) });
   gracefulShutdown("uncaughtException", 1);
 });
 
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+process.on("unhandledRejection", (reason) => {
+  operationalLogger.error("process_unhandled_rejection", { subsystem: "process", safeErrorCategory: normalizeOperationalError(reason) });
   gracefulShutdown("unhandledRejection", 1);
 });

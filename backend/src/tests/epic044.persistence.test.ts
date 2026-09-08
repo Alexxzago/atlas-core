@@ -74,7 +74,7 @@ test("EPIC044 upgrades 0059 data without changing delivery order or event cursor
     assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
     database.close();
     const reopened = new DatabaseSync(path); reopened.exec("PRAGMA foreign_keys=ON"); runMigrations(reopened);
-    assert.deepEqual({ ...(reopened.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as Record<string, unknown>) }, { id: 68, name: "0068_billing_operations_provider_events_reconciliation" });
+    assert.deepEqual({ ...(reopened.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as Record<string, unknown>) }, { id: 69, name: "0069_shared_rate_limit_windows" });
     assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=60").get() as { count: number }).count, 1);
     assert.equal(reopened.prepare("SELECT id FROM schema_migrations WHERE id=61").get(), undefined);
     assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=62").get() as { count: number }).count, 1);
@@ -83,7 +83,7 @@ test("EPIC044 upgrades 0059 data without changing delivery order or event cursor
     assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=65").get() as { count: number }).count, 1);
     assert.deepEqual((reopened.prepare("SELECT rowid FROM outbound_deliveries ORDER BY rowid").all() as Array<{ rowid: number }>).map((row) => row.rowid), value.legacyRowids);
     reopened.close();
-  } finally { if (database.isOpen) database.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { if (database.isOpen) database.close(); rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });
 
 test("EPIC044 upgrades file-backed 0060 data to 0062 without recreating historical event sequences", () => {
@@ -102,7 +102,7 @@ test("EPIC044 upgrades file-backed 0060 data to 0062 without recreating historic
     assert.deepEqual(new ConversationRepository(database).listConversationEventsAfter(createWorkspaceContext(new WorkspaceRepository(database).resolveDefault()), value.companyId, 10, 10).map(event => event.sequence), [11]);
     database.close(); database = new DatabaseSync(path); database.exec("PRAGMA foreign_keys=ON"); runMigrations(database);
     assert.deepEqual(new ConversationRepository(database).listConversationEventsAfter(createWorkspaceContext(new WorkspaceRepository(database).resolveDefault()), value.companyId, 10, 10).map(event => event.sequence), [11]);
-  } finally { if (database.isOpen) database.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { if (database.isOpen) database.close(); rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });
 
 test("EPIC044 persistence rejects cross-scope, immutable, and invalid Voice states", () => {
@@ -151,7 +151,7 @@ test("EPIC044 restart retains message immutability after migration 0060", () => 
     assert.throws(() => reopened.prepare("DELETE FROM conversation_messages WHERE id=?").run(value.inboundId));
     assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM conversation_message_teardowns").get() as { count: number }).count, 0);
     reopened.close();
-  } finally { if (database.isOpen) database.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { if (database.isOpen) database.close(); rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });
 
 test("EPIC044 PASS7A retains safe Voice read state and metadata-only events after file-backed restart", () => {
@@ -169,7 +169,7 @@ test("EPIC044 PASS7A retains safe Voice read state and metadata-only events afte
     const events = new ConversationRepository(database).listConversationEventsAfter(context, value.companyId, 0, 50).filter(event => event.type === "voice_state_changed");
     assert.deepEqual(events.map(event => event.relatedMessageId), [value.inboundId, value.outboundId, value.outboundId]);
     assert.equal(JSON.stringify(events).includes("canonical transcript"), false);
-  } finally { if (database.isOpen) database.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { if (database.isOpen) database.close(); rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });
 
 test("EPIC044 Voice repository persists policy replay, transcript replay, and recovered leases", () => {
@@ -262,7 +262,7 @@ test("EPIC044 PASS3A suppresses a leased transcription after authority takeover 
       assert.equal(result.kind, "suppressed");
        assert.deepEqual({ ...(first.prepare("SELECT state,media_gate_state FROM channel_execution_requests WHERE id='cex_04400000000000000000000000000001'").get() as Record<string, unknown>) }, { state: "completed", media_gate_state: "blocked_by_transcript" });
       assert.equal(first.prepare("SELECT state FROM audio_transcription_requests WHERE id=?").get(leased.id) && (first.prepare("SELECT state FROM audio_transcription_requests WHERE id=?").get(leased.id) as { state: string }).state, "suppressed");
-    } finally { first.close(); second.close(); rmSync(directory, { recursive: true, force: true }); }
+    } finally { first.close(); second.close(); rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   }
 });
 
@@ -281,7 +281,7 @@ test("EPIC044 PASS3A suppresses STT finalized after a real human-required transi
     assert.equal(controls.applyConversationControlOperation(context, value.companyId, value.conversationId as never, { operationId: "release-human-required", operation: "release", actorId: "usr_operator" as never, expectedVersion: 2, occurredAt: "2026-08-27T12:02:00.000Z" }).kind, "applied");
     assert.equal(voices.finalizeTranscription(context, value.companyId, leased.id, "stt", { transcript: { id: "cat-human-required", conversationId: value.conversationId, messageId: value.inboundId, mediaAssetId: value.assetId, normalizedTranscript: "hola", languageTag: "es", inputDigest: "d".repeat(64), outcome: "completed", safeFailureCategory: null, createdAt: "2026-08-27T12:02:00.000Z" }, settlement: { state: "completed", safeOutcome: "completed", safeFailureCategory: null, completedAt: "2026-08-27T12:02:00.000Z", updatedAt: "2026-08-27T12:02:00.000Z" } }).kind, "suppressed");
     assert.deepEqual({ ...(first.prepare("SELECT state,media_gate_state FROM channel_execution_requests WHERE id='cex_04400000000000000000000000000001'").get() as Record<string, unknown>) }, { state: "completed", media_gate_state: "blocked_by_transcript" });
-  } finally { first.close(); second.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { first.close(); second.close(); rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });
 
 test("EPIC044 PASS3A replays an expired transcription lease after restart before opening its gate", () => {
@@ -300,7 +300,7 @@ test("EPIC044 PASS3A replays an expired transcription lease after restart before
     assert.equal(replayed.attemptCount, 2);
     assert.equal(new WhatsAppVoiceRepository(database).finalizeTranscription(context, value.companyId, replayed.id, "restarted-worker", { transcript: { id: "cat-replay", conversationId: value.conversationId, messageId: value.inboundId, mediaAssetId: value.assetId, normalizedTranscript: "hola atlas", languageTag: "es", inputDigest: "e".repeat(64), outcome: "completed", safeFailureCategory: null, createdAt: "2026-08-27T12:02:00.000Z" }, settlement: { state: "completed", safeOutcome: "completed", safeFailureCategory: null, completedAt: "2026-08-27T12:02:00.000Z", updatedAt: "2026-08-27T12:02:00.000Z" } }).kind, "opened");
     assert.deepEqual({ ...(database.prepare("SELECT state,media_gate_state FROM channel_execution_requests WHERE id='cex_04400000000000000000000000000001'").get() as Record<string, unknown>) }, { state: "pending", media_gate_state: "open" });
-  } finally { if (database.isOpen) database.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { if (database.isOpen) database.close(); rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });
 
 test("EPIC044 PASS3A execution leasing permits only an open pending request", () => {

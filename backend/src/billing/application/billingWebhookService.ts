@@ -19,7 +19,8 @@ export class BillingWebhookService {
     if (!secret) return false;
     const header = headerValue(headers, provider === "stripe" ? "stripe-signature" : "x-signature");
     if (!header) return false;
-    const expected = provider === "stripe" ? stripeSignature(secret, raw, header) : mercadoPagoSignature(secret, raw, headers, header);
+    if (provider === "stripe") return stripeSignature(secret, raw, header, this.now()).some((signature) => safeEqual(signature.digest, signature.signature));
+    const expected = mercadoPagoSignature(secret, raw, headers, header);
     return expected !== null && safeEqual(expected.digest, expected.signature);
   }
 }
@@ -33,7 +34,7 @@ function normalize(provider: BillingProviderKind, raw: Buffer): Omit<import("../
   if (provider === "stripe" && eventType === "checkout.session.completed" && (!bounded(objectId) || !bounded(subscriptionId))) return null;
   return { providerEventId: eventId, eventType, providerObjectId: bounded(objectId) ? objectId : null, providerCustomerId: bounded(customerId) ? customerId : null, providerSubscriptionId: bounded(subscriptionId) ? subscriptionId : null, correlationToken:bounded(correlationToken)?correlationToken:null };
 }
-function stripeSignature(secret: string, raw: Buffer, header: string): { digest: Buffer; signature: Buffer } | null { const timestamp = header.split(",").find(value => value.startsWith("t="))?.slice(2), signature = header.split(",").find(value => value.startsWith("v1="))?.slice(3); if (!timestamp || !signature || !/^\d+$/.test(timestamp) || !/^[0-9a-f]{64}$/i.test(signature)) return null; return { digest: createHmac("sha256", secret).update(`${timestamp}.`).update(raw).digest(), signature: Buffer.from(signature, "hex") }; }
+function stripeSignature(secret: string, raw: Buffer, header: string, now: string): readonly { digest: Buffer; signature: Buffer }[] { const parts=header.split(",").map(value=>value.trim()), timestamps=parts.filter(value=>value.startsWith("t=")).map(value=>value.slice(2)), signatures=parts.filter(value=>value.startsWith("v1=")).map(value=>value.slice(3)); if(timestamps.length!==1||!timestamps[0]||!/^\d+$/.test(timestamps[0])||!signatures.length)return[]; const timestamp=Number(timestamps[0]), current=Math.floor(Date.parse(now)/1000); if(!Number.isSafeInteger(timestamp)||!Number.isSafeInteger(current)||Math.abs(current-timestamp)>300)return[]; const digest=createHmac("sha256",secret).update(`${timestamp}.`).update(raw).digest(); return signatures.filter(value=>/^[0-9a-f]{64}$/i.test(value)).map(value=>({digest,signature:Buffer.from(value,"hex")})); }
 function mercadoPagoSignature(secret: string, raw: Buffer, headers: Record<string, string | string[] | undefined>, header: string): { digest: Buffer; signature: Buffer } | null { const values = Object.fromEntries(header.split(",").map(part => { const [key, value] = part.trim().split("=", 2); return [key, value]; })), timestamp = values.ts, signature = values.v1, requestId = headerValue(headers, "x-request-id"); if (!timestamp || !signature || !requestId || !/^\d+$/.test(timestamp) || !/^[0-9a-f]{64}$/i.test(signature)) return null; let id = ""; try { id = text(object((JSON.parse(raw.toString("utf8")) as Json).data)?.id) ?? ""; } catch { return null; } return { digest: createHmac("sha256", secret).update(`id:${id};request-id:${requestId};ts:${timestamp};`).digest(), signature: Buffer.from(signature, "hex") }; }
 function safeEqual(left: Buffer, right: Buffer): boolean { return left.length === right.length && timingSafeEqual(left, right); }
 function headerValue(headers: Record<string, string | string[] | undefined>, name: string): string | null { const value = headers[name]; return typeof value === "string" && value.length <= 2048 ? value : null; }

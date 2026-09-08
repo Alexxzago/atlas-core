@@ -39,7 +39,7 @@ test("EPIC-042 migrations 0056-0058 are additive, tenant-scoped, and advance the
   const database = createDatabase(":memory:");
   try {
     const head = database.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as { id: number; name: string };
-    assert.deepEqual({ ...head }, { id: 68, name: "0068_billing_operations_provider_events_reconciliation" });
+    assert.deepEqual({ ...head }, { id: 69, name: "0069_shared_rate_limit_windows" });
     assert.ok(database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='meta_embedded_signup_attempts'").get());
     const legacy = new DatabaseSync(":memory:");
     try { legacy.exec("PRAGMA foreign_keys=ON"); runMigrations(legacy, 55); assert.equal(legacy.prepare("SELECT id FROM schema_migrations WHERE id=57").get(), undefined); runMigrations(legacy); assert.equal((legacy.prepare("SELECT COUNT(*) count FROM schema_migrations WHERE id=57").get() as { count: number }).count, 1); } finally { legacy.close(); }

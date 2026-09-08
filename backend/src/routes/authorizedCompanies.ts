@@ -9,6 +9,8 @@ import type { WorkspaceContext } from "../types/workspaceContext.js";
 import { createActorContext, type ActorContext } from "../knowledge/domain/actorContext.js";
 import type { CompanyCoreControllers } from "../controllers/companyCoreController.js";
 import { CommercialControlsRepository } from "../repositories/commercialControlsRepository.js";
+import type { CompanyOperationalStatusService } from "../company/services/companyOperationalStatusService.js";
+import { createGetCompanyOperationalStatusController } from "../controllers/companyOperationalStatusController.js";
 
 interface ContextualControllers {
   list: (context: WorkspaceContext) => RequestHandler;
@@ -26,7 +28,7 @@ interface ContextualAssistantControllers {
   update: (context: WorkspaceContext) => RequestHandler;
   transition: (context: WorkspaceContext) => RequestHandler;
   preview: (context: WorkspaceContext) => RequestHandler;
-  execution?: (context: WorkspaceContext) => RequestHandler;
+  execution?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
 }
 interface ContextualAssistantCapabilityControllers { list:(context:WorkspaceContext)=>RequestHandler; replace:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler; }
 interface ContextualAssistantReadinessControllers { get: (context: WorkspaceContext) => RequestHandler; refresh: (context: WorkspaceContext) => RequestHandler; }
@@ -76,6 +78,7 @@ interface AuthorizedCompanyDependencies {
   whatsAppConnectionControllers?: ContextualWhatsAppConnectionControllers;
   voicePolicyControllers?: ContextualVoicePolicyControllers;
   proactiveActionControllers?: ContextualProactiveActionControllers;
+  companyOperationalStatusService?: CompanyOperationalStatusService;
   metaEmbeddedSignupControllers?: ContextualMetaEmbeddedSignupControllers;
   knowledgeControllers?: Record<string, (context: WorkspaceContext, actor: ActorContext) => RequestHandler>;
   conversationMessageController?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
@@ -95,6 +98,7 @@ let productionAssistantCapabilityControllers: ContextualAssistantCapabilityContr
 let productionCommercialControls: CommercialControlsRepository | null = null;
 let productionVoicePolicyControllers: ContextualVoicePolicyControllers | null = null;
 let productionProactiveActionControllers: ContextualProactiveActionControllers | null = null;
+let productionCompanyOperationalStatusService: CompanyOperationalStatusService | null = null;
 export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
 export function configureProductionConversationReadControllers(controllers: ContextualConversationReadControllers): void { productionConversationReadControllers = controllers; }
 export function configureProductionConversationControlControllers(controllers: ContextualConversationControlControllers): void { productionConversationControlControllers = controllers; }
@@ -105,6 +109,7 @@ export function configureProductionAssistantCapabilityControllers(controllers: C
 export function configureProductionCommercialControls(controls: CommercialControlsRepository): void { productionCommercialControls = controls; }
 export function configureProductionVoicePolicyControllers(controllers: ContextualVoicePolicyControllers): void { productionVoicePolicyControllers = controllers; }
 export function configureProductionProactiveActionControllers(controllers: ContextualProactiveActionControllers): void { productionProactiveActionControllers = controllers; }
+export function configureProductionCompanyOperationalStatusService(service: CompanyOperationalStatusService): void { productionCompanyOperationalStatusService = service; }
 
 function rawCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -155,6 +160,7 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
       if (changing && dependencies.commercial && !dependencies.commercial.isWorkspaceActive(decision.workspaceId)) { res.status(409).json({ error: { code: "commercial_account_suspended", message: "Commercial account is suspended." } }); return; }
       const context = dependencies.resolver.resolve(decision);
       const actor = createActorContext({ userId: decision.userId, membershipId: decision.membershipId, role: decision.role, capabilities: decision.capabilities });
+      res.locals.actorId = actor.userId;
       await controller(context, actor)(req, res, next);
     } catch { res.status(404).json({ error: "Resource not found." }); }
   };
@@ -198,10 +204,12 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     router.get("/:workspaceId/companies/:companyId/assistant/readiness", authorize("company:read", false, readiness.get));
     router.post("/:workspaceId/companies/:companyId/assistant/readiness/refresh", authorize("company:manage", true, readiness.refresh));
   }
+  const operationalStatus = dependencies.companyOperationalStatusService ?? productionCompanyOperationalStatusService;
+  if (operationalStatus) router.get("/:workspaceId/companies/:companyId/operational-status", authorize("company:read", false, (context) => createGetCompanyOperationalStatusController(operationalStatus, context)));
   const defaults=dependencies.defaultAssistantControllers??productionDefaultAssistantControllers;
   if(defaults){router.get("/:workspaceId/companies/:companyId/assistant/default",authorize("company:read",false,defaults.get));router.put("/:workspaceId/companies/:companyId/assistant/default",authorize("company:manage",true,defaults.put));}
   const operationalJson = json({ type: "application/json", limit: 8 * 1024 });
-  const operationalExecution = dependencies.assistantControllers.execution ? authorize("chat:use", true, (context) => (req, res, next) => {
+  const operationalExecution = dependencies.assistantControllers.execution ? authorize("chat:use", true, (context, actor) => (req, res, next) => {
     if (!req.is("application/json")) {
       res.status(415).json({ error: { code: "assistant_execution_media_type_unsupported", message: "Assistant execution requires application/json." } });
       return;
@@ -213,7 +221,7 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
         res.status(400).json({ error: { code: "invalid_assistant_execution_request", message: "A valid Assistant Profile and message are required." } });
         return;
       }
-      dependencies.assistantControllers.execution!(context)(req, res, next);
+      dependencies.assistantControllers.execution!(context, actor)(req, res, next);
     });
   }) : null;
   if (operationalExecution) router.post("/:workspaceId/companies/:companyId/assistant/executions", operationalExecution);

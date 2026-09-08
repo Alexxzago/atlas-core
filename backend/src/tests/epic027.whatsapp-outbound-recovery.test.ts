@@ -62,12 +62,16 @@ test("EPIC-027 Phase 5 logs only sanitized Meta outbound failure diagnostics", a
   } finally { console.info = original; }
   assert.equal(logs.length, 1);
   const diagnostic = JSON.parse(logs[0]!) as Record<string, unknown>;
-  assert.deepEqual(Object.keys(diagnostic).sort(), ["connectionId", "errorType", "event", "graphApiVersion", "httpStatus", "operation", "outboundDeliveryId", "providerCode", "providerSubcode", "sanitizedDetailsCategory", "sanitizedReason", "timestamp", "transient"]);
-  assert.equal(diagnostic.event, "whatsapp_provider_outbound_failed");
-  assert.equal(diagnostic.sanitizedDetailsCategory, "outside_test_recipient_set");
-  assert.equal(diagnostic.sanitizedReason, "recipient_not_in_allowed_list");
+  assert.deepEqual(Object.keys(diagnostic).sort(), ["event", "httpStatus", "level", "operation", "outboundDeliveryId", "outcome", "provider", "safeErrorCategory", "timestamp", "whatsAppConnectionId"]);
+  assert.equal(diagnostic.event, "provider_call_failed");
+  assert.equal(diagnostic.level, "warn");
+  assert.equal(diagnostic.provider, "meta_whatsapp");
+  assert.equal(diagnostic.operation, "send_message");
+  assert.equal(diagnostic.httpStatus, 400);
+  assert.equal(diagnostic.outcome, "failed");
+  assert.equal(diagnostic.safeErrorCategory, "provider_rejected");
   const text = logs[0]!;
-  assert.equal(text.includes("token") || text.includes("Reply") || text.includes('"wa"') || text.includes("phone") || text.includes("private Meta detail") || text.includes("trace-id"), false);
+  assert.equal(text.includes("token") || text.includes("Authorization") || text.includes("Reply") || text.includes('"wa"') || text.includes("phone") || text.includes("private Meta detail") || text.includes("trace-id") || text.includes("OAuthException") || text.includes("outside_test_recipient_set") || text.includes("recipient_not_in_allowed_list") || text.includes("stack"), false);
 });
 
 test("EPIC-027 Phase 5 accepts eventually, terminates exhausted retries, and recovers expired leases", async () => {

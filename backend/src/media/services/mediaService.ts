@@ -10,7 +10,7 @@ export class MediaService {
   public async store(context: WorkspaceContext, companyId: number, input: StoreMediaInput): Promise<MediaAsset> {
     const filename=safeFilename(input.filename), metadata=safeMetadata(input.metadata), mediaType=normalizeType(input.declaredMediaType), kind=mediaKind(mediaType), now=this.clock.now(), assetId=id("mas"),candidateId=id("mbl"); let staged: Awaited<ReturnType<MediaStoragePort["stage"]>> | undefined; let promoted: string | undefined; let reservedAssetId: string | undefined;
     try {
-      staged=await this.storage.stage(candidateId,input.content);
+      staged=await this.storage.stage(candidateId,input.content,{workspaceId:context.workspaceId,companyId});
       const fingerprint=createHash("sha256").update(JSON.stringify({kind,mediaType,filename,metadata:canonicalMetadata(metadata),digest:staged.digest,sizeBytes:staged.sizeBytes})).digest("hex");
       const reserved=this.repository.reserve(context,companyId,input.operation,key(input.idempotencyKey),fingerprint,{id:assetId,workspaceId:context.workspaceId,companyId,kind,mediaType,sizeBytes:null,filename,metadata,status:"pending",createdAt:now,archivedAt:null,deletedAt:null},now);
       if(reserved.kind==="same"){await this.storage.delete(staged.temporaryReference);return reserved.asset;}
@@ -21,7 +21,7 @@ export class MediaService {
       const inspected=this.inspector.inspect(bytes);
       if(inspected.mediaType!==mediaType)throw new MediaDomainError("media_type_mismatch");
       safeMetadata(inspected.metadata);
-      promoted=await this.storage.promote(staged.temporaryReference,candidateId);
+      promoted=await this.storage.promote(staged.temporaryReference,candidateId,inspected.mediaType);
       const existing=this.repository.findBlob(context,companyId,staged.digest,staged.sizeBytes,inspected.mediaType);
       if(existing){await this.storage.delete(promoted);promoted=undefined;}
       const complete=this.repository.complete(context,companyId,reservedAssetId,{id:candidateId,workspaceId:context.workspaceId,companyId,digest:staged.digest,sizeBytes:staged.sizeBytes,mediaType:inspected.mediaType,storageReference:promoted??candidateId,state:"active",createdAt:this.clock.now()},this.clock.now());
