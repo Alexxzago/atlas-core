@@ -147,8 +147,8 @@ test("EPIC040 migrates a fresh database through the current schema head", () => 
   const database = createDatabase(":memory:");
   try {
     const head = database.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as { id: number; name: string };
-    assert.equal(head.id, 68);
-    assert.equal(head.name, "0068_billing_operations_provider_events_reconciliation");
+    assert.equal(head.id, 69);
+    assert.equal(head.name, "0069_shared_rate_limit_windows");
   } finally {
     database.close();
   }

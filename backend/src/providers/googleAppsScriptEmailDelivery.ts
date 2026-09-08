@@ -1,6 +1,7 @@
 import type { CredentialEnrollmentDeliveryPort, CredentialEnrollmentDeliveryRequest, EmailVerificationDeliveryPort, EmailVerificationDeliveryRequest, PasswordResetDeliveryPort, PasswordResetDeliveryRequest, VerificationDeliveryOutcome } from "../identity/application/ports.js";
 import type { InvitationDeliveryPort, InvitationDeliveryRequest } from "../workspace/application/ports.js";
 import { emailContent, emailDeliveryPurpose, type EmailDeliveryPurpose, type EmailDeliveryRequest } from "./emailDeliveryContent.js";
+import { operationalLogger } from "../observability/operationalLogger.js";
 
 export interface GoogleAppsScriptConfiguration {
   readonly endpoint: string;
@@ -52,7 +53,7 @@ function parseContract(payload: unknown): { readonly ok: true } | { readonly ok:
 }
 
 export class GoogleAppsScriptEmailDelivery implements EmailVerificationDeliveryPort, CredentialEnrollmentDeliveryPort, PasswordResetDeliveryPort, InvitationDeliveryPort {
-  public constructor(private readonly configuration: GoogleAppsScriptConfiguration, private readonly fetcher: typeof fetch = fetch, private readonly logFailure: GoogleAppsScriptFailureLogger = (entry) => console.error(JSON.stringify(entry))) {}
+  public constructor(private readonly configuration: GoogleAppsScriptConfiguration, private readonly fetcher: typeof fetch = fetch, private readonly logFailure: GoogleAppsScriptFailureLogger = (entry) => operationalLogger.error("provider_call_failed", { provider: entry.provider, operation: entry.purpose, outcome: entry.outcome, safeErrorCategory: entry.providerCode ?? "internal_failure", ...(entry.httpStatus === null ? {} : { httpStatus: entry.httpStatus }) })) {}
 
   public async deliver(request: EmailDeliveryRequest): Promise<VerificationDeliveryOutcome> {
     const content = emailContent(request);

@@ -11,6 +11,7 @@ import type { WhatsAppConnectionService } from "./WhatsAppConnectionService.js";
 import type { VoiceRepositoryPort } from "../application/voicePorts.js";
 import type { VoiceDeferredSemanticRecoveryService } from "./voiceDeferredSemanticRecoveryService.js";
 import type { ProactiveSemanticRecoveryService } from "../../proactive/services/proactiveSemanticRecoveryService.js";
+import { operationalLogger } from "../../observability/operationalLogger.js";
 
 export class WhatsAppOutboundDeliveryValidationError extends Error {}
 
@@ -101,7 +102,7 @@ export class WhatsAppOutboundDeliveryService {
     const nextAttemptAt = outcome === "retryable" ? retryAt(now, delivery.attemptCount, result.retryAfterMilliseconds) : null;
     this.deliveries.settleLease(delivery.id, owner, outcome, nextAttemptAt, result.safeErrorCategory, now);
   }
-  private logFailure(error: unknown, connectionId: string, outboundDeliveryId: string): void { const diagnostic = error instanceof WhatsAppCloudApiError ? error.diagnostic : null; console.info(JSON.stringify({ event: "whatsapp_provider_outbound_failed", operation: "send_text", graphApiVersion: diagnostic?.graphApiVersion ?? null, httpStatus: diagnostic?.httpStatus ?? null, providerCode: diagnostic?.providerCode ?? null, providerSubcode: diagnostic?.providerSubcode ?? null, errorType: diagnostic?.errorType ?? null, transient: diagnostic?.transient ?? null, sanitizedDetailsCategory: diagnostic?.sanitizedDetailsCategory ?? "provider_rejected", sanitizedReason: diagnostic?.sanitizedReason ?? "provider_rejected", connectionId, outboundDeliveryId, timestamp: new Date().toISOString() } satisfies OutboundFailureLog)); }
+  private logFailure(error: unknown, connectionId: string, outboundDeliveryId: string): void { const diagnostic = error instanceof WhatsAppCloudApiError ? error.diagnostic : null; operationalLogger.warn("provider_call_failed", { provider: "meta_whatsapp", operation: "send_message", whatsAppConnectionId: connectionId, outboundDeliveryId, ...(diagnostic?.httpStatus !== null && diagnostic?.httpStatus !== undefined ? { httpStatus: diagnostic.httpStatus } : {}), safeErrorCategory: diagnostic?.sanitizedReason === "rate_limited" ? "rate_limited" : "provider_rejected", outcome: "failed" }); }
 }
 
 function safe(value: OutboundDelivery): WhatsAppOutboundDeliveryResult {

@@ -1,4 +1,5 @@
 import type { MetaEmbeddedSignupAuditPort } from "./metaEmbeddedSignupAttemptService.js";
+import { operationalLogger } from "../../observability/operationalLogger.js";
 
 export type MetaEmbeddedSignupOperationalAuditEvent =
   | Parameters<MetaEmbeddedSignupAuditPort["record"]>[0]
@@ -24,15 +25,12 @@ export interface MetaEmbeddedSignupOperationalAuditPort {
 export class StructuredMetaEmbeddedSignupAudit
   implements MetaEmbeddedSignupAuditPort, MetaEmbeddedSignupOperationalAuditPort {
   public record(event: MetaEmbeddedSignupOperationalAuditEvent): void {
-    console.info(JSON.stringify({
-      event: event.type,
-      timestamp: event.at,
+    operationalLogger.info(event.type, {
       workspaceId: event.workspaceId,
       companyId: event.companyId,
       ...("attemptId" in event && event.attemptId ? { attemptId: event.attemptId } : {}),
       ...("integrationConnectionId" in event && event.integrationConnectionId ? { integrationConnectionId: event.integrationConnectionId } : {}),
       ...("whatsAppConnectionId" in event && event.whatsAppConnectionId ? { whatsAppConnectionId: event.whatsAppConnectionId } : {}),
-      ...("subscriptionChanged" in event && typeof event.subscriptionChanged === "boolean" ? { subscriptionChanged: event.subscriptionChanged } : {}),
-    }));
+    });
   }
 }

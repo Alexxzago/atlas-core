@@ -36,12 +36,12 @@ test("EPIC-042 structured Meta audit projects safe correlation fields only", () 
   assert.equal(captured.length, 1);
   const event = JSON.parse(captured[0]!) as Record<string, unknown>;
   assert.equal(event.event, "meta_signup_ready");
-  assert.equal(event.timestamp, now);
+  assert.equal(typeof event.timestamp, "string"); assert.ok(!Number.isNaN(Date.parse(event.timestamp as string))); assert.equal("at" in event, false);
   assert.equal(event.workspaceId, 1);
   assert.equal(event.companyId, 2);
   assert.equal(event.integrationConnectionId, integrationId);
   assert.equal(event.whatsAppConnectionId, whatsAppId);
-  assert.equal(event.subscriptionChanged, true);
+  assert.equal("subscriptionChanged" in event, false);
   assert.doesNotMatch(captured[0]!, /raw-state|authorization-code|access-token|provider-body/);
 });
 

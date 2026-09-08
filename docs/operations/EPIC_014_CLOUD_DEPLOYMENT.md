@@ -40,16 +40,20 @@ The import includes `schema_migrations`, tenant records, Knowledge versions/publ
 ## Render
 
 1. Create a Render Web Service from this GitHub repository and select the current branch.
-2. Render discovers `render.yaml`; confirm root directory `backend`, build command `npm ci && npm run build`, start command `npm start`, and health check `/health`.
-3. Add secret environment variables: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `ATLAS_VERIFICATION_ORIGIN`, `ATLAS_BOOTSTRAP_SECRET`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_REPLY_TO`, `GEMINI_API_KEY`, `FIRECRAWL_API_KEY`, `EMAIL_PROVIDER`, `GOOGLE_APPS_SCRIPT_URL`, `GOOGLE_APPS_SCRIPT_TOKEN`, and `EMAIL_TIMEOUT` when their features are enabled.
+2. Render discovers `render.yaml`; confirm root directory `backend`, build command `npm ci && npm run build`, start command `npm start`, and health check `/ready`. `/health` is liveness only; Render must gate deployment on readiness.
+3. Render-managed values must satisfy `backend/src/config/productionConfiguration.ts`. Core configuration is `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `ATLAS_VERIFICATION_ORIGIN`, and `ATLAS_BOOTSTRAP_SECRET`. Configure delivery credentials only for the selected `EMAIL_PROVIDER`/`ATLAS_VERIFICATION_DELIVERY`; configure WhatsApp, integrations, Meta, Billing, Gemini, and Firecrawl only when those providers are enabled. `render.yaml` tracks variable names, not secret values.
 4. Set non-secret variables: `NODE_ENV=production` and `DATABASE_PROVIDER=libsql`.
 5. Set `ATLAS_VERIFICATION_ORIGIN` to the final HTTPS Vercel origin, for example `https://atlas-portal.vercel.app`.
 6. Set `ATLAS_ALLOWED_ORIGINS` to that same exact origin. Multiple explicit origins are comma-separated only when required.
 7. Deploy, then check `https://YOUR-RENDER-HOST/health` and `https://YOUR-RENDER-HOST/ready`.
 
-`ATLAS_BOOTSTRAP_SECRET` must be a unique secret of at least 32 characters. It authorizes the one-time initial platform claim and must never be sent to browsers, logs, or email. SMTP values configure Nodemailer: `SMTP_SECURE=true` normally uses port 465; `SMTP_SECURE=false` normally uses port 587. `SMTP_FROM` and `SMTP_REPLY_TO` are the sender and support reply address. For Google Apps Script, set `EMAIL_PROVIDER=google_apps_script`, `GOOGLE_APPS_SCRIPT_URL` to the HTTPS endpoint, `GOOGLE_APPS_SCRIPT_TOKEN` to the shared secret, and `EMAIL_TIMEOUT` for the request timeout in milliseconds. The backend sends a JSON payload with `authToken`, `to`, `subject`, `html`, and `text`; the Web App compares `authToken` with a Script Property and must return JSON `{ "ok": true }` for success. The endpoint must not be used without a shared secret, and secrets must never be committed to Git. Production startup fails if the bootstrap secret or any provider-specific variables are missing or invalid.
+`ATLAS_BOOTSTRAP_SECRET` must be a unique secret of at least 32 characters. It authorizes the one-time initial platform claim and must never be sent to browsers, logs, or email. SMTP values configure Nodemailer: `SMTP_SECURE=true` normally uses port 465; `SMTP_SECURE=false` normally uses port 587. `SMTP_FROM` and `SMTP_REPLY_TO` are the sender and support reply address. For Google Apps Script, set `EMAIL_PROVIDER=google_apps_script`, `GOOGLE_APPS_SCRIPT_URL` to the HTTPS endpoint, `GOOGLE_APPS_SCRIPT_TOKEN` to the shared secret, and `EMAIL_TIMEOUT` for the request timeout in milliseconds. The backend sends a JSON payload with `authToken`, `to`, `subject`, `html`, and `text`; the Web App compares `authToken` with a Script Property and must return JSON `{ "ok": true }` for success. The endpoint must not be used without a shared secret, and secrets must never be committed to Git. Production startup fails only for invalid core configuration or an enabled provider's invalid configuration.
 
 Render free services can sleep after inactivity and their local filesystem is ephemeral. Atlas production data is therefore only in Turso. The first request after sleep can be slow.
+
+## Media Durability Blocker
+
+Production media uses private S3-compatible object storage. Set `ATLAS_MEDIA_STORAGE_PROVIDER=s3`, `ATLAS_S3_ENDPOINT` to the account-specific Cloudflare R2 S3 endpoint, `ATLAS_S3_REGION=auto`, `ATLAS_S3_BUCKET`, `ATLAS_S3_ACCESS_KEY_ID`, and `ATLAS_S3_SECRET_ACCESS_KEY` in Render. `ATLAS_MEDIA_ROOT` is not used in production. Do not configure a filesystem path, public bucket, public object URLs, or Render Persistent Disk as a substitute. Atlas retains media metadata and authorization in Turso; R2 holds bytes only.
 
 ## Vercel
 
@@ -77,6 +81,8 @@ Render free services can sleep after inactivity and their local filesystem is ep
 - Roll back application code by redeploying the prior GitHub revision. Database migrations are additive; do not delete migration records or modify historical migration SQL.
 - To rotate a Turso token, create a new token, update Render, verify `/ready`, then revoke the old token in Turso.
 - Rotate provider keys in their provider consoles and Render only. Never log secret values.
+- Persisted WhatsApp and Integration credentials use versioned AES-GCM envelopes. To rotate a domain key, configure its active key ID/key and retain the prior `*_KEY` as the legacy v1 key or configure one previous key ID/key, deploy, run `npm run maintenance:reencrypt-credentials`, and confirm only count-only output reports zero legacy/previous envelopes. Remove retired material, redeploy, and verify `/health` and `/ready`. Runtime secrets, including R2/S3, webhook, billing, email, and AI credentials, remain deployment-managed: rotate with the provider, update Render, restart, verify, then retire the prior provider credential. Do not place secret values in commands, logs, or documentation.
+- Production database recovery is Turso PITR, not a libSQL export or filesystem copy. Restore always creates a new Turso database at an operator-selected RFC3339 recovery point; verify it before manually updating deployment database configuration and redeploying. Retain the source database until explicit cleanup. PITR retention is plan-dependent and may have a recovery gap of up to 15 seconds immediately before the selected point. Media recovery requires a separate private, deletion-protected backup bucket and a completed Atlas DR manifest; never use public URLs or embed database, Turso, or S3 credentials in manifests.
 
 ## Free-Tier Limits
 

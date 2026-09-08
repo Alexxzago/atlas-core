@@ -11,6 +11,8 @@ import type { KnowledgeService as FrozenKnowledgeService } from "../knowledge/se
 import type { ActorContext } from "../knowledge/domain/actorContext.js";
 import { createSystemActorContext } from "../knowledge/domain/actorContext.js";
 import { KnowledgeDomainError } from "../knowledge/domain/knowledge.js";
+import { abuseScope } from "../abuse/sharedRateLimitRepository.js";
+import { companyOnboardingActorLimit, companyOnboardingCompanyLimit, type RateLimitService } from "../abuse/rateLimitService.js";
 
 export class OnboardingError extends Error {}
 
@@ -29,13 +31,21 @@ export class OnboardingService {
     private readonly cleaner: (markdown: string) => string,
     private readonly debugStore: MarkdownDebugStore,
     private readonly frozenKnowledge?: FrozenKnowledgeService,
+    private readonly limits?: RateLimitService,
   ) {}
+
+  public validateTarget(context: WorkspaceContext, companyIdValue: unknown, rawUrl: unknown): void {
+    const companyId = parseCompanyId(companyIdValue);
+    normalizeWebsiteUrl(rawUrl);
+    if (!this.companies.findById(context, companyId)) throw new CompanyNotFoundError("Company was not found.");
+  }
 
   public async onboard(context: WorkspaceContext, companyIdValue: unknown, rawUrl: unknown, actor?: ActorContext): Promise<OnboardingResult> {
     const companyId = parseCompanyId(companyIdValue);
     const website = normalizeWebsiteUrl(rawUrl);
     const company = this.companies.findById(context, companyId);
     if (!company) throw new CompanyNotFoundError("Company was not found.");
+    if (actor && this.limits) { this.limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actor.userId), "actor", companyOnboardingActorLimit); this.limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", companyOnboardingCompanyLimit); }
     const existingPublishedKnowledge = this.knowledge.load(context, companyId);
 
     if (!this.frozenKnowledge) throw new OnboardingError("Frozen Knowledge service is required.");

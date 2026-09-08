@@ -11,6 +11,8 @@ import { reconstructWhatsAppConnection, whatsAppConnectionId, whatsAppConnection
 import { reconstructEncryptedWhatsAppConnectionCredentials, reconstructWhatsAppConnectionOperationalState, type WhatsAppConnectionOperationalState } from "../domain/whatsappConnectionOnboarding.js";
 import type { AssistantReadinessService } from "../../assistant/services/assistantReadinessService.js";
 import { assertBillingEntitlement, BillingEntitlementDeniedError, type BillingEntitlementPort } from "../../billing/services/billingEntitlementService.js";
+import { abuseScope } from "../../abuse/sharedRateLimitRepository.js";
+import { whatsAppValidationActorLimit, whatsAppValidationCompanyLimit, type RateLimitService } from "../../abuse/rateLimitService.js";
 
 export class WhatsAppConnectionValidationError extends Error {}
 export class WhatsAppConnectionNotFoundError extends Error {}
@@ -23,6 +25,7 @@ export interface WhatsAppConnectionClock { now(): string; }
 
 export class WhatsAppConnectionService {
   private readonly executionPolicy = new AssistantProfileExecutionPolicy();
+  private limits: RateLimitService | null = null;
   public constructor(private readonly companies: CompanyRepositoryPort, private readonly profiles: AssistantProfileRepositoryPort, private readonly connections: WhatsAppConnectionRepositoryPort, private readonly clock: WhatsAppConnectionClock, private readonly onboarding?: { credentials: WhatsAppConnectionCredentialRepositoryPort; states: WhatsAppConnectionOperationalStateRepositoryPort; cipher: WhatsAppCredentialCipherPort; resolver: WhatsAppCredentialResolverPort; validator: WhatsAppConnectionProviderValidationPort; knowledge: KnowledgeRepositoryPort }, private readonly readiness?: AssistantReadinessService, private readonly entitlements?: BillingEntitlementPort) {}
   public create(context: WorkspaceContext, companyIdValue: unknown, value: unknown): WhatsAppConnection {
     const companyId = parseCompanyId(companyIdValue), input = createInput(value); this.company(context, companyId);
@@ -128,8 +131,12 @@ export class WhatsAppConnectionService {
     if (!updated) return this.changed(context, connection);
     return this.status(context, updated.companyId, updated.id);
   }
-  public async validate(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): Promise<WhatsAppConnectionOperationalStatus> {
-    const connection = this.get(context, companyIdValue, connectionIdValue), dependencies = this.requiredOnboarding(), token = dependencies.resolver.resolve(context, connection.companyId, connection.id);
+  public setRateLimiter(limits: RateLimitService): void { this.limits = limits; }
+  public async validate(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown, actorId = "unknown"): Promise<WhatsAppConnectionOperationalStatus> {
+    const connection = this.get(context, companyIdValue, connectionIdValue), dependencies = this.requiredOnboarding();
+    this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", connection.companyId, "actor", actorId), "actor", whatsAppValidationActorLimit);
+    this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", connection.companyId), "company", whatsAppValidationCompanyLimit);
+    const token = dependencies.resolver.resolve(context, connection.companyId, connection.id);
     if (!token) throw new WhatsAppConnectionCredentialsNotConfiguredError("WhatsApp credentials are not configured.");
     const now = this.clock.now(), result = await dependencies.validator.validateConnection({ accessToken: token, phoneNumberId: connection.phoneNumberId, whatsappBusinessAccountId: connection.whatsappBusinessAccountId });
     this.saveState(context, connection, result.status === "valid" ? { validationState: "valid", validatedAt: now, validationFailureCode: null, healthState: "healthy", lastProviderActivityAt: now, lastWebhookActivityAt: null, healthFailureCode: null, updatedAt: now } : { validationState: "invalid", validatedAt: now, validationFailureCode: result.failureCode, healthState: "degraded", lastProviderActivityAt: null, lastWebhookActivityAt: null, healthFailureCode: result.failureCode, updatedAt: now });

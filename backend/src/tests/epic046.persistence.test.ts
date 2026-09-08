@@ -52,7 +52,7 @@ import { createBillingWebhookController } from "../controllers/billingWebhookCon
 import { createBillingWebhookRouter } from "../routes/billingWebhook.js";
 import { createApp } from "../app.js";
 
-const at = "2026-09-01T00:00:00.000Z";
+const at = "2026-09-01T00:00:00.000Z", stripeTimestamp = Math.floor(Date.parse(at) / 1_000);
 function open(path = ":memory:"): DatabaseSync { const db = new DatabaseSync(path); db.exec("PRAGMA foreign_keys=ON"); runMigrations(db); return db; }
 function defaultWorkspace(db: DatabaseSync): number { return (db.prepare("SELECT id FROM workspaces WHERE key='default'").get() as { id:number }).id; }
 function catalogInput(overrides: Record<string, unknown> = {}) { return { planKey:"test", catalogVersion:1, displayName:"Test", interval:"month" as const, currency:"USD", amountMinor:0, lifecycle:"active" as const, maxCompanies:null, maxAssistantProfiles:null, maxActiveChannels:null, mutationEligible:true, entitlementDefinitionVersion:1, providerKind:null, providerPriceId:null, ...overrides }; }
@@ -581,7 +581,7 @@ test("EPIC046 migrates fresh and staged file-backed databases, backfills unmanag
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
     db.close(); db = new DatabaseSync(path); db.exec("PRAGMA foreign_keys=ON"); runMigrations(db);
     const head = db.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as {id:number;name:string};
-    assert.equal(head.id, 68); assert.equal(head.name, "0068_billing_operations_provider_events_reconciliation");
+    assert.equal(head.id, 69); assert.equal(head.name, "0069_shared_rate_limit_windows");
   } finally { if (db.isOpen) db.close(); rmSync(directory, {recursive:true, force:true}); }
 });
 
@@ -998,22 +998,22 @@ test("EPIC046 accepts verified bounded webhook evidence once and only enqueues r
     db.prepare("UPDATE billing_accounts SET rollout_mode='managed',provider_kind='stripe',provider_customer_id='cus_webhook',version=version+1 WHERE id=?").run(account.id);
     db.prepare("UPDATE billing_subscriptions SET provider_kind='stripe',provider_subscription_id='sub_webhook',effective_state='active',version=version+1 WHERE billing_account_id=?").run(account.id);
     const secret = "stripe_webhook_secret", raw = Buffer.from(JSON.stringify({ id:"evt_webhook", type:"customer.subscription.updated", data:{ object:{ id:"sub_webhook", customer:"cus_webhook", status:"past_due" } } }));
-    const signature = createHmac("sha256", secret).update("1700000000.").update(raw).digest("hex");
+    const signature = createHmac("sha256", secret).update(`${stripeTimestamp}.`).update(raw).digest("hex");
     const service = new BillingWebhookService({stripe:secret,mercadopago:"mp_webhook_secret"},new BillingWebhookRepository(db),()=>at);
     const authorityBefore = db.prepare("SELECT effective_state,version FROM billing_subscriptions WHERE billing_account_id=?").get(account.id);
-    assert.equal(service.receive("stripe",raw,{"stripe-signature":`t=1700000000,v1=${signature}`}),"accepted");
-    assert.equal(service.receive("stripe",raw,{"stripe-signature":`t=1700000000,v1=${signature}`}),"duplicate");
+    assert.equal(service.receive("stripe",raw,{"stripe-signature":`t=${stripeTimestamp},v1=${signature}`}),"accepted");
+    assert.equal(service.receive("stripe",raw,{"stripe-signature":`t=${stripeTimestamp},v1=${signature}`}),"duplicate");
     assert.equal(count(db,"SELECT COUNT(*) count FROM billing_provider_events"),1);
     assert.equal(count(db,"SELECT COUNT(*) count FROM billing_reconciliation_work WHERE billing_account_id=? AND status='pending'",account.id),1);
     assert.deepEqual(db.prepare("SELECT effective_state,version FROM billing_subscriptions WHERE billing_account_id=?").get(account.id),authorityBefore);
-    assert.equal(service.receive("stripe",raw,{"stripe-signature":"t=1700000000,v1=00"}),"invalid");
+    assert.equal(service.receive("stripe",raw,{"stripe-signature":`t=${stripeTimestamp},v1=00`}),"invalid");
     const unknown = Buffer.from(JSON.stringify({id:"evt_unknown",type:"customer.subscription.updated",data:{object:{id:"sub_unknown",customer:"cus_unknown"}}}));
-    const unknownSignature = createHmac("sha256",secret).update("1700000001.").update(unknown).digest("hex");
-    assert.equal(service.receive("stripe",unknown,{"stripe-signature":`t=1700000001,v1=${unknownSignature}`}),"ignored");
+    const unknownSignature = createHmac("sha256",secret).update(`${stripeTimestamp}.`).update(unknown).digest("hex");
+    assert.equal(service.receive("stripe",unknown,{"stripe-signature":`t=${stripeTimestamp},v1=${unknownSignature}`}),"ignored");
     assert.equal(count(db,"SELECT COUNT(*) count FROM billing_reconciliation_work"),1);
     const conflicting = Buffer.from(JSON.stringify({id:"evt_conflicting",type:"customer.subscription.updated",data:{object:{id:"sub_webhook",customer:"cus_unknown"}}}));
-    const conflictingSignature = createHmac("sha256",secret).update("1700000002.").update(conflicting).digest("hex");
-    assert.equal(service.receive("stripe",conflicting,{"stripe-signature":`t=1700000002,v1=${conflictingSignature}`}),"ignored");
+    const conflictingSignature = createHmac("sha256",secret).update(`${stripeTimestamp}.`).update(conflicting).digest("hex");
+    assert.equal(service.receive("stripe",conflicting,{"stripe-signature":`t=${stripeTimestamp},v1=${conflictingSignature}`}),"ignored");
     assert.equal(count(db,"SELECT COUNT(*) count FROM billing_reconciliation_work"),1);
     assert.deepEqual(db.prepare("PRAGMA table_info(billing_provider_events)").all().map(row=>(row as {name:string}).name).filter(name=>/payload|body/i.test(name)),["payload_digest"]);
   } finally { db.close(); }
@@ -1121,8 +1121,8 @@ test("EPIC046 PASS4F5 HTTP checkout success never activates local subscription a
 }));
 
 test("EPIC046 PASS4F5 HTTP webhooks are raw-signature independent and only enqueue reconciliation", async () => withBillingHttp({webhook:true},async fixture => {
-  fixture.managed("active"); const raw=Buffer.from(JSON.stringify({id:"evt_http_webhook",type:"customer.subscription.updated",data:{object:{id:"sub_http",customer:"cus_http",status:"past_due"}}})), signature=createHmac("sha256","stripe_webhook_secret").update("1700000000.").update(raw).digest("hex"), before=fixture.db.prepare("SELECT effective_state,version FROM billing_subscriptions WHERE billing_account_id=?").get(fixture.account.id);
-  const response=await fetch(`${fixture.origin}/webhooks/billing/stripe`,{method:"POST",headers:{"content-type":"application/json","stripe-signature":`t=1700000000,v1=${signature}`},body:raw}); assert.equal(response.status,200); assert.deepEqual(fixture.db.prepare("SELECT effective_state,version FROM billing_subscriptions WHERE billing_account_id=?").get(fixture.account.id),before); assert.equal(count(fixture.db,"SELECT COUNT(*) count FROM billing_reconciliation_work WHERE billing_account_id=?",fixture.account.id),1);
+  fixture.managed("active"); const raw=Buffer.from(JSON.stringify({id:"evt_http_webhook",type:"customer.subscription.updated",data:{object:{id:"sub_http",customer:"cus_http",status:"past_due"}}})), signature=createHmac("sha256","stripe_webhook_secret").update(`${stripeTimestamp}.`).update(raw).digest("hex"), before=fixture.db.prepare("SELECT effective_state,version FROM billing_subscriptions WHERE billing_account_id=?").get(fixture.account.id);
+  const response=await fetch(`${fixture.origin}/webhooks/billing/stripe`,{method:"POST",headers:{"content-type":"application/json","stripe-signature":`t=${stripeTimestamp},v1=${signature}`},body:raw}); assert.equal(response.status,200); assert.deepEqual(fixture.db.prepare("SELECT effective_state,version FROM billing_subscriptions WHERE billing_account_id=?").get(fixture.account.id),before); assert.equal(count(fixture.db,"SELECT COUNT(*) count FROM billing_reconciliation_work WHERE billing_account_id=?",fixture.account.id),1);
 }));
 
 interface BillingHttpFixture { readonly db:DatabaseSync; readonly workspaceId:number; readonly account:NonNullable<ReturnType<BillingAccountRepository["findByWorkspace"]>>; readonly origin:string; readonly stripe:DeterministicFakeBillingProvider; readonly mercadoPago:DeterministicFakeBillingProvider|null; headers(extra?:Record<string,string>):Record<string,string>; get(path:string, extra?:Record<string,string>):Promise<Response>; post(path:string, body:unknown, extra?:Record<string,string>):Promise<Response>; catalog(overrides:Record<string,unknown>):ReturnType<BillingCatalogRepository["create"]>; managed(state:"active"|"canceling_at_period_end"):void; }
@@ -1178,7 +1178,7 @@ test("EPIC046 Recovery H fences a late recovery worker after a reclaimed lease",
 test("EPIC046 Recovery H settles lost Stripe webhook responses canonically and preserves conflicting enrollment", () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),account=new BillingAccountRepository(db).findByWorkspace(workspaceId)!,catalog=new BillingCatalogRepository(db).create(catalogInput({planKey:"recovery-webhook",providerKind:"stripe",providerPriceId:"price_webhook"})),operations=new BillingOperationRepository(db),pending=operations.createOrReplay({billingAccountId:account.id,kind:"checkout_session_create",providerKind:"stripe",operationId:"lost-response",fingerprint:billingOperationFingerprint({billingAccountId:account.id,operationKind:"checkout_session_create",catalogEntryId:catalog.id,providerKind:"stripe",redirectTarget:"https://atlas.test/s",cancelTarget:"https://atlas.test/c"}),catalogEntryId:catalog.id,successTarget:"https://atlas.test/s",cancelTarget:"https://atlas.test/c",at}).operation!,started=operations.start(pending.id,pending.version,at)!; operations.uncertain(started.id,started.version,at);
-    const receive=(eventId:string,subscription:string,customer:string)=>{const raw=Buffer.from(JSON.stringify({id:eventId,type:"checkout.session.completed",data:{object:{id:"cs_lost",subscription,customer,client_reference_id:pending.recoveryCorrelationToken}}})),signature=createHmac("sha256","recovery-secret").update("1700000000.").update(raw).digest("hex");return new BillingWebhookService({stripe:"recovery-secret",mercadopago:""},new BillingWebhookRepository(db),()=>at).receive("stripe",raw,{"stripe-signature":`t=1700000000,v1=${signature}`});};
+    const receive=(eventId:string,subscription:string,customer:string)=>{const raw=Buffer.from(JSON.stringify({id:eventId,type:"checkout.session.completed",data:{object:{id:"cs_lost",subscription,customer,client_reference_id:pending.recoveryCorrelationToken}}})),signature=createHmac("sha256","recovery-secret").update(`${stripeTimestamp}.`).update(raw).digest("hex");return new BillingWebhookService({stripe:"recovery-secret",mercadopago:""},new BillingWebhookRepository(db),()=>at).receive("stripe",raw,{"stripe-signature":`t=${stripeTimestamp},v1=${signature}`});};
     assert.equal(receive("evt_lost","sub_canonical","cus_canonical"),"accepted"); assert.equal(operations.find(account.id,"checkout_session_create","lost-response")?.status,"succeeded"); assert.equal(receive("evt_conflict","sub_other","cus_other"),"ignored"); assert.deepEqual({...db.prepare("SELECT provider_subscription_id,provider_customer_id,status FROM billing_checkout_enrollments WHERE checkout_operation_id=?").get(pending.id) as Record<string,unknown>},{provider_subscription_id:"sub_canonical",provider_customer_id:"cus_canonical",status:"conflict"});
   } finally { db.close(); }
 });

@@ -10,6 +10,8 @@ import type { RequestOriginPolicy } from "../identity/infrastructure/requestOrig
 import { EffectiveRequestAuthorityResolver } from "../identity/infrastructure/requestOriginPolicy.js";
 import { PlatformBootstrapConflict, PlatformBootstrapError, type PlatformBootstrapService } from "../identity/services/platformBootstrapService.js";
 import { PasswordResetError, type PasswordResetService } from "../identity/services/passwordResetService.js";
+import { AbuseLimitExceededError, credentialEnrollmentRequestLimit, passwordResetRequestLimit, registrationLimit, resendVerificationLimit, type RateLimitService } from "../abuse/rateLimitService.js";
+import { normalizedIdentityScope } from "../abuse/sharedRateLimitRepository.js";
 
 function registrationInput(body: unknown): { fullName: string; email: string; password: string; confirmation: string; locale: Locale } {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new InvalidEmailAddressError();
@@ -31,10 +33,10 @@ function cookieValue(service:AuthenticationService,grant:SessionGrant):string{co
 function clearCookie(service:AuthenticationService):string{return `${service.cookieName()}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${service.cookieName().startsWith("__Host-")?"; Secure":""}`;}
 function safe(handler:RequestHandler):RequestHandler{return async(req,res,next)=>{try{await handler(req,res,next);}catch(error:unknown){if(error instanceof PasswordPolicyError){res.status(400).json({error:"Password does not meet policy."});return;}if(error instanceof AuthenticationConflict){res.status(409).json({error:"Authentication state changed. Try again."});return;}if(error instanceof AuthenticationFailure){res.status(401).json({error:"Authentication failed."});return;}res.status(503).json({error:"Authentication is temporarily unavailable."});}};}
 
-export function createAuthenticationControllers(service:AuthenticationService,originPolicy:RequestOriginPolicy):Record<"requestEnrollment"|"completeEnrollment"|"login"|"bootstrap"|"refresh"|"current"|"replacePassword"|"logout",RequestHandler>{
+export function createAuthenticationControllers(service:AuthenticationService,originPolicy:RequestOriginPolicy,limiter?:RateLimitService):Record<"requestEnrollment"|"completeEnrollment"|"login"|"bootstrap"|"refresh"|"current"|"replacePassword"|"logout",RequestHandler>{
   const stateChange=(request:Parameters<RequestHandler>[0]):string=>{if(!originAllowed(request,originPolicy))throw new AuthenticationFailure();const raw=cookie(request,service.cookieName());if(!raw||typeof request.headers["x-csrf-token"]!=="string"||!service.validateCsrf(raw,request.headers["x-csrf-token"]))throw new AuthenticationFailure();return raw;};
   return {
-    requestEnrollment:safe(async(req,res)=>{const b=record(req.body);await service.requestEnrollment(stringField(b,"email"));res.status(202).json({status:"credential_enrollment_requested"});}),
+    requestEnrollment:async(req,res)=>{try{const b=record(req.body),email=stringField(b,"email");limiter?.enforce(normalizedIdentityScope(email),"identity",credentialEnrollmentRequestLimit);await service.requestEnrollment(email);}catch(error){if(error instanceof AbuseLimitExceededError){res.setHeader("Retry-After",String(error.retryAfterSeconds));res.status(429).json({error:{code:"rate_limited",message:"Request is temporarily unavailable."}});return;}}res.status(202).json({status:"credential_enrollment_requested"});},
     completeEnrollment:safe(async(req,res)=>{const b=record(req.body);await service.completeEnrollment(stringField(b,"proof"),stringField(b,"password"),stringField(b,"confirmation"));res.status(204).end();}),
     login:safe(async(req,res)=>{const b=record(req.body);const grant=await service.login(stringField(b,"email"),stringField(b,"password"),req.ip??"unknown");res.setHeader("set-cookie",cookieValue(service,grant));res.status(200).json({status:"authenticated",csrfToken:grant.csrfToken,csrfGeneration:grant.csrfGeneration});}),
     bootstrap:async(req,res)=>{res.setHeader("Cache-Control","no-store, private");res.setHeader("Pragma","no-cache");if(!originAllowed(req,originPolicy)){res.status(403).json({error:"Request not allowed."});return;}let body:Record<string,unknown>;try{body=record(req.body);}catch{res.status(400).json({error:"Invalid request."});return;}if(Object.keys(body).length!==0){res.status(400).json({error:"Invalid request."});return;}const raw=cookie(req,service.cookieName());if(!raw){res.status(401).json({status:"unauthenticated"});return;}try{const result=service.bootstrapSession(raw);res.status(200).json({status:"authenticated",identity:result.identity,csrfToken:result.csrfToken,csrfGeneration:result.csrfGeneration});}catch(error:unknown){if(error instanceof AuthenticationConflict){res.status(409).json({error:"Authentication state changed. Try again."});return;}if(error instanceof AuthenticationFailure){res.setHeader("set-cookie",clearCookie(service));res.status(401).json({status:"unauthenticated"});return;}res.status(503).json({error:"Authentication is temporarily unavailable."});}},
@@ -45,26 +47,30 @@ export function createAuthenticationControllers(service:AuthenticationService,or
   };
 }
 
-export function createRegistrationController(service: RegistrationService): RequestHandler {
+export function createRegistrationController(service: RegistrationService, limiter?: RateLimitService): RequestHandler {
   return async (request, response) => {
     try {
       const input = registrationInput(request.body);
+      limiter?.enforce(normalizedIdentityScope(input.email), "identity", registrationLimit);
       await service.register(input.email, input.locale, input.fullName, input.password, input.confirmation);
       response.status(202).json({ status: "verification_requested" });
     } catch (error: unknown) {
+      if (error instanceof AbuseLimitExceededError) { response.setHeader("Retry-After", String(error.retryAfterSeconds)); response.status(429).json({ error: { code: "rate_limited", message: "Request is temporarily unavailable." } }); return; }
       if (error instanceof InvalidEmailAddressError || error instanceof InvalidIdentityStateError || error instanceof PasswordPolicyError) { response.status(400).json({ error: "Invalid registration input." }); return; }
       response.status(202).json({ status: "verification_requested" });
     }
   };
 }
 
-export function createResendVerificationController(service: ResendEmailVerificationService): RequestHandler {
+export function createResendVerificationController(service: ResendEmailVerificationService, limiter?: RateLimitService): RequestHandler {
   return async (request, response) => {
     try {
       const input = verificationRequestInput(request.body);
+      limiter?.enforce(normalizedIdentityScope(input.email), "identity", resendVerificationLimit);
       await service.resend(input.email, input.locale);
       response.status(202).json({ status: "verification_requested" });
     } catch (error: unknown) {
+      if (error instanceof AbuseLimitExceededError) { response.setHeader("Retry-After", String(error.retryAfterSeconds)); response.status(429).json({ error: { code: "rate_limited", message: "Request is temporarily unavailable." } }); return; }
       if (error instanceof InvalidEmailAddressError) { response.status(400).json({ error: "Invalid verification request." }); return; }
       response.status(202).json({ status: "verification_requested" });
     }
@@ -87,10 +93,10 @@ export function createVerifyEmailController(service: VerifyEmailService): Reques
   };
 }
 
-export function createPasswordResetControllers(service: PasswordResetService): Record<"requestPasswordReset" | "completePasswordReset", RequestHandler> {
+export function createPasswordResetControllers(service: PasswordResetService, limiter?: RateLimitService): Record<"requestPasswordReset" | "completePasswordReset", RequestHandler> {
   return {
     requestPasswordReset: async (request, response) => {
-      try { const input = verificationRequestInput(request.body); await service.request(input.email, input.locale); } catch { /* Enumeration-safe response. */ }
+      try { const input = verificationRequestInput(request.body); limiter?.enforce(normalizedIdentityScope(input.email), "identity", passwordResetRequestLimit); await service.request(input.email, input.locale); } catch (error) { if (error instanceof AbuseLimitExceededError) { response.setHeader("Retry-After", String(error.retryAfterSeconds)); response.status(429).json({ error: { code: "rate_limited", message: "Request is temporarily unavailable." } }); return; } /* Enumeration-safe response. */ }
       response.status(202).json({ status: "password_reset_requested" });
     },
     completePasswordReset: async (request, response) => {

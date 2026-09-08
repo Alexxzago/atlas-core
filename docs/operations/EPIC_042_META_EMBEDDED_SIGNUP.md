@@ -33,7 +33,7 @@ The existing WhatsApp runtime also uses:
 - `WHATSAPP_WEBHOOK_VERIFY_TOKEN`
 - `WHATSAPP_GRAPH_API_VERSION`
 
-Production also requires the existing deployment variables documented by EPIC 014, including `NODE_ENV=production`, `DATABASE_PROVIDER=libsql`, Turso credentials, allowed origins, and `ATLAS_MEDIA_ROOT`.
+Production also requires the existing deployment variables documented by EPIC 014, including `NODE_ENV=production`, `DATABASE_PROVIDER=libsql`, Turso credentials, and allowed origins. Production media uses private S3-compatible object storage, with Cloudflare R2 as the initial supported target. Configure `ATLAS_MEDIA_STORAGE_PROVIDER=s3`, `ATLAS_S3_ENDPOINT`, `ATLAS_S3_REGION`, `ATLAS_S3_BUCKET`, `ATLAS_S3_ACCESS_KEY_ID`, and `ATLAS_S3_SECRET_ACCESS_KEY`.
 
 Do not put secret values in source control, Vercel variables, frontend configuration, logs, documentation, or screenshots.
 
@@ -150,19 +150,9 @@ After changing secrets or Meta configuration:
 
 ## Media Storage Warning
 
-Render free-service local disk is ephemeral.
+Production media bytes are stored in private S3-compatible object storage. Cloudflare R2 is the initial supported target; Turso remains authoritative for media metadata and lifecycle.
 
-The temporary production setting:
-
-```text
-ATLAS_MEDIA_ROOT=/tmp/atlas-media
-```
-
-is acceptable only for current development and validation. Media stored there can disappear after restart, redeploy, or infrastructure replacement.
-
-Turso remains the durable database authority, but it does not make files under `/tmp/atlas-media` durable.
-
-Do not treat `/tmp/atlas-media` as production-grade media persistence. Durable object storage is a separate infrastructure concern and is intentionally outside EPIC 042.
+`ATLAS_MEDIA_ROOT` and `LocalMediaStorage` are development/test/pre-hardening only. Production must not fall back to the local filesystem, and Render Persistent Disk is neither required nor recommended as canonical media storage.
 
 ## Smoke Test
 

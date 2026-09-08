@@ -8,13 +8,14 @@ import { assistantProfileId } from "../domain/assistantProfile.js";
 import { AssistantProfileExecutionPolicy, AssistantProfilePolicyError } from "../domain/assistantProfilePolicies.js";
 import type { OperationalAssistantRuntime } from "./operationalAssistantRuntime.js";
 import type { LexicalKnowledgeRetrievalService } from "../../knowledgeV2/services/knowledgeRetrievalService.js";
+import { AbuseLimitExceededError } from "../../abuse/rateLimitService.js";
 
 export class OperationalAssistantExecutionValidationError extends Error {}
 export class OperationalAssistantExecutionNotFoundError extends Error {}
 export class OperationalAssistantProfileNotExecutableError extends Error {}
 export class OperationalAssistantCompanyNotReadyError extends Error {}
 export class OperationalAssistantKnowledgeUnavailableError extends Error {}
-export class OperationalAssistantExecutionRateLimitedError extends Error {}
+export class OperationalAssistantExecutionRateLimitedError extends Error { public constructor(public readonly retryAfterSeconds = 60) { super("Assistant execution rate limited."); } }
 
 export class OperationalAssistantExecutionService {
   private readonly executionPolicy = new AssistantProfileExecutionPolicy();
@@ -29,7 +30,7 @@ export class OperationalAssistantExecutionService {
     private readonly retrieval?: LexicalKnowledgeRetrievalService,
   ) {}
 
-  public async execute(context: WorkspaceContext, companyIdValue: unknown, input: unknown): Promise<AssistantExecutionResult> {
+  public async execute(context: WorkspaceContext, companyIdValue: unknown, input: unknown, actorId = "unknown"): Promise<AssistantExecutionResult> {
     const scopedCompanyId = parseCompanyId(companyIdValue);
     const parsed = parseInput(input);
     const company = this.companies.findById(context, scopedCompanyId);
@@ -44,7 +45,9 @@ export class OperationalAssistantExecutionService {
     if (company.status !== "ready") throw new OperationalAssistantCompanyNotReadyError();
     const knowledge = this.knowledge.loadCurrentVersion(context, scopedCompanyId);
     if (!knowledge) throw new OperationalAssistantKnowledgeUnavailableError();
-    const lease = this.budget.acquire(context);
+    let lease;
+    try { lease = this.budget.acquire(context, scopedCompanyId, actorId); }
+    catch (error: unknown) { if (error instanceof AbuseLimitExceededError) throw new OperationalAssistantExecutionRateLimitedError(error.retryAfterSeconds); throw error; }
     if (!lease) throw new OperationalAssistantExecutionRateLimitedError();
     try {
       return (await this.runtime.execute(company, profile, knowledge, parsed.message, [], {

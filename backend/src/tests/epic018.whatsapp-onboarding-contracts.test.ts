@@ -153,7 +153,7 @@ test("EPIC-018 authenticated lifecycle configures, validates, and activates only
 });
 
 test("EPIC-018 replacing credentials deactivates an active connection, requires revalidation, and returns no token", async () => {
-  const database = createDatabase(":memory:"), workspaces = new WorkspaceRepository(database), context = createWorkspaceContext(workspaces.resolveDefault()), companies = new CompanyRepository(database), profiles = new AssistantProfileRepository(database), connections = new WhatsAppConnectionRepository(database), cipher = new AesGcmWhatsAppCredentialCipher(Buffer.alloc(32, 13));
+  const database = createDatabase(":memory:"), workspaces = new WorkspaceRepository(database), context = createWorkspaceContext(workspaces.resolveDefault()), companies = new CompanyRepository(database), profiles = new AssistantProfileRepository(database), connections = new WhatsAppConnectionRepository(database), cipher = new AesGcmWhatsAppCredentialCipher({ activeKeyId:"active_2026",activeKey:Buffer.alloc(32,13),previousKeyId:"previous_2025",previousKey:Buffer.alloc(32,14) });
   const company = companies.create(context, { name: "Company", website: "https://company.test", status: "ready" });
   const profile = reconstructAssistantProfile({ id: assistantProfileId("asp_8123456789abcdef0123456789abcdef"), companyId: company.id, name: "WhatsApp", normalizedName: "whatsapp", description: null, businessRole: "Advisor", objective: "Help", audience: null, tone: "friendly", assistantLanguage: "en", welcomeMessage: "Welcome", fallbackMessage: "Fallback", status: "ready", createdAt: now, updatedAt: now, archivedAt: null });
   profiles.create(context, company.id, profile);
@@ -179,6 +179,7 @@ test("EPIC-018 replacing credentials deactivates an active connection, requires 
     assert.equal(JSON.stringify(body).includes("old-company-token"), false);
     assert.equal(JSON.stringify(body).includes("new-company-token"), false);
     assert.equal(resolver.resolve(context, company.id, connection.id), "new-company-token");
+    const persisted=connections.findCredentials(context,company.id,connection.id)!;assert.match(persisted.encryptedAccessToken,/^v2\.active_2026\./u);assert.equal(persisted.encryptedAccessToken.includes("new-company-token"),false);
     assert.equal((await fetch(`${path}/activation`, { method: "POST", headers })).status, 409);
   } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); database.close(); }
 });

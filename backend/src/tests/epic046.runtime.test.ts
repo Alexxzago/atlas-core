@@ -22,7 +22,7 @@ import { BillingWebhookRepository } from "../repositories/billingWebhookReposito
 import { createBillingRouter } from "../routes/billing.js";
 import { createBillingWebhookRouter } from "../routes/billingWebhook.js";
 
-const at = "2026-09-01T00:00:00.000Z";
+const at = "2026-09-01T00:00:00.000Z", stripeTimestamp = Math.floor(Date.parse(at) / 1_000);
 type CycleWorker = Pick<BillingReconciliationWorker, "runBatch">;
 
 function runtime(worker: CycleWorker, callback: { value: (() => void) | null }): BillingReconciliationRuntime {
@@ -61,7 +61,7 @@ test("EPIC046 PASS4F6 e2e webhook acceptance wakes runtime to paused authority a
   const reconciliation = new BillingReconciliationRuntime(new BillingReconciliationWorker(new BillingReconciliationRepository(db), new BillingProviderRegistry([{ kind: "stripe", provider }]), () => at), { intervalMilliseconds: 1_000, batchSize: 1 }, { schedule: () => ({ unref() {} }), clear: () => {}, reportError: () => { throw new Error("unexpected reconciliation failure"); } });
   const webhook = new BillingWebhookService({ stripe: "webhook-secret", mercadopago: "" }, new BillingWebhookRepository(db), () => at);
   const raw = Buffer.from(JSON.stringify({ id: "evt_runtime_paused", type: "customer.subscription.updated", data: { object: { id: "sub_runtime", customer: "cus_runtime" } } }));
-  const signature = createHmac("sha256", "webhook-secret").update("1700000000.").update(raw).digest("hex");
+  const signature = createHmac("sha256", "webhook-secret").update(`${stripeTimestamp}.`).update(raw).digest("hex");
   const operations = new BillingOperationService(new BillingAccountRepository(db), new BillingCatalogRepository(db), new BillingSubscriptionRepository(db), new BillingOperationRepository(db), new BillingProviderRegistry([{ kind: "stripe", provider }]), () => at);
   const service = new BillingApplicationService(db, operations, { checkoutSuccess: "https://atlas.test/success", checkoutCancel: "https://atlas.test/cancel", portalReturn: "https://atlas.test/portal" });
   const billingRouter = createBillingRouter({ authentication: { cookieName: () => "atlas", current: (value: string) => value === "manager" ? { userId: "manager", authenticationIdentityId: "manager-identity" } : null, validateCsrf: () => true } as never, users: { findById: () => ({ id: "manager", status: "active" }) } as never, authorization: { authorize: () => ({ workspaceId, workspacePublicId: "default", userId: "manager", membershipId: "member", role: "owner", capabilities: new Set(["workspace:manage"]), permission: "workspace:manage" }) } as never, resolver: { resolve: () => ({ workspaceId, workspaceKey: "default" }) } as never, originPolicy: { allows: () => true } as never, controllers: createBillingControllers(service) });
@@ -72,7 +72,7 @@ test("EPIC046 PASS4F6 e2e webhook acceptance wakes runtime to paused authority a
     await new Promise<void>((resolve) => server.once("listening", resolve));
     const address = server.address() as AddressInfo;
     const origin = `http://127.0.0.1:${address.port}`;
-    const accepted = await fetch(`${origin}/webhooks/billing/stripe`, { method: "POST", headers: { "content-type": "application/json", "stripe-signature": `t=1700000000,v1=${signature}` }, body: raw });
+    const accepted = await fetch(`${origin}/webhooks/billing/stripe`, { method: "POST", headers: { "content-type": "application/json", "stripe-signature": `t=${stripeTimestamp},v1=${signature}` }, body: raw });
     assert.equal(accepted.status, 200);
     reconciliation.start(); await reconciliation.stop();
     assert.equal((db.prepare("SELECT effective_state FROM billing_subscriptions WHERE billing_account_id=?").get(account.id) as { effective_state: string }).effective_state, "paused");

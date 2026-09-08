@@ -3,10 +3,11 @@ import type { OperationalAssistantExecutionService } from "../assistant/services
 import { OperationalAssistantCompanyNotReadyError, OperationalAssistantExecutionNotFoundError, OperationalAssistantExecutionRateLimitedError, OperationalAssistantExecutionValidationError, OperationalAssistantKnowledgeUnavailableError, OperationalAssistantProfileNotExecutableError } from "../assistant/services/operationalAssistantExecutionService.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 
-export function createOperationalAssistantExecutionController(service: OperationalAssistantExecutionService, context: WorkspaceContext): RequestHandler {
+export function createOperationalAssistantExecutionController(service: OperationalAssistantExecutionService, context: WorkspaceContext, actorId = "unknown"): RequestHandler {
   return async (req, res): Promise<void> => {
     try {
-      const result = await service.execute(context, req.params.companyId, req.body);
+      const scopedActorId = actorId === "unknown" && typeof res.locals.actorId === "string" ? res.locals.actorId : actorId;
+      const result = await service.execute(context, req.params.companyId, req.body, scopedActorId);
       res.json({ status: result.outcome, answer: result.answer });
     } catch (error: unknown) { respond(res, error); }
   };
@@ -18,6 +19,6 @@ function respond(res: Response, error: unknown): void {
   if (error instanceof OperationalAssistantProfileNotExecutableError) { res.status(409).json({ error: { code: "assistant_profile_not_executable", message: "Assistant Profile is not ready for execution." } }); return; }
   if (error instanceof OperationalAssistantCompanyNotReadyError) { res.status(409).json({ error: { code: "company_not_ready", message: "Company is not ready for Assistant execution." } }); return; }
   if (error instanceof OperationalAssistantKnowledgeUnavailableError) { res.status(409).json({ error: { code: "knowledge_unavailable", message: "Company Knowledge is not available for execution." } }); return; }
-  if (error instanceof OperationalAssistantExecutionRateLimitedError) { res.status(429).json({ error: { code: "assistant_execution_rate_limited", message: "Assistant execution is temporarily rate limited." } }); return; }
+  if (error instanceof OperationalAssistantExecutionRateLimitedError) { res.setHeader("Retry-After", String(error.retryAfterSeconds)); res.status(429).json({ error: { code: "rate_limited", message: "Request is temporarily unavailable." } }); return; }
   res.status(503).json({ error: { code: "assistant_execution_unavailable", message: "Assistant execution is temporarily unavailable." } });
 }

@@ -4,7 +4,8 @@ import type { WorkspaceContext } from "../../types/workspaceContext.js";
 export interface InspectedMedia { readonly mediaType: string; readonly metadata: Readonly<Record<string, MediaMetadataValue>>; }
 export interface MediaInspectorPort { inspect(content: Uint8Array): InspectedMedia; }
 export interface StagedMedia { readonly temporaryReference: string; readonly digest: string; readonly sizeBytes: number; }
-export interface MediaStoragePort { stage(blobId: string, content: AsyncIterable<Uint8Array>): Promise<StagedMedia>; readTemporary(reference: string, maximumBytes: number): Promise<Uint8Array>; promote(temporaryReference: string, blobId: string): Promise<string>; delete(reference: string): Promise<void>; read(reference: string, maximumBytes: number): Promise<Uint8Array>; }
+export interface MediaStorageLocation { readonly workspaceId: number; readonly companyId: number; }
+export interface MediaStoragePort { stage(blobId: string, content: AsyncIterable<Uint8Array>, location?: MediaStorageLocation): Promise<StagedMedia>; readTemporary(reference: string, maximumBytes: number): Promise<Uint8Array>; promote(temporaryReference: string, blobId: string, mediaType?: string): Promise<string>; delete(reference: string): Promise<void>; read(reference: string, maximumBytes: number): Promise<Uint8Array>; }
 export interface MediaAssociationOwnerResolver { owns(context: WorkspaceContext, companyId: number, type: MediaAssociationOwnerType, id: string): boolean; }
 
 export interface MediaRepositoryPort {
