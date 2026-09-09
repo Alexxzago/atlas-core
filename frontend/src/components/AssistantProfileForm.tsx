@@ -9,6 +9,7 @@ interface Props {
   submitting: boolean;
   onSubmit: (input: CreateAssistantProfileInput | UpdateAssistantProfileInput) => void;
   onCancel: () => void;
+  section?: "general" | "behavior";
 }
 
 function initial(profile?: AssistantProfile): AssistantProfileFormValues {
@@ -18,7 +19,7 @@ function initial(profile?: AssistantProfile): AssistantProfileFormValues {
     welcomeMessage: profile?.welcomeMessage ?? "", fallbackMessage: profile?.fallbackMessage ?? "" };
 }
 
-export function AssistantProfileForm({ mode, profile, submitting, onSubmit, onCancel }: Props): React.JSX.Element {
+export function AssistantProfileForm({ mode, profile, submitting, onSubmit, onCancel, section }: Props): React.JSX.Element {
   const { t } = useI18n(); const prefix = useId();
   const [values, setValues] = useState<AssistantProfileFormValues>(() => initial(profile));
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +40,9 @@ export function AssistantProfileForm({ mode, profile, submitting, onSubmit, onCa
   </section>;
 
   return <form className="assistant-form" onSubmit={submit} aria-busy={submitting} noValidate>
-    <fieldset className="assistant-form-fields" disabled={submitting}>
+      <fieldset className="assistant-form-fields" disabled={submitting}>
+        {section === "behavior" && <p className="state-copy">Configure how this assistant responds to customers.</p>}
+        {section !== "behavior" && <>
       <section className="assistant-form-section">
         <div className="assistant-form-section__heading"><h3>{t("profiles.form.identity")}</h3><p>{t("profiles.form.identityDescription")}</p></div>
         <div className="assistant-form-grid">
@@ -47,15 +50,15 @@ export function AssistantProfileForm({ mode, profile, submitting, onSubmit, onCa
           <label className="form-field" htmlFor={field("assistantLanguage")}><span className="form-field__label">{t("profiles.field.language")}</span><select id={field("assistantLanguage")} required value={values.assistantLanguage} aria-invalid={error ? "true" : undefined} aria-describedby={error ? errorId : undefined} onChange={(event) => set("assistantLanguage", event.target.value as AssistantLanguage)}><option value="">{t("profiles.languageSelect")}</option><option value="es">{t("language.es")}</option><option value="en">{t("language.en")}</option></select></label>
           <label className="form-field assistant-form-wide" htmlFor={field("businessRole")}><span className="form-field__label">{t("profiles.field.businessRole")}</span><input id={field("businessRole")} maxLength={120} value={values.businessRole} onChange={(event) => set("businessRole", event.target.value)} /></label>
         </div>
-      </section>
+      </section></>}
       <section className="assistant-form-section assistant-form-section--optional">
         <div className="assistant-form-section__heading"><h3>{t("profiles.form.communication")}</h3><p>{t("profiles.form.optionalDescription")}</p></div>
         <div className="assistant-form-grid">
           <label className="form-field" htmlFor={field("tone")}><span className="form-field__label">{t("profiles.field.tone")}</span><select id={field("tone")} value={values.tone} onChange={(event) => set("tone", event.target.value as AssistantTone)}>{(["professional", "friendly", "concise", "empathetic"] as const).map((tone) => <option key={tone} value={tone}>{t(`profiles.tone.${tone}`)}</option>)}</select></label>
-          <label className="form-field assistant-form-wide" htmlFor={field("description")}><span className="form-field__label">{t("profiles.field.description")}</span><textarea id={field("description")} maxLength={240} value={values.description} onChange={(event) => set("description", event.target.value)} /></label>
+          {section !== "behavior" && <label className="form-field assistant-form-wide" htmlFor={field("description")}><span className="form-field__label">{t("profiles.field.description")}</span><textarea id={field("description")} maxLength={240} value={values.description} onChange={(event) => set("description", event.target.value)} /></label>}
         </div>
       </section>
-      {disclosure(`${prefix}-purpose`, t("profiles.form.purpose"), t("profiles.form.optionalDescription"), purposeOpen, () => setPurposeOpen((open) => !open), <>
+      {section !== "behavior" && disclosure(`${prefix}-purpose`, t("profiles.form.purpose"), t("profiles.form.optionalDescription"), purposeOpen, () => setPurposeOpen((open) => !open), <>
         <label className="form-field assistant-form-wide" htmlFor={field("objective")}><span className="form-field__label">{t("profiles.field.objective")}</span><textarea id={field("objective")} maxLength={500} value={values.objective} onChange={(event) => set("objective", event.target.value)} /></label>
         <label className="form-field assistant-form-wide" htmlFor={field("audience")}><span className="form-field__label">{t("profiles.field.audience")}</span><textarea id={field("audience")} maxLength={300} value={values.audience} onChange={(event) => set("audience", event.target.value)} /></label>
       </>)}

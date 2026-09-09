@@ -18,6 +18,38 @@ const json = (value: unknown): Response => new Response(JSON.stringify(value), {
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } { let resolve!: (value: T) => void; return { promise: new Promise<T>((next) => { resolve = next; }), resolve }; }
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.localStorage.clear(); });
 
+function assistantPortalFetch(profiles: ReturnType<typeof profile>[], defaultId: string | null, fallbackStatus = 200): typeof fetch {
+  return vi.fn((input: string | URL | Request) => { const url=String(input);
+    if(url.endsWith("/workspaces")&&!url.includes("selected"))return Promise.resolve(json([workspace]));
+    if(url.endsWith("/workspaces/selected")||url.endsWith("/workspaces/workspace/select"))return Promise.resolve(json(workspace));
+    if(url.endsWith("/workspaces/workspace/companies"))return Promise.resolve(json([companyA]));
+    if(url.endsWith("/workspaces/workspace/companies/1"))return Promise.resolve(json(companyA));
+    if(url.endsWith("/companies/1/assistant-profiles"))return Promise.resolve(json(profiles));
+    const detail=/assistant-profiles\/([^/]+)$/.exec(url);if(detail){const found=profiles.find(item=>item.id===detail[1]);return Promise.resolve(found?json(found):new Response("",{status:404}));}
+    if(url.endsWith("/assistant/default"))return Promise.resolve(defaultId?json({companyId:1,assistantProfileId:defaultId,version:1,assignedAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z",assignedByActorId:null,source:null}):new Response("",{status:fallbackStatus}));
+    if(url.endsWith("/assistant/readiness"))return Promise.resolve(json({assistantIdentifier:"default",workspaceId:1,companyId:1,status:"ready",blockers:[],knowledgeVersionId:"knowledge",assistantProfileId:defaultId,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"1",configurationDigest:"digest"}));
+    if(url.endsWith("/web-chat-connections")||url.endsWith("/whatsapp-connections"))return Promise.resolve(json([]));return Promise.resolve(new Response("",{status:404})); }) as unknown as typeof fetch;
+}
+function renderAssistantPortal(path: string, profiles: ReturnType<typeof profile>[], defaultId: string | null): void { window.history.replaceState({},"",path);vi.stubGlobal("fetch",assistantPortalFetch(profiles,defaultId));render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticatedCompanyPortal csrf="csrf" email="operator@example.test" onPassword={()=>{}} onLogout={()=>{}}/></RouterProvider></I18nProvider></ThemeProvider>); }
+
+test("assistant base route uses the server default or the first accessible profile and retains the empty state", async () => {
+  renderAssistantPortal("/companies/1/assistant",[profile("a","Assistant A"),profile("b","Assistant B")],"b");
+  await screen.findByRole("heading",{name:"Assistant B"});expect(window.location.pathname).toBe("/companies/1/assistant/b/general");
+  cleanup();renderAssistantPortal("/companies/1/assistant",[profile("a","Assistant A")],null);
+  await screen.findByRole("heading",{name:"Assistant A"});await waitFor(()=>expect(window.location.pathname).toBe("/companies/1/assistant/a/general"));
+  cleanup();renderAssistantPortal("/companies/1/assistant",[],null);
+  expect(await screen.findByRole("heading",{name:"Configure how your assistant will work"})).toBeTruthy();expect(window.location.pathname).toBe("/companies/1/assistant");
+});
+
+test("portal deep links select their URL assistant and safely recover inaccessible or future sections", async () => {
+  renderAssistantPortal("/companies/1/assistant/b/behavior",[profile("a","Assistant A"),profile("b","Assistant B")],"a");
+  await screen.findByRole("link",{name:"Comportamiento"});expect(screen.getByRole("link",{name:"Comportamiento"}).getAttribute("aria-current")).toBe("page");
+  cleanup();renderAssistantPortal("/companies/1/assistant/missing/general",[profile("a","Assistant A")],"a");
+  await screen.findByRole("heading",{name:"Assistant A"});await waitFor(()=>expect(window.location.pathname).toBe("/companies/1/assistant/a/general"));
+  cleanup();renderAssistantPortal("/companies/1/assistant/a/capabilities",[profile("a","Assistant A")],"a");
+  await screen.findByRole("heading",{name:"Assistant A"});expect(window.location.pathname).toBe("/companies/1/assistant/a/general");
+});
+
 test("automatically enters the only accessible company after workspace restoration", async () => {
   window.history.replaceState({}, "", "/dashboard");
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {

@@ -24,6 +24,8 @@ test("builds canonical company paths", () => {
 
 test("parses assistant subpaths while preserving the existing assistant route", () => {
   assert.deepEqual(parsePortalRoute("/companies/7/assistant"), { name: "company-assistant", companyId: 7 });
+  assert.deepEqual(parsePortalRoute("/companies/7/assistant/asp_1/general"), { name: "company-assistant-section", companyId: 7, assistantProfileId: "asp_1", section: "general" });
+  assert.deepEqual(parsePortalRoute("/companies/7/assistant/asp_1/behavior"), { name: "company-assistant-section", companyId: 7, assistantProfileId: "asp_1", section: "behavior" });
   assert.deepEqual(parsePortalRoute("/companies/7/assistant/asp_1/capabilities"), { name: "company-assistant-section", companyId: 7, assistantProfileId: "asp_1", section: "capabilities" });
   assert.deepEqual(parsePortalRoute("/companies/7/assistant/asp_1/unknown"), { name: "not-found" });
 });
