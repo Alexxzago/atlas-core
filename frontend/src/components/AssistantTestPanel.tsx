@@ -35,7 +35,7 @@ export function AssistantTestPanel({ csrf, workspaceId, companyId, profile, capa
     generation.current += 1;
     controller.current?.abort();
     setPending(false); setMessage(""); setAnswer(null); setError(null);
-  }, [workspaceId, companyId, profile.id, profile.status]);
+  }, [workspaceId, companyId, profile.id, profile.status, csrf, canPreview, canActive]);
   useEffect(() => { if (canPreview || canActive) { if (mode === "preview" && !canPreview) setMode("active"); if (mode === "active" && !canActive) setMode("preview"); } }, [mode, canPreview, canActive]);
 
   const submit = async (event: React.FormEvent): Promise<void> => {

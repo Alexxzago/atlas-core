@@ -37,7 +37,7 @@ export function parsePortalRoute(pathname: string): PortalRoute {
     if (!id) return { name: "not-found" };
     if (segments.length === 2) return { name: "company-overview", companyId: id };
     if (segments.length === 3 && segments[2] === "assistant") return { name: "company-assistant", companyId: id };
-    if (segments.length === 5 && segments[2] === "assistant" && /^[A-Za-z0-9_-]+$/u.test(segments[3] ?? "") && assistantSections.has(segments[4] as AssistantSection)) return { name: "company-assistant-section", companyId: id, assistantProfileId: segments[3]!, section: segments[4] as AssistantSection };
+    if (segments.length === 5 && segments[2] === "assistant" && /^[A-Za-z0-9_-]+$/u.test(segments[3] ?? "")) return assistantSections.has(segments[4] as AssistantSection) ? { name: "company-assistant-section", companyId: id, assistantProfileId: segments[3]!, section: segments[4] as AssistantSection } : { name: "company-assistant", companyId: id };
     if (segments.length === 3 && segments[2] === "knowledge") return { name: "company-knowledge", companyId: id };
     if (segments.length === 3 && segments[2] === "channels") return { name: "company-channels", companyId: id };
     if (segments.length === 4 && segments[2] === "channels" && segments[3] === "whatsapp") return { name: "company-whatsapp", companyId: id };

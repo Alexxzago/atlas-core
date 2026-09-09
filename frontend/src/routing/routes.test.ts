@@ -29,7 +29,7 @@ test("parses assistant subpaths while preserving the existing assistant route", 
   assert.deepEqual(parsePortalRoute("/companies/7/assistant/asp_1/capabilities"), { name: "company-assistant-section", companyId: 7, assistantProfileId: "asp_1", section: "capabilities" });
   assert.deepEqual(parsePortalRoute("/companies/7/assistant/asp_1/status"), { name: "company-assistant-section", companyId: 7, assistantProfileId: "asp_1", section: "status" });
   assert.deepEqual(parsePortalRoute("/companies/7/assistant/asp_1/test"), { name: "company-assistant-section", companyId: 7, assistantProfileId: "asp_1", section: "test" });
-  assert.deepEqual(parsePortalRoute("/companies/7/assistant/asp_1/unknown"), { name: "not-found" });
+  assert.deepEqual(parsePortalRoute("/companies/7/assistant/asp_1/unknown"), { name: "company-assistant", companyId: 7 });
 });
 
 test("classifies public and authenticated application routes", () => {

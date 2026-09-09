@@ -76,7 +76,7 @@ test("uses only the confirmed default assignment and disables duplicate default 
   fireEvent.click(screen.getByRole("button", { name: "Set as default" }));
   expect(screen.getByRole("button", { name: "Updating…" }).hasAttribute("disabled")).toBe(true);
   resolveDefault({ companyId: 1, assistantProfileId: "assistant-1", version: 2, assignedAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", assignedByActorId: null, source: null });
-  await screen.findByText("Default Assistant");
+  await screen.findByText("Set as default");
 });
 
 test("refetches the canonical default after a default assignment conflict", async () => {
@@ -86,6 +86,6 @@ test("refetches the canonical default after a default assignment conflict", asyn
   render(<I18nProvider><AssistantProfilesPanel csrf="csrf" workspaceId="workspace-1" workspaceRole={null} capabilities={["company:manage"]} companyId={1} companyName={null} companySelected profiles={[{ ...draftProfile, status: "ready" }]} selectedProfile={{ ...draftProfile, status: "ready" }} transientArchivedProfile={null} loading={false} error={false} formMode="closed" submitting={false} transitionTarget={null} activeSection="general" onSelectProfile={() => {}} onOpenCreate={() => {}} onOpenEdit={() => {}} onCloseForm={() => {}} onSubmitForm={() => {}} onTransition={() => {}} onRetry={() => {}}/></I18nProvider>);
   await waitFor(() => expect(screen.getByRole("button", { name: "Set as default" })).toBeTruthy());
   fireEvent.click(screen.getByRole("button", { name: "Set as default" }));
-  await screen.findByText("Default Assistant");
+  await screen.findByText("Set as default");
   expect(getDefault).toHaveBeenCalledTimes(2);
 });

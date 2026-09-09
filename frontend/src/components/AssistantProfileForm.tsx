@@ -41,7 +41,7 @@ export function AssistantProfileForm({ mode, profile, submitting, onSubmit, onCa
 
   return <form className="assistant-form" onSubmit={submit} aria-busy={submitting} noValidate>
       <fieldset className="assistant-form-fields" disabled={submitting}>
-        {section === "behavior" && <p className="state-copy">Configure how this assistant responds to customers.</p>}
+        {section === "behavior" && <p className="state-copy">{t("profiles.form.communication")}</p>}
         {section !== "behavior" && <>
       <section className="assistant-form-section">
         <div className="assistant-form-section__heading"><h3>{t("profiles.form.identity")}</h3><p>{t("profiles.form.identityDescription")}</p></div>

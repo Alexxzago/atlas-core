@@ -36,7 +36,7 @@ function renderAssistantPortal(path: string, profiles: ReturnType<typeof profile
 
 test("assistant base route uses the server default or the first accessible profile and retains the empty state", async () => {
   renderAssistantPortal("/companies/1/assistant",[profile("a","Assistant A"),profile("b","Assistant B")],"b");
-  await screen.findByRole("heading",{name:"Assistant B"});expect(window.location.pathname).toBe("/companies/1/assistant/b/general");
+  await screen.findByRole("heading",{name:"Assistant B"});await waitFor(()=>expect(window.location.pathname).toBe("/companies/1/assistant/b/general"));
   cleanup();renderAssistantPortal("/companies/1/assistant",[profile("a","Assistant A")],null);
   await screen.findByRole("heading",{name:"Assistant A"});await waitFor(()=>expect(window.location.pathname).toBe("/companies/1/assistant/a/general"));
   cleanup();renderAssistantPortal("/companies/1/assistant",[],null);
