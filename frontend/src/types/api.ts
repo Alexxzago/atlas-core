@@ -148,6 +148,11 @@ export interface OperationalAssistantExecutionResponse {
   answer: string;
 }
 
+export type AssistantCapabilityAvailability = "available" | "unavailable" | "degraded";
+export type AssistantCapabilityConsequence = "read_only" | "consequential";
+export interface AssistantCapabilityCatalogItem { id:string; assigned:boolean; availability:AssistantCapabilityAvailability; consequence:AssistantCapabilityConsequence; safeReason:string|null; safeNextAction:string|null; toolCount:number; }
+export interface AssistantCapabilityCatalog { capabilities:AssistantCapabilityCatalogItem[]; }
+
 export type WebChatConnectionStatus = "active" | "inactive";
 
 export interface WebChatConnection {

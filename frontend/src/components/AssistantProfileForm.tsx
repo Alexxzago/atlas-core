@@ -9,7 +9,7 @@ interface Props {
   submitting: boolean;
   onSubmit: (input: CreateAssistantProfileInput | UpdateAssistantProfileInput) => void;
   onCancel: () => void;
-  section?: "general" | "behavior";
+  section?: "general" | "behavior" | "capabilities";
 }
 
 function initial(profile?: AssistantProfile): AssistantProfileFormValues {
