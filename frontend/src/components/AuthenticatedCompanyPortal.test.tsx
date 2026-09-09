@@ -45,13 +45,13 @@ test("assistant base route uses the server default or the first accessible profi
 
 test("portal deep links select their URL assistant, recover inaccessible sections, and expose capabilities", async () => {
   renderAssistantPortal("/companies/1/assistant/b/behavior",[profile("a","Assistant A"),profile("b","Assistant B")],"a");
-  await screen.findByRole("link",{name:"Comportamiento"});expect(screen.getByRole("link",{name:"Comportamiento"}).getAttribute("aria-current")).toBe("page");
+  await screen.findByRole("link",{name:"Behavior"});expect(screen.getByRole("link",{name:"Behavior"}).getAttribute("aria-current")).toBe("page");
   cleanup();renderAssistantPortal("/companies/1/assistant/missing/general",[profile("a","Assistant A")],"a");
   await screen.findByRole("heading",{name:"Assistant A"});await waitFor(()=>expect(window.location.pathname).toBe("/companies/1/assistant/a/general"));
    cleanup();renderAssistantPortal("/companies/1/assistant/a/capabilities",[profile("a","Assistant A")],"a");
    await screen.findByRole("heading",{name:"What this assistant can do"});expect(window.location.pathname).toBe("/companies/1/assistant/a/capabilities");
    cleanup();renderAssistantPortal("/companies/1/assistant/a/tools",[profile("a","Assistant A")],"a");
-   await screen.findByRole("heading",{name:"Assistant tools"});expect(window.location.pathname).toBe("/companies/1/assistant/a/tools");expect(screen.getByRole("link",{name:"Herramientas"}).getAttribute("aria-current")).toBe("page");
+   await screen.findByRole("heading",{name:"Assistant tools"});expect(window.location.pathname).toBe("/companies/1/assistant/a/tools");expect(screen.getByRole("link",{name:"Tools"}).getAttribute("aria-current")).toBe("page");
 });
 
 test("automatically enters the only accessible company after workspace restoration", async () => {

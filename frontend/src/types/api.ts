@@ -234,6 +234,11 @@ export interface AssistantReadinessAssessment {
   policyVersion: string;
   configurationDigest: string;
 }
+export interface CompanyOperationalStatus {
+  assistant: { status: "ready" | "blocked" | "unavailable"; evaluatedAt: string | null; blockers: string[] };
+  whatsApp: Array<{ connectionId: string; status: "active" | "inactive"; validationState: "not_validated" | "valid" | "invalid"; healthState: "inactive" | "healthy" | "degraded" }>;
+  voice: { status: "unavailable" };
+}
 export interface DefaultAssistantAssignment { companyId:number; assistantProfileId:string; version:number; assignedAt:string; updatedAt:string; assignedByActorId:string|null; source:string|null; }
 
 export type EmbeddedSignupUiStatus="awaiting_meta"|"verifying"|"connected"|"needs_attention"|"reconnect_required"|"failed"|"expired";

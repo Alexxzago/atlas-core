@@ -45,11 +45,11 @@ test("makes General the current accessible section and keeps read-only customers
   const navigate = vi.fn();
   render(<I18nProvider><AssistantProfilesPanel csrf="csrf" workspaceId="workspace-1" workspaceRole={null} capabilities={["company:read"]} companyId={1} companyName={null} companySelected profiles={[draftProfile]} selectedProfile={draftProfile} transientArchivedProfile={null} loading={false} error={false} formMode="closed" submitting={false} transitionTarget={null} activeSection="general" onNavigate={navigate} onSelectProfile={() => {}} onOpenCreate={() => {}} onOpenEdit={() => {}} onCloseForm={() => {}} onSubmitForm={() => {}} onTransition={() => {}} onRetry={() => {}}/></I18nProvider>);
   expect(screen.getByRole("link", { name: "General" }).getAttribute("aria-current")).toBe("page");
-  expect(screen.getByRole("link", { name: "Comportamiento" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Behavior" })).toBeTruthy();
   expect(screen.getAllByText("Sales").length).toBeGreaterThan(0);
   expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Set as default" })).toBeNull();
-  fireEvent.click(screen.getByRole("link", { name: "Comportamiento" }));
+  fireEvent.click(screen.getByRole("link", { name: "Behavior" }));
   expect(navigate).toHaveBeenCalledWith("/companies/1/assistant/assistant-1/behavior");
 });
 
