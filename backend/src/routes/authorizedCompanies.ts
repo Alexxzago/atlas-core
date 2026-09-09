@@ -30,7 +30,7 @@ interface ContextualAssistantControllers {
   preview: (context: WorkspaceContext) => RequestHandler;
   execution?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
 }
-interface ContextualAssistantCapabilityControllers { list:(context:WorkspaceContext)=>RequestHandler; catalog:(context:WorkspaceContext)=>RequestHandler; replace:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler; }
+interface ContextualAssistantCapabilityControllers { list:(context:WorkspaceContext)=>RequestHandler; catalog:(context:WorkspaceContext)=>RequestHandler; toolsCatalog?:(context:WorkspaceContext)=>RequestHandler; replace:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler; }
 interface ContextualAssistantReadinessControllers { get: (context: WorkspaceContext) => RequestHandler; refresh: (context: WorkspaceContext) => RequestHandler; }
 interface ContextualDefaultAssistantControllers { get:(context:WorkspaceContext)=>RequestHandler; put:(context:WorkspaceContext,actor:ActorContext)=>RequestHandler; }
 
@@ -198,6 +198,7 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   if(assistantCapabilities){
     router.get("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/capabilities",authorize("assistant:capability:manage",false,(context)=>assistantCapabilities.list(context)));
     router.get("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/capabilities/catalog",authorize("company:read",false,(context)=>assistantCapabilities.catalog(context)));
+    if(assistantCapabilities.toolsCatalog)router.get("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/tools/catalog",authorize("company:read",false,(context)=>assistantCapabilities.toolsCatalog!(context)));
     router.put("/:workspaceId/companies/:companyId/assistant-profiles/:assistantProfileId/capabilities",authorize("assistant:capability:manage",true,(context,actor)=>assistantCapabilities.replace(context,actor)));
   }
   const readiness = dependencies.assistantReadinessControllers ?? productionAssistantReadinessControllers;

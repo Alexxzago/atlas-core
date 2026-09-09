@@ -154,7 +154,8 @@ import { AssistantCapabilityRepository } from "./repositories/assistantCapabilit
 import { productionAssistantCapabilityCatalog } from "./assistant/domain/assistantCapability.js";
 import { AssistantCapabilityService } from "./assistant/services/assistantCapabilityService.js";
 import { AssistantCapabilityCatalogService } from "./assistant/services/assistantCapabilityCatalogService.js";
-import { createListAssistantCapabilitiesController, createListAssistantCapabilityCatalogController, createReplaceAssistantCapabilitiesController } from "./controllers/assistantCapabilityController.js";
+import { AssistantToolCatalogService } from "./assistant/services/assistantToolCatalogService.js";
+import { createListAssistantCapabilitiesController, createListAssistantCapabilityCatalogController, createListAssistantToolCatalogController, createReplaceAssistantCapabilitiesController } from "./controllers/assistantCapabilityController.js";
 import { ToolRegistry } from "./assistant/application/toolRegistry.js";
 import { NoIntegrationToolAvailabilityPolicy } from "./assistant/application/toolContracts.js";
 import { IntegrationToolAvailabilityPolicy } from "./integrations/services/integrationToolAvailabilityPolicy.js";
@@ -320,7 +321,8 @@ const productionToolRegistry=new ToolRegistry(productionAssistantCapabilityCatal
 const productionToolAvailability=new LiveDataToolAvailabilityPolicy(new IntegrationToolAvailabilityPolicy(new NoIntegrationToolAvailabilityPolicy(),integrationConnections),integrationConnections);
 const assistantCapabilityService=new AssistantCapabilityService(productionAssistantCapabilityCatalog,assistantCapabilityRepository,identityClock);
 const assistantCapabilityCatalogService=new AssistantCapabilityCatalogService(productionAssistantCapabilityCatalog,assistantCapabilityRepository,productionToolRegistry,productionToolAvailability);
-configureProductionAssistantCapabilityControllers({list:context=>createListAssistantCapabilitiesController(assistantCapabilityService,context),catalog:context=>createListAssistantCapabilityCatalogController(assistantCapabilityCatalogService,context),replace:(context,actor)=>createReplaceAssistantCapabilitiesController(assistantCapabilityService,context,actor)});
+const assistantToolCatalogService=new AssistantToolCatalogService(assistantCapabilityRepository,productionToolRegistry,productionToolAvailability);
+configureProductionAssistantCapabilityControllers({list:context=>createListAssistantCapabilitiesController(assistantCapabilityService,context),catalog:context=>createListAssistantCapabilityCatalogController(assistantCapabilityCatalogService,context),toolsCatalog:context=>createListAssistantToolCatalogController(assistantToolCatalogService,context),replace:(context,actor)=>createReplaceAssistantCapabilitiesController(assistantCapabilityService,context,actor)});
 const productionAssistantTools=new AssistantToolOrchestrator(geminiProvider.toolModel(),productionToolRegistry,assistantCapabilityRepository,productionToolAvailability,new ToolExecutionService(new AssistantToolExecutionTraceRepository(new SynchronousSqlDatabaseAdapter(database)),identityClock),identityClock);
 const webChatConnectionService = new WebChatConnectionService(companyRepository, new AssistantProfileRepository(database), new WebChatConnectionRepository(database), identityClock, billingEntitlements);
 const whatsAppConnections = new WhatsAppConnectionRepository(database);

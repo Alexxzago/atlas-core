@@ -152,6 +152,9 @@ export type AssistantCapabilityAvailability = "available" | "unavailable" | "deg
 export type AssistantCapabilityConsequence = "read_only" | "consequential";
 export interface AssistantCapabilityCatalogItem { id:string; assigned:boolean; availability:AssistantCapabilityAvailability; consequence:AssistantCapabilityConsequence; safeReason:string|null; safeNextAction:string|null; toolCount:number; }
 export interface AssistantCapabilityCatalog { capabilities:AssistantCapabilityCatalogItem[]; }
+export type AssistantToolAvailability = "available" | "unavailable" | "degraded";
+export interface AssistantToolCatalogItem { id:string; enabled:boolean; availability:AssistantToolAvailability; capabilityId:string; safeReason:string|null; safeNextAction:string|null; }
+export interface AssistantToolCatalog { tools:AssistantToolCatalogItem[]; }
 
 export type WebChatConnectionStatus = "active" | "inactive";
 

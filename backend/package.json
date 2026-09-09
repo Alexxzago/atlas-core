@@ -25,7 +25,7 @@
     "test:epic045": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic045.pass2.persistence.test.ts src/tests/epic045.pass3.worker.test.ts src/tests/epic045.pass4b.runtime-boundary.test.ts src/tests/epic045.pass6.operator-api.test.ts",
     "test:epic046": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic046.persistence.test.ts src/tests/epic046.runtime.test.ts src/tests/epic046.remediation.test.ts",
     "test:epic047": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic047.production-configuration.test.ts src/tests/epic047.trusted-proxy.test.ts src/tests/epic047.throttle-safety.test.ts src/tests/epic047.observability.test.ts src/tests/epic047.pass3.test.ts src/tests/epic047.pass4.test.ts src/tests/epic047.pass5.test.ts src/tests/epic047.pass6.test.ts src/tests/epic047.pass7.test.ts src/tests/epic047.pass8.test.ts",
-    "test:epic048": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic048.pass3.capability-catalog.test.ts",
+    "test:epic048": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic048.pass3.capability-catalog.test.ts src/tests/epic048.pass4.tool-catalog.test.ts",
     "maintenance:reencrypt-credentials": "tsx src/scripts/reencryptCredentials.ts",
     "maintenance:verify-backup": "tsx src/scripts/verifyBackup.ts",
     "maintenance:backup": "tsx src/scripts/backup.ts",
