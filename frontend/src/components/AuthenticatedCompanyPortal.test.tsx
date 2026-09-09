@@ -106,7 +106,7 @@ test("Today translates authoritative blockers into one next action", async () =>
   window.localStorage.setItem("atlas.locale", "es");
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
     const url = String(input);
-    if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ status: "blocked", blockers: ["default_assistant_missing", "published_knowledge_missing"], knowledgeVersionId: null, assistantProfileId: null }));
+    if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ assistantIdentifier: "default", workspaceId: 1, companyId: 1, status: "blocked", blockers: ["default_assistant_missing", "published_knowledge_missing"], knowledgeVersionId: null, assistantProfileId: null, evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "assistant-readiness-v1", configurationDigest: "a".repeat(64) }));
     if (url.endsWith("/web-chat-connections") || url.endsWith("/whatsapp-connections")) return Promise.resolve(json([]));
     return Promise.resolve(new Response("", { status: 404 }));
   }));

@@ -3,11 +3,13 @@ import type { EmbeddedSignupAttemptResponse, EmbeddedSignupStatusResponse, Assis
 export class ApiError extends Error {
   public readonly status: number;
   public readonly code: string | null;
+  public readonly retryAfterSeconds: number | null;
 
-  public constructor(status: number, message: string, code: string | null = null) {
+  public constructor(status: number, message: string, code: string | null = null, retryAfterSeconds: number | null = null) {
     super(message);
     this.status = status;
     this.code = code;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -47,7 +49,9 @@ async function request<T>(path: string, options?: RequestInit, recoveryAttempted
     } catch {
       // Use the HTTP status text when the response is not JSON.
     }
-    throw new ApiError(response.status, message, code);
+    const retryAfter = response.headers.get("retry-after");
+    const retryAfterSeconds = retryAfter !== null && /^\d+$/u.test(retryAfter) ? Number(retryAfter) : null;
+    throw new ApiError(response.status, message, code, retryAfterSeconds);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -117,6 +121,17 @@ function operationalExecutionResponse(value: unknown): OperationalAssistantExecu
   return { status: record.status, answer: record.answer };
 }
 
+function assistantProfileResponse(value: unknown): AssistantProfile {
+  const profile = record(value, "Assistant profile");
+  const status = profile.status, tone = profile.tone, language = profile.assistantLanguage;
+  if ((status !== "draft" && status !== "ready" && status !== "disabled" && status !== "archived") || (tone !== "professional" && tone !== "friendly" && tone !== "concise" && tone !== "empathetic") || (language !== "es" && language !== "en")) throw malformedList("Assistant profile");
+  return { id: text(profile.id, "Assistant profile"), name: text(profile.name, "Assistant profile"), description: nullableText(profile.description, "Assistant profile"), businessRole: nullableText(profile.businessRole, "Assistant profile"), objective: nullableText(profile.objective, "Assistant profile"), audience: nullableText(profile.audience, "Assistant profile"), tone, assistantLanguage: language, welcomeMessage: nullableText(profile.welcomeMessage, "Assistant profile"), fallbackMessage: text(profile.fallbackMessage, "Assistant profile"), status, createdAt: text(profile.createdAt, "Assistant profile"), updatedAt: text(profile.updatedAt, "Assistant profile"), archivedAt: nullableText(profile.archivedAt, "Assistant profile") };
+}
+
+function assistantProfilesResponse(value: unknown): AssistantProfile[] { if (!Array.isArray(value)) throw malformedList("Assistant profile list"); return value.map(assistantProfileResponse); }
+function defaultAssistantResponse(value: unknown): DefaultAssistantAssignment { const assignment = record(value, "Default assistant"), version = assignment.version; if (!Number.isSafeInteger(assignment.companyId) || typeof version !== "number" || !Number.isSafeInteger(version) || version < 1 || (assignment.source !== "operator" && assignment.source !== "compatibility_bootstrap" && assignment.source !== null)) throw malformedList("Default assistant"); return { companyId: assignment.companyId as number, assistantProfileId: text(assignment.assistantProfileId, "Default assistant"), version, assignedAt: text(assignment.assignedAt, "Default assistant"), updatedAt: text(assignment.updatedAt, "Default assistant"), assignedByActorId: nullableText(assignment.assignedByActorId, "Default assistant"), source: assignment.source }; }
+function assistantReadinessResponse(value: unknown): AssistantReadinessAssessment { const assessment = record(value, "Assistant readiness"); if (assessment.assistantIdentifier !== "default" || (assessment.status !== "ready" && assessment.status !== "blocked") || !Number.isSafeInteger(assessment.workspaceId) || !Number.isSafeInteger(assessment.companyId) || !Array.isArray(assessment.blockers) || !assessment.blockers.every(item => typeof item === "string")) throw malformedList("Assistant readiness"); return { assistantIdentifier: "default", workspaceId: assessment.workspaceId as number, companyId: assessment.companyId as number, status: assessment.status, blockers: assessment.blockers, knowledgeVersionId: nullableText(assessment.knowledgeVersionId, "Assistant readiness"), assistantProfileId: nullableText(assessment.assistantProfileId, "Assistant readiness"), evaluatedAt: text(assessment.evaluatedAt, "Assistant readiness"), policyVersion: text(assessment.policyVersion, "Assistant readiness"), configurationDigest: text(assessment.configurationDigest, "Assistant readiness") }; }
+
 export const atlasApi = {
   listCompanies: (): Promise<Company[]> => request("/companies"),
   getCompany: (companyId: number): Promise<Company> => request(`/companies/${companyId}`),
@@ -168,17 +183,17 @@ export const atlasApi = {
   listWorkspaceCompanies:async(workspaceId:string,signal?:AbortSignal):Promise<Company[]>=>companyListResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies`,{signal:signal??null})),
   createOnboardingCompany:async(csrf:string,workspaceId:string,input:{readonly name:string;readonly website?:string|null},signal?:AbortSignal):Promise<Company>=>companyResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/onboarding`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null})),
   getWorkspaceCompany:async(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<Company>=>companyResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}`,{signal:signal??null})),
-  listAssistantProfiles:(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<AssistantProfile[]>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles`,{signal:signal??null}),
-  getAssistantProfile:(workspaceId:string,companyId:number,profileId:string,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}`,{signal:signal??null}),
-  createAssistantProfile:(csrf:string,workspaceId:string,companyId:number,input:CreateAssistantProfileInput,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null}),
-  updateAssistantProfile:(csrf:string,workspaceId:string,companyId:number,profileId:string,input:UpdateAssistantProfileInput,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}`,{method:"PATCH",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null}),
-  transitionAssistantProfile:(csrf:string,workspaceId:string,companyId:number,profileId:string,targetStatus:AssistantProfileStatus,signal?:AbortSignal):Promise<AssistantProfile>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}/transitions`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({targetStatus}),signal:signal??null}),
-  previewAssistantProfile:(csrf:string,workspaceId:string,companyId:number,profileId:string,message:string,signal?:AbortSignal):Promise<AssistantPreviewResponse>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}/preview`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({message}),signal:signal??null}),
+  listAssistantProfiles:async(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<AssistantProfile[]>=>assistantProfilesResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles`,{signal:signal??null})),
+  getAssistantProfile:async(workspaceId:string,companyId:number,profileId:string,signal?:AbortSignal):Promise<AssistantProfile>=>assistantProfileResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}`,{signal:signal??null})),
+  createAssistantProfile:async(csrf:string,workspaceId:string,companyId:number,input:CreateAssistantProfileInput,signal?:AbortSignal):Promise<AssistantProfile>=>assistantProfileResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null})),
+  updateAssistantProfile:async(csrf:string,workspaceId:string,companyId:number,profileId:string,input:UpdateAssistantProfileInput,signal?:AbortSignal):Promise<AssistantProfile>=>assistantProfileResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}`,{method:"PATCH",headers:{"x-csrf-token":csrf},body:JSON.stringify(input),signal:signal??null})),
+  transitionAssistantProfile:async(csrf:string,workspaceId:string,companyId:number,profileId:string,targetStatus:AssistantProfileStatus,signal?:AbortSignal):Promise<AssistantProfile>=>assistantProfileResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}/transitions`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({targetStatus}),signal:signal??null})),
+  previewAssistantProfile:async(csrf:string,workspaceId:string,companyId:number,profileId:string,message:string,signal?:AbortSignal):Promise<AssistantPreviewResponse>=>operationalExecutionResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant-profiles/${segment(profileId)}/preview`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({message}),signal:signal??null})),
   executeAssistantProfile:async(csrf:string,workspaceId:string,companyId:number,profileId:string,message:string,signal?:AbortSignal):Promise<OperationalAssistantExecutionResponse>=>operationalExecutionResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant/executions`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({assistantProfileId:profileId,message}),signal:signal??null})),
-  getAssistantReadiness:(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<AssistantReadinessAssessment>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant/readiness`,{signal:signal??null}),
-  refreshAssistantReadiness:(csrf:string,workspaceId:string,companyId:number):Promise<AssistantReadinessAssessment>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant/readiness/refresh`,{method:"POST",headers:{"x-csrf-token":csrf},body:"{}"}),
-  getDefaultAssistant:(workspaceId:string,companyId:number):Promise<DefaultAssistantAssignment>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant/default`),
-  setDefaultAssistant:(csrf:string,workspaceId:string,companyId:number,assistantProfileId:string,expectedVersion?:number):Promise<DefaultAssistantAssignment>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant/default`,{method:"PUT",headers:{"x-csrf-token":csrf},body:JSON.stringify({assistantProfileId,...(expectedVersion===undefined?{}:{expectedVersion})})}),
+  getAssistantReadiness:async(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<AssistantReadinessAssessment>=>assistantReadinessResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant/readiness`,{signal:signal??null})),
+  refreshAssistantReadiness:async(csrf:string,workspaceId:string,companyId:number):Promise<AssistantReadinessAssessment>=>assistantReadinessResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant/readiness/refresh`,{method:"POST",headers:{"x-csrf-token":csrf},body:"{}"})),
+  getDefaultAssistant:async(workspaceId:string,companyId:number):Promise<DefaultAssistantAssignment>=>defaultAssistantResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant/default`)),
+  setDefaultAssistant:async(csrf:string,workspaceId:string,companyId:number,assistantProfileId:string,expectedVersion?:number):Promise<DefaultAssistantAssignment>=>defaultAssistantResponse(await request<unknown>(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/assistant/default`,{method:"PUT",headers:{"x-csrf-token":csrf},body:JSON.stringify({assistantProfileId,...(expectedVersion===undefined?{}:{expectedVersion})})})),
   listWebChatConnections:(workspaceId:string,companyId:number,signal?:AbortSignal):Promise<WebChatConnection[]>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/web-chat-connections`,{signal:signal??null}),
   createWebChatConnection:(csrf:string,workspaceId:string,companyId:number,assistantProfileId:string):Promise<WebChatConnection>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/web-chat-connections`,{method:"POST",headers:{"x-csrf-token":csrf},body:JSON.stringify({assistantProfileId})}),
   updateWebChatConnectionStatus:(csrf:string,workspaceId:string,companyId:number,connectionId:string,status:WebChatConnectionStatus):Promise<WebChatConnection>=>request(`/workspaces/${segment(workspaceId)}/companies/${segment(companyId)}/web-chat-connections/${segment(connectionId)}`,{method:"PATCH",headers:{"x-csrf-token":csrf},body:JSON.stringify({status})}),

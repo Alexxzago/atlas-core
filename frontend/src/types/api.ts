@@ -47,7 +47,7 @@ export interface WorkspaceSummary {
   capabilities: Permission[];
   commercialStatus?: WorkspaceCommercialStatus;
 }
-export type Permission = "workspace:read"|"workspace:manage"|"company:read"|"company:manage"|"onboarding:run"|"chat:use"|"conversation:message:send"|"conversation:manage"|"assistant:preview"|"knowledge:read"|"knowledge:ingest"|"knowledge:publish"|"knowledge:archive"|"membership:list"|"membership:invite"|"membership:manage"|"administrator:manage"|"owner:manage"|"owner:transfer";
+export type Permission = "workspace:read"|"workspace:manage"|"company:read"|"company:manage"|"onboarding:run"|"chat:use"|"conversation:message:send"|"conversation:manage"|"assistant:preview"|"assistant:capability:manage"|"knowledge:read"|"knowledge:ingest"|"knowledge:publish"|"knowledge:archive"|"membership:list"|"membership:invite"|"membership:manage"|"administrator:manage"|"owner:manage"|"owner:transfer";
 
 export type ConversationControlState = "automated" | "human_required" | "human_controlled";
 export interface ConversationDelivery { state: "pending" | "leased" | "accepted" | "delivered" | "read" | "retryable" | "permanent_failure" | "uncertain"; updatedAt: string; safeErrorCategory: string | null; }

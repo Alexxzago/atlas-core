@@ -90,7 +90,7 @@ function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmi
     if (route.name === "conversations") return <ConversationInbox csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} companyId={state.selectedCompanyId} capabilities={state.selectedWorkspace?.capabilities ?? []}/>;
     if (route.name === "analytics") return <><PageHeader title={t("shell.analyticsTitle")} description={t("shell.analyticsDescription")} /><EmptyState title={t("shell.analyticsTitle")} description={t("shell.analyticsDescription")} /></>;
     if (route.name === "settings") return <WorkspaceMembershipPortal csrf={csrf} currentUserId={userId} currentUserEmail={email} workspaces={state.workspaces} selectedWorkspace={state.selectedWorkspace} pendingWorkspaceId={state.pendingWorkspaceId} loading={state.workspacesLoading} error={state.workspaceError} onSelectWorkspace={(id) => { void selectWorkspace(id).then((selected) => { if (selected) navigate("/companies", { replace: true }); }); }} onWorkspacesChanged={() => void refresh()} onActiveWorkspaceLeft={clearWorkspace}/>;
-    if (route.name === "company-assistant") return assistantPanel;
+    if (route.name === "company-assistant" || route.name === "company-assistant-section") return assistantPanel;
     if (route.name === "company-knowledge") return knowledgePanel;
     if (route.name === "company-channels") return <>{requestedCompanyId && <ChannelHub companyId={requestedCompanyId} onNavigate={navigate}/>}</>;
     if (route.name === "company-web-chat") return <><ContextBackLink href={`/companies/${requestedCompanyId}/channels`} label={t("channels.back")} onNavigate={(event)=>{event.preventDefault();navigate(`/companies/${requestedCompanyId}/channels`);}}/>{webChatPanel}</>;

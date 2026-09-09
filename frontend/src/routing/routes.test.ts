@@ -19,6 +19,13 @@ test("builds canonical company paths", () => {
   assert.equal(portalPath({ name: "company-overview", companyId: 7 }), "/companies/7");
   assert.equal(portalPath({ name: "company-whatsapp", companyId: 7 }), "/companies/7/channels/whatsapp");
   assert.equal(portalPath({ name: "company-web-chat", companyId: 7 }), "/companies/7/channels/web-chat");
+  assert.equal(portalPath({ name: "company-assistant-section", companyId: 7, assistantProfileId: "asp_1", section: "status" }), "/companies/7/assistant/asp_1/status");
+});
+
+test("parses assistant subpaths while preserving the existing assistant route", () => {
+  assert.deepEqual(parsePortalRoute("/companies/7/assistant"), { name: "company-assistant", companyId: 7 });
+  assert.deepEqual(parsePortalRoute("/companies/7/assistant/asp_1/capabilities"), { name: "company-assistant-section", companyId: 7, assistantProfileId: "asp_1", section: "capabilities" });
+  assert.deepEqual(parsePortalRoute("/companies/7/assistant/asp_1/unknown"), { name: "not-found" });
 });
 
 test("classifies public and authenticated application routes", () => {
