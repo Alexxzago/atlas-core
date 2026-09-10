@@ -176,3 +176,31 @@ test("bootstrap owner keeps the default Workspace through login, proxy-origin se
     database.close();
   }
 });
+
+test("workspace selection accepts only strict forwarded HTTPS through the shared stateUser guard", async () => {
+  const { database, authentication, bootstrap, clock } = setup();
+  await bootstrap.bootstrap({ email: "owner@example.com", locale: "en", password: "first administrator password", confirmation: "first administrator password", setupSecret: secret });
+  const login = await authentication.login("owner@example.com", "first administrator password", "127.0.0.1");
+  const service = new WorkspaceAdministrationService(new SqliteWorkspaceAdministrationTransaction(database), new SecureInvitationProofProvider(), clock, { async deliver() { return "accepted" as const; } }, "https://portal.example.test");
+  const workspaceId = service.listWorkspaces(authentication.current(login.rawIdentifier)!.userId as import("../identity/domain/user.js").UserId)[0]!.publicId;
+  const app = express();
+  app.use(express.json());
+  app.use("/workspaces", createWorkspacesRouter(createWorkspaceAdministrationControllers(service, authentication, new ExactRequestOriginPolicy(["https://portal.example.test"], true))));
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => { server.once("listening", resolve); server.once("error", reject); });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const headers = { "content-type": "application/json", host: "portal.example.test", cookie: `${authentication.cookieName()}=${encodeURIComponent(login.rawIdentifier)}`, origin: "https://portal.example.test", "sec-fetch-site": "same-origin", "x-csrf-token": login.csrfToken };
+  const select = (extra: Record<string, string> = {}) => fetch(`${base}/workspaces/${workspaceId}/select`, { method: "POST", headers: { ...headers, ...extra }, body: "{}" });
+  try {
+    assert.equal((await select()).status, 404);
+    assert.equal((await select({ "x-forwarded-proto": "ftp" })).status, 404);
+    assert.equal((await select({ "x-forwarded-proto": "https, http" })).status, 404);
+    assert.equal((await select({ "x-forwarded-proto": "https", origin: "https://evil.example.test" })).status, 404);
+    for (const fetchSite of ["same-site", "cross-site"]) assert.equal((await select({ "x-forwarded-proto": "https", "sec-fetch-site": fetchSite })).status, 404);
+    assert.equal((await select({ "x-forwarded-proto": "https", "x-csrf-token": "invalid" })).status, 404);
+    assert.equal((await select({ "x-forwarded-proto": "https" })).status, 200);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    database.close();
+  }
+});
