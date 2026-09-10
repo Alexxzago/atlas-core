@@ -34,6 +34,7 @@ export class ExactRequestOriginPolicy implements RequestOriginPolicy {
 export interface EffectiveRequestAuthorityInput {
   readonly protocol: string;
   readonly host: string | undefined;
+  readonly forwardedProtocol?: string | readonly string[] | undefined;
 }
 
 export interface EffectiveRequestAuthority {
@@ -44,12 +45,20 @@ export interface EffectiveRequestAuthority {
 export class EffectiveRequestAuthorityResolver {
   public resolve(input: EffectiveRequestAuthorityInput): EffectiveRequestAuthority | null {
     if ((input.protocol !== "http" && input.protocol !== "https") || !input.host) return null;
+    const protocol = this.forwardedProtocol(input.forwardedProtocol) ?? (input.forwardedProtocol === undefined ? input.protocol : null);
+    if (!protocol) return null;
     try {
-      const url = new URL(`${input.protocol}://${input.host}`);
+      const url = new URL(`${protocol}://${input.host}`);
       if (url.host !== input.host) return null;
-      return { protocol: input.protocol, authority: url.host };
+      return { protocol, authority: url.host };
     } catch {
       return null;
     }
+  }
+
+  private forwardedProtocol(value: string | readonly string[] | undefined): "http" | "https" | null {
+    if (value === undefined) return null;
+    if (typeof value !== "string" || (value !== "http" && value !== "https")) return null;
+    return value;
   }
 }

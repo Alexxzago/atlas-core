@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { createDatabase } from "../config/database.js";
 import type { Clock, CredentialEnrollmentDeliveryPort, CredentialEnrollmentDeliveryRequest } from "../identity/application/ports.js";
 import { reconstructUser } from "../identity/domain/user.js";
-import { ExactRequestOriginPolicy, type RequestOriginPolicy } from "../identity/infrastructure/requestOriginPolicy.js";
+import { EffectiveRequestAuthorityResolver, ExactRequestOriginPolicy, type RequestOriginPolicy } from "../identity/infrastructure/requestOriginPolicy.js";
 import { SecureRandomProvider, ScryptPasswordProvider, Sha256CredentialEnrollmentHashProvider, Sha256SessionIdentifierProvider } from "../identity/infrastructure/securityProviders.js";
 import { AuthenticationFailure, AuthenticationService } from "../identity/services/authenticationService.js";
 import { SqliteAuthenticationTransaction } from "../repositories/identityTransaction.js";
@@ -37,6 +37,22 @@ test("platform administrator wiring retains the default two-hour session idle wi
 test("bootstrap rejects logout, expiry and credential mismatch",async()=>{const first=await setup();first.service.logout(first.grant.rawIdentifier);assert.throws(()=>first.service.bootstrapSession(first.grant.rawIdentifier),AuthenticationFailure);first.database.close();const expired=await setup();expired.clock.value="2026-07-18T12:00:00.000Z";assert.throws(()=>expired.service.bootstrapSession(expired.grant.rawIdentifier),AuthenticationFailure);expired.database.close();const mismatch=await setup();mismatch.database.prepare("UPDATE password_credentials SET credential_version=2 WHERE state='active'").run();assert.throws(()=>mismatch.service.bootstrapSession(mismatch.grant.rawIdentifier),AuthenticationFailure);mismatch.database.close();});
 
 test("RequestOriginPolicy freezes exact Origin and Fetch Metadata behavior",()=>{const production=new ExactRequestOriginPolicy(["https://app.example.com"],true),base={origin:"https://app.example.com",effectiveProtocol:"https" as const,effectiveAuthority:"app.example.com"};assert.equal(production.allows({...base,fetchSite:"same-origin"}),true);assert.equal(production.allows({...base,fetchSite:undefined}),true);assert.equal(production.allows({...base,fetchSite:"none"}),true);assert.equal(production.allows({...base,fetchSite:"same-site"}),false);assert.equal(production.allows({...base,fetchSite:"cross-site"}),false);assert.equal(production.allows({...base,origin:undefined,fetchSite:"same-origin"}),false);assert.equal(production.allows({...base,origin:"https://evil.example.com",fetchSite:"same-origin"}),false);const development=new ExactRequestOriginPolicy(["http://localhost:5173"],false);assert.equal(development.allows({origin:"http://localhost:5173",fetchSite:"same-origin",effectiveProtocol:"http",effectiveAuthority:"localhost:5173"}),true);});
+
+test("EffectiveRequestAuthorityResolver accepts only one exact forwarded protocol and preserves direct HTTPS",()=>{const resolver=new EffectiveRequestAuthorityResolver();assert.deepEqual(resolver.resolve({protocol:"https",host:"app.example.com",forwardedProtocol:undefined}),{protocol:"https",authority:"app.example.com"});assert.deepEqual(resolver.resolve({protocol:"http",host:"app.example.com",forwardedProtocol:"https"}),{protocol:"https",authority:"app.example.com"});for(const forwardedProtocol of ["https, http","https ","HTTPS","ftp",["https"],["https","http"]] as Array<string|readonly string[]>)assert.equal(resolver.resolve({protocol:"http",host:"app.example.com",forwardedProtocol}),null);});
+
+test("production identity origin checks accept strict forwarded HTTPS only through shared bootstrap and refresh paths",async()=>{
+  const{database,service,grant}=await setup();const authentication=createAuthenticationControllers(service,new ExactRequestOriginPolicy(["https://app.example.com"],true));const noop=((_request:unknown,response:{status:(value:number)=>{json:(body:unknown)=>void}}):void=>{response.status(501).json({});}) as never;
+  const app=express();app.use(express.json());app.use("/identity",createIdentityRouter({register:noop,resend:noop,verify:noop,...authentication}));const listener=app.listen(0,"127.0.0.1");await new Promise<void>((resolve,reject)=>{listener.once("listening",resolve);listener.once("error",reject);});
+  const address=listener.address()as AddressInfo,url=`http://127.0.0.1:${address.port}/identity/session`,cookie=`${service.cookieName()}=${encodeURIComponent(grant.rawIdentifier)}`,headers={"content-type":"application/json",host:"app.example.com",cookie,origin:"https://app.example.com","sec-fetch-site":"same-origin"};
+  try{
+    assert.equal((await fetch(`${url}/bootstrap`,{method:"POST",headers,body:"{}"})).status,403);
+    assert.equal((await fetch(`${url}/bootstrap`,{method:"POST",headers:{...headers,origin:"https://evil.example.com","x-forwarded-proto":"https"},body:"{}"})).status,403);
+    for(const fetchSite of ["cross-site","same-site"])assert.equal((await fetch(`${url}/bootstrap`,{method:"POST",headers:{...headers,"sec-fetch-site":fetchSite,"x-forwarded-proto":"https"},body:"{}"})).status,403);
+    for(const forwardedProtocol of ["https, http","ftp"])assert.equal((await fetch(`${url}/bootstrap`,{method:"POST",headers:{...headers,"x-forwarded-proto":forwardedProtocol},body:"{}"})).status,403);
+    const bootstrap=await fetch(`${url}/bootstrap`,{method:"POST",headers:{...headers,"x-forwarded-proto":"https"},body:"{}"});assert.equal(bootstrap.status,200);const body=await bootstrap.json()as{csrfToken:string};
+    assert.equal((await fetch(`${url}/refresh`,{method:"POST",headers:{...headers,"x-forwarded-proto":"https","x-csrf-token":body.csrfToken},body:"{}"})).status,200);
+  }finally{await new Promise<void>((resolve,reject)=>listener.close(error=>error?reject(error):resolve()));database.close();}
+});
 
 test("bootstrap HTTP contract is no-store, generic, empty-body only, and exposes no tenant or Session fields",async()=>{
   const{database,service,grant}=await setup();const allow={allows:()=>true} satisfies RequestOriginPolicy;
