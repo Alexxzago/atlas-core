@@ -92,6 +92,7 @@ test("EPIC048 permits non-factual intake questions while retaining strict factua
     message: "Hola, estoy buscando una casa para comprar en Mendoza. ¿Qué información necesitás para ayudarme?",
   }));
   assert.match(prompt, /ask brief clarifying or qualifying questions/);
+  assert.match(prompt, /When tools are available, do not call a tool or return FALLBACK MESSAGE merely because a direct non-factual clarification or qualification response is appropriate/);
   assert.match(prompt, /do not state, imply, recommend, or invent company, listing, price, availability, schedule, inventory/);
   assert.match(prompt, /Use only facts contained in COMPANY KNOWLEDGE/);
   assert.match(prompt, /If COMPANY KNOWLEDGE does not support an answer, return FALLBACK MESSAGE exactly/);

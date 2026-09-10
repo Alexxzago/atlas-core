@@ -5,6 +5,7 @@ import type { AssistantExecutionPort } from "../assistant/application/assistantE
 import { AnswerGenerationUnavailableError, type AssistantExecutionRequest, type AssistantExecutionResult } from "../assistant/application/assistantExecution.js";
 import { assistantProfileId, reconstructAssistantProfile, type AssistantProfile } from "../assistant/domain/assistantProfile.js";
 import { OperationalAssistantRuntime } from "../assistant/services/operationalAssistantRuntime.js";
+import { ToolExecutionError } from "../assistant/services/toolExecutionService.js";
 import { AssistantExecutionRecordRepository } from "../repositories/assistantExecutionRecordRepository.js";
 import { AssistantProfileRepository } from "../repositories/assistantProfileRepository.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
@@ -80,5 +81,18 @@ test("runtime records approved fallback and provider failures without persisting
   await assert.rejects(() => runtime.execute(company, ready, knowledge, "Question", [], { purpose: "preview", provider: "test", fallbackOnUnavailable: false }), AnswerGenerationUnavailableError);
   const failed = database.prepare("SELECT state,result,error_code FROM assistant_execution_records WHERE state='failed'").get() as { state: string; result: string | null; error_code: string };
   assert.equal(failed.state, "failed"); assert.equal(failed.result, null); assert.equal(failed.error_code, "provider_unavailable");
+  database.close();
+});
+
+test("tool-capable runtime preserves direct answers, configured fallback, and tool failure safety", async () => {
+  const { database, company, profile: ready, knowledge, clock, execution, records } = setup();
+  const direct = { runOutcome: async () => ({ answer: "¿Qué zona, presupuesto y tipo de propiedad buscás?", conversationMemory: [] }) };
+  const runtime = new OperationalAssistantRuntime(execution, records, clock, direct as never);
+  const context = { purpose: "operational_execution" as const, provider: "test", fallbackOnUnavailable: true };
+  assert.deepEqual((await runtime.execute(company, ready, knowledge, "Necesito ayuda", [], context)).response, { outcome: "answered", answer: "¿Qué zona, presupuesto y tipo de propiedad buscás?" });
+  const fallback = { runOutcome: async () => ({ answer: ready.fallbackMessage, conversationMemory: [] }) };
+  assert.deepEqual((await new OperationalAssistantRuntime(execution, records, clock, fallback as never).execute(company, ready, knowledge, "Necesito ayuda", [], context)).response, { outcome: "safe_fallback", answer: ready.fallbackMessage });
+  const failing = { runOutcome: async () => { throw new ToolExecutionError("tool_execution_failed"); } };
+  assert.deepEqual((await new OperationalAssistantRuntime(execution, records, clock, failing as never).execute(company, ready, knowledge, "Necesito ayuda", [], context)).response, { outcome: "safe_fallback", answer: ready.fallbackMessage });
   database.close();
 });

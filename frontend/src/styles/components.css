@@ -196,6 +196,29 @@
 .authenticated-portal .assistant-test-mode:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; }
 .authenticated-portal .assistant-test-mode:disabled { color: var(--color-text-muted); cursor: not-allowed; opacity: .6; }
 .authenticated-portal .assistant-test-content { display: grid; gap: var(--space-4); padding: var(--space-4); background: var(--color-surface-subtle); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); }
+.authenticated-portal .assistant-capabilities, .authenticated-portal .assistant-tools { display: grid; gap: var(--space-5); padding: var(--space-5); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+.authenticated-portal .assistant-capabilities > header, .authenticated-portal .assistant-tools > header { display: grid; gap: var(--space-2); }
+.authenticated-portal .assistant-capabilities__list, .authenticated-portal .assistant-tools__list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); margin: 0; padding: 0; list-style: none; }
+.authenticated-portal .assistant-capability-card, .authenticated-portal .assistant-tool-card { min-inline-size: 0; display: grid; align-content: start; gap: var(--space-4); padding: var(--space-4); background: var(--color-surface-subtle); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); }
+.authenticated-portal .assistant-capability-card > div, .authenticated-portal .assistant-tool-card article { display: grid; gap: var(--space-2); }
+.authenticated-portal .assistant-capability-card h3, .authenticated-portal .assistant-tool-card h3 { margin: 0; font-size: 1rem; }
+.authenticated-portal .assistant-capability-card:focus-within, .authenticated-portal .assistant-tool-card:focus-within { border-color: var(--color-focus); box-shadow: 0 0 0 2px var(--color-focus-halo); }
+.authenticated-portal .assistant-capability-card label { display: inline-flex; align-items: center; gap: var(--space-2); min-block-size: 40px; font-weight: 700; cursor: pointer; }
+.authenticated-portal .assistant-capability-card input { inline-size: 20px; block-size: 20px; min-block-size: 0; padding: 0; accent-color: var(--color-action); }
+.authenticated-portal .assistant-capability-card__availability { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.authenticated-portal .assistant-capability-card__availability > span { color: var(--color-text-secondary); font-size: .8125rem; }
+.authenticated-portal .assistant-capability-card__availability > strong { display: inline-flex; align-items: center; min-block-size: 24px; padding-inline: var(--space-2); border: 1px solid; border-radius: var(--radius-pill); font-size: .8125rem; }
+.authenticated-portal .assistant-capability-card__availability--available > strong { color: var(--color-success); background: var(--color-success-bg); border-color: var(--color-success-border); }
+.authenticated-portal .assistant-capability-card__availability--degraded > strong { color: var(--color-warning); background: var(--color-warning-bg); border-color: var(--color-warning-border); }
+.authenticated-portal .assistant-capability-card__availability--unavailable > strong { color: var(--color-error); background: var(--color-error-bg); border-color: var(--color-error-border); }
+.authenticated-portal .assistant-capability-card__cue, .authenticated-portal .assistant-capability-card__guidance { color: var(--color-text-secondary); }
+.authenticated-portal .assistant-tool-card__status { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.authenticated-portal .assistant-tool-card__status strong, .authenticated-portal .assistant-tool-card__status span { display: inline-flex; min-block-size: 24px; align-items: center; padding-inline: var(--space-2); border-radius: var(--radius-pill); font-size: .8125rem; }
+.authenticated-portal .assistant-tool-card__status strong.is-enabled { color: var(--color-success); background: var(--color-success-bg); }
+.authenticated-portal .assistant-tool-card__status strong.is-disabled { color: var(--color-warning); background: var(--color-warning-bg); }
+.authenticated-portal .assistant-tool-card__status span { color: var(--color-text-secondary); background: var(--color-surface); border: 1px solid var(--color-border); }
+.authenticated-portal .assistant-tool-card__guidance { display: grid; gap: var(--space-1); color: var(--color-text-secondary); }
+.authenticated-portal .assistant-tool-card__action { justify-self: start; font-weight: 700; }
 .authenticated-portal .whatsapp-onboarding { display: grid; gap: var(--space-5); }
 .authenticated-portal .whatsapp-steps { display: grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap: var(--space-3); padding: 0; overflow-x: auto; list-style: none; }
 .authenticated-portal .whatsapp-steps li { display: grid; gap: var(--space-2); min-inline-size: 120px; padding: var(--space-3); color: var(--color-text-secondary); background: var(--color-surface-subtle); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); font-size: 12px; }
@@ -211,6 +234,7 @@
   .authenticated-portal .assistant-profile-detail .action-row { align-items: stretch; flex-direction: column; }
   .authenticated-portal .assistant-profile-detail .action-row .button { inline-size: 100%; }
   .authenticated-portal .assistant-profile-workspace > .authenticated-section ul { grid-template-columns: 1fr; }
+  .authenticated-portal .assistant-capabilities__list, .authenticated-portal .assistant-tools__list { grid-template-columns: 1fr; }
   .authenticated-portal .assistant-test-modes { inline-size: 100%; }
   .authenticated-portal .whatsapp-create, .authenticated-portal .whatsapp-credential-row { grid-template-columns: 1fr; }
 }

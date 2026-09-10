@@ -76,7 +76,7 @@ export class OperationalAssistantRuntime {
           channel: context.snapshotContext?.channelProvider === "whatsapp" ? "whatsapp" : context.snapshotContext?.channelProvider === "web_chat" ? "web_chat" : "internal",
            invocationId: "", idempotencyKey: null, confirmation: null, purpose: context.purpose,
         }) : null;
-      const result = toolOutcome ? Object.freeze({ outcome: "answered" as const, answer: toolOutcome.answer }) : await this.execution.execute(request);
+      const result = toolOutcome ? Object.freeze({ outcome: toolOutcome.answer === profile.fallbackMessage ? "safe_fallback" as const : "answered" as const, answer: toolOutcome.answer }) : await this.execution.execute(request);
       const response = validResponse(result)
         ? context.fallbackOnUnavailable && result.outcome === "safe_fallback" ? fallback(profile.fallbackMessage) : result
         : fallback(profile.fallbackMessage);
