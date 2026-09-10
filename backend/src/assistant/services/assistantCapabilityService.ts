@@ -13,7 +13,6 @@ export class AssistantCapabilityService {
     if (!input || typeof input!=="object" || Array.isArray(input) || Object.keys(input).length!==1 || !Array.isArray((input as Record<string,unknown>).capabilities)) throw new AssistantCapabilityValidationError("Capabilities input is invalid.");
     const values=(input as {capabilities:unknown[]}).capabilities;
     if (values.some(value=>typeof value!=="string")) throw new AssistantCapabilityValidationError("Capabilities input is invalid.");
-    if (values.length===0) throw new AssistantCapabilityValidationError("At least one Assistant capability is required.");
     let capabilities: AssistantCapabilityKey[];
     try { capabilities=values.map(value=>this.catalog.require(value as string)); } catch { throw new AssistantCapabilityValidationError("Assistant capability is unknown."); }
     if(new Set(capabilities).size!==capabilities.length) throw new AssistantCapabilityValidationError("Assistant capabilities are duplicated.");

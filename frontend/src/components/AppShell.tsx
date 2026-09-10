@@ -36,7 +36,7 @@ function responsibilities(companyId: number): readonly Responsibility[] { return
 ]; }
 function active(key: Responsibility["key"], route: PortalRoute): boolean {
   if (key === "today") return route.name === "dashboard" || route.name === "company-overview";
-  if (key === "prepare") return route.name === "company-assistant";
+  if (key === "prepare") return route.name === "company-assistant" || route.name === "company-assistant-section";
   if (key === "teach") return route.name === "company-knowledge";
   if (key === "places") return route.name === "company-channels" || route.name === "company-whatsapp" || route.name === "company-web-chat";
   return route.name === "conversations";
@@ -98,7 +98,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
   const companyName=props.selectedCompany?.name??t("shell.chooseCompany");
   const companyContext = <button ref={companyTrigger} className={`company-context-button${props.companyTransitioning?" is-transitioning":""}`} type="button" title={companyName} aria-label={`${t("shell.companyContext")}: ${companyName}`} aria-haspopup="dialog" aria-expanded={chooserOpen} onClick={() => setChooserOpen(true)} disabled={!props.workspace || props.companiesLoading}><span>{t("shell.companyContext")}</span><span className="company-context-button__value"><strong>{props.companyTransitioning?t("shell.changingCompany"):companyName}</strong>{props.companyTransitioning?<span className="company-context-button__progress" role="status" aria-label={t("shell.changingCompany")}/>:<span className="company-context-button__chevron" aria-hidden="true">⌄</span>}</span></button>;
 
-  return <div className={`app-shell${props.selectedCompany ? " has-company" : " no-company"}`}><SkipLink />
+  return <div className={`app-shell authenticated-portal${props.selectedCompany ? " has-company" : " no-company"}`}><SkipLink />
     <aside className="app-sidebar" aria-label={t("shell.applicationNavigation")}><div className="app-sidebar__brand"><span aria-hidden="true"/><strong>ATLAS</strong></div>{companyContext}{props.workspace && <p className="workspace-context">{props.workspace.name}</p>}{navigation}<button className="workspace-menu-trigger" type="button" aria-expanded={accountOpen} onClick={(event) => { accountTrigger.current = event.currentTarget; setAccountOpen((value) => !value); }}>{t("shell.workspaceMenu")}</button></aside>
     <header className="mobile-context-bar"><button ref={mobileTrigger} className="mobile-navigation-trigger" type="button" aria-expanded={mobileOpen} aria-controls="mobile-navigation" onClick={() => setMobileOpen(true)}>{t("shell.openNavigation")}</button>{companyContext}<button className="mobile-account-trigger" type="button" aria-label={t("shell.workspaceMenu")} onClick={(event) => { accountTrigger.current = event.currentTarget; setAccountOpen((value) => !value); }}>•••</button></header>
     {accountOpen && createPortal(<><div className="workspace-menu-backdrop" aria-hidden="true"/><AccountMenu ref={accountMenu} {...props} navigate={navigate} style={accountPosition}/></>,document.body)}

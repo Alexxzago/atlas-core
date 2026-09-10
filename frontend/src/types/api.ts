@@ -47,7 +47,7 @@ export interface WorkspaceSummary {
   capabilities: Permission[];
   commercialStatus?: WorkspaceCommercialStatus;
 }
-export type Permission = "workspace:read"|"workspace:manage"|"company:read"|"company:manage"|"onboarding:run"|"chat:use"|"conversation:message:send"|"conversation:manage"|"assistant:preview"|"knowledge:read"|"knowledge:ingest"|"knowledge:publish"|"knowledge:archive"|"membership:list"|"membership:invite"|"membership:manage"|"administrator:manage"|"owner:manage"|"owner:transfer";
+export type Permission = "workspace:read"|"workspace:manage"|"company:read"|"company:manage"|"onboarding:run"|"chat:use"|"conversation:message:send"|"conversation:manage"|"assistant:preview"|"assistant:capability:manage"|"knowledge:read"|"knowledge:ingest"|"knowledge:publish"|"knowledge:archive"|"membership:list"|"membership:invite"|"membership:manage"|"administrator:manage"|"owner:manage"|"owner:transfer";
 
 export type ConversationControlState = "automated" | "human_required" | "human_controlled";
 export interface ConversationDelivery { state: "pending" | "leased" | "accepted" | "delivered" | "read" | "retryable" | "permanent_failure" | "uncertain"; updatedAt: string; safeErrorCategory: string | null; }
@@ -148,6 +148,14 @@ export interface OperationalAssistantExecutionResponse {
   answer: string;
 }
 
+export type AssistantCapabilityAvailability = "available" | "unavailable" | "degraded";
+export type AssistantCapabilityConsequence = "read_only" | "consequential";
+export interface AssistantCapabilityCatalogItem { id:string; assigned:boolean; availability:AssistantCapabilityAvailability; consequence:AssistantCapabilityConsequence; safeReason:string|null; safeNextAction:string|null; toolCount:number; }
+export interface AssistantCapabilityCatalog { capabilities:AssistantCapabilityCatalogItem[]; }
+export type AssistantToolAvailability = "available" | "unavailable" | "degraded";
+export interface AssistantToolCatalogItem { id:string; enabled:boolean; availability:AssistantToolAvailability; capabilityId:string; safeReason:string|null; safeNextAction:string|null; }
+export interface AssistantToolCatalog { tools:AssistantToolCatalogItem[]; }
+
 export type WebChatConnectionStatus = "active" | "inactive";
 
 export interface WebChatConnection {
@@ -225,6 +233,11 @@ export interface AssistantReadinessAssessment {
   evaluatedAt: string;
   policyVersion: string;
   configurationDigest: string;
+}
+export interface CompanyOperationalStatus {
+  assistant: { status: "ready" | "blocked" | "unavailable"; evaluatedAt: string | null; blockers: string[] };
+  whatsApp: Array<{ connectionId: string; status: "active" | "inactive"; validationState: "not_validated" | "valid" | "invalid"; healthState: "inactive" | "healthy" | "degraded" }>;
+  voice: { status: "unavailable" };
 }
 export interface DefaultAssistantAssignment { companyId:number; assistantProfileId:string; version:number; assignedAt:string; updatedAt:string; assignedByActorId:string|null; source:string|null; }
 

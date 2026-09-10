@@ -1,7 +1,11 @@
 import type { RequestHandler, Response } from "express";
 import { AssistantCapabilityNotFoundError, AssistantCapabilityService, AssistantCapabilityValidationError } from "../assistant/services/assistantCapabilityService.js";
+import { AssistantCapabilityCatalogService } from "../assistant/services/assistantCapabilityCatalogService.js";
+import { AssistantToolCatalogService } from "../assistant/services/assistantToolCatalogService.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 
 export function createListAssistantCapabilitiesController(service: AssistantCapabilityService, context: WorkspaceContext): RequestHandler { return async(req,res):Promise<void>=>{try{res.json({capabilities:await service.list(context,req.params.companyId,req.params.assistantProfileId)});}catch(error:unknown){respond(res,error);}}; }
+export function createListAssistantCapabilityCatalogController(service: AssistantCapabilityCatalogService, context: WorkspaceContext): RequestHandler { return async(req,res):Promise<void>=>{try{res.json({capabilities:await service.list(context,req.params.companyId,req.params.assistantProfileId)});}catch(error:unknown){respond(res,error);}}; }
+export function createListAssistantToolCatalogController(service: AssistantToolCatalogService, context: WorkspaceContext): RequestHandler { return async(req,res):Promise<void>=>{try{res.json({tools:await service.list(context,req.params.companyId,req.params.assistantProfileId)});}catch(error:unknown){respond(res,error);}}; }
 export function createReplaceAssistantCapabilitiesController(service: AssistantCapabilityService,context:WorkspaceContext,actor:{readonly userId:string}):RequestHandler{return async(req,res):Promise<void>=>{try{res.json({capabilities:await service.replace(context,req.params.companyId,req.params.assistantProfileId,req.body,actor.userId)});}catch(error:unknown){respond(res,error);}};}
 function respond(res:Response,error:unknown):void{if(error instanceof AssistantCapabilityValidationError){res.status(400).json({error:error.message});return;}if(error instanceof AssistantCapabilityNotFoundError){res.status(404).json({error:error.message});return;}console.error("Assistant capability operation failed.",error);res.status(500).json({error:"Assistant capability operation failed."});}

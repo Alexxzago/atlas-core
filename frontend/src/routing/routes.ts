@@ -3,6 +3,7 @@ export type PortalRoute =
   | { readonly name: "companies" }
   | { readonly name: "company-overview"; readonly companyId: number }
   | { readonly name: "company-assistant"; readonly companyId: number }
+  | { readonly name: "company-assistant-section"; readonly companyId: number; readonly assistantProfileId: string; readonly section: AssistantSection }
   | { readonly name: "company-knowledge"; readonly companyId: number }
   | { readonly name: "company-channels"; readonly companyId: number }
   | { readonly name: "company-whatsapp"; readonly companyId: number }
@@ -17,6 +18,9 @@ export type AppRoute =
   | { readonly kind: "public"; readonly name: "chat"; readonly connectionPublicId: string }
   | { readonly kind: "admin"; readonly route: "overview" | "workspaces" | "workspace-commercial" | "users" | "user-commercial" | "not-found"; readonly id?: string }
   | { readonly kind: "portal"; readonly route: PortalRoute };
+
+export type AssistantSection = "general" | "capabilities" | "tools" | "behavior" | "status" | "test";
+const assistantSections = new Set<AssistantSection>(["general", "capabilities", "tools", "behavior", "status", "test"]);
 
 function companyId(value: string | undefined): number | null {
   if (!value || !/^\d+$/.test(value)) return null;
@@ -33,6 +37,7 @@ export function parsePortalRoute(pathname: string): PortalRoute {
     if (!id) return { name: "not-found" };
     if (segments.length === 2) return { name: "company-overview", companyId: id };
     if (segments.length === 3 && segments[2] === "assistant") return { name: "company-assistant", companyId: id };
+    if (segments.length === 5 && segments[2] === "assistant" && /^[A-Za-z0-9_-]+$/u.test(segments[3] ?? "")) return assistantSections.has(segments[4] as AssistantSection) ? { name: "company-assistant-section", companyId: id, assistantProfileId: segments[3]!, section: segments[4] as AssistantSection } : { name: "company-assistant", companyId: id };
     if (segments.length === 3 && segments[2] === "knowledge") return { name: "company-knowledge", companyId: id };
     if (segments.length === 3 && segments[2] === "channels") return { name: "company-channels", companyId: id };
     if (segments.length === 4 && segments[2] === "channels" && segments[3] === "whatsapp") return { name: "company-whatsapp", companyId: id };
@@ -71,6 +76,7 @@ export function portalPath(route: Exclude<PortalRoute, { name: "not-found" }>): 
   const base = `/companies/${route.companyId}`;
   if (route.name === "company-overview") return base;
   if (route.name === "company-assistant") return `${base}/assistant`;
+  if (route.name === "company-assistant-section") return `${base}/assistant/${route.assistantProfileId}/${route.section}`;
   if (route.name === "company-knowledge") return `${base}/knowledge`;
   if (route.name === "company-channels") return `${base}/channels`;
   if (route.name === "company-whatsapp") return `${base}/channels/whatsapp`;

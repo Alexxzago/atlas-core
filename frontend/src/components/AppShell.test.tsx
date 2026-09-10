@@ -20,6 +20,11 @@ test("uses responsibility navigation and omits Analytics from primary navigation
   expect(within(navigation).queryByText("Analytics")).toBeNull();
 });
 
+test("keeps Configure assistant active for assistant subsections", () => {
+  render(view({ route: { name: "company-assistant-section", companyId: 2, assistantProfileId: "assistant", section: "test" } }));
+  expect(screen.getByRole("link", { name: "Configure assistant" }).getAttribute("aria-current")).toBe("page");
+});
+
 test("opens one authoritative company chooser", () => {
   render(view());
   fireEvent.click(screen.getAllByRole("button", { name: /Company Two/ })[0]!);
