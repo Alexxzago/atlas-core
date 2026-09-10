@@ -68,7 +68,7 @@ export function AssistantStatusPanel({ csrf, workspaceId, companyId, profileId, 
   const label = overall === "ready" ? t("assistantStatus.ready") : overall === "needsAttention" ? t("assistantStatus.needsAttention") : overall === "checking" ? t("assistantStatus.checking") : t("assistantStatus.unavailable");
   const summary = overall === "ready" ? t("assistantStatus.summary.ready") : overall === "needsAttention" ? t("assistantStatus.summary.attention") : t("assistantStatus.summary.unavailable");
   const blockers = [...new Set(readiness.blockers)];
-  return <section className="assistant-status" aria-labelledby="assistant-status-title" aria-busy={pending}>
+  return <section className="assistant-status-panel" aria-labelledby="assistant-status-title" aria-busy={pending}>
     <p className="atlas-eyebrow">{t("assistantStatus.eyebrow")}</p><h2 id="assistant-status-title">{t("assistantStatus.title")}</h2><p>{t("assistantStatus.lead")}</p>
     <div className={`assistant-status__summary assistant-status__summary--${overall}`} role="status" aria-live="polite"><strong>{label}</strong><p>{summary}</p>{readiness.evaluatedAt && <p>{t("assistantStatus.checked", { date: formatDate(readiness.evaluatedAt) })}</p>}</div>
     {readiness.assistantProfileId !== profileId && <p>{t("assistantStatus.defaultOther")}</p>}
