@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { I18nProvider } from "../i18n/I18nContext";
 import { ApiError, atlasApi } from "../api/atlasApi";
 import { AssistantProfilesPanel } from "./AssistantProfilesPanel";
+import type { Permission } from "../types/api";
 
 const draftProfile = { id: "assistant-1", name: "Atlas Assistant", description: null, businessRole: "Sales", objective: "Help customers", audience: null, tone: "professional" as const, assistantLanguage: "en" as const, welcomeMessage: "Hello", fallbackMessage: "Please contact a person.", status: "draft" as const, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", archivedAt: null };
 
@@ -76,7 +77,18 @@ test("uses only the confirmed default assignment and disables duplicate default 
   fireEvent.click(screen.getByRole("button", { name: "Set as default" }));
   expect(screen.getByRole("button", { name: "Updating…" }).hasAttribute("disabled")).toBe(true);
   resolveDefault({ companyId: 1, assistantProfileId: "assistant-1", version: 2, assignedAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", assignedByActorId: null, source: null });
-  await screen.findByText("Set as default");
+  await screen.findByText("Default assistant");
+});
+
+test("renders a non-interactive default badge while retaining the action for another assistant", async () => {
+  vi.spyOn(atlasApi, "getDefaultAssistant").mockResolvedValue({ companyId: 1, assistantProfileId: "assistant-1", version: 1, assignedAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", assignedByActorId: null, source: null });
+  const props = { csrf: "csrf", workspaceId: "workspace-1", workspaceRole: null, capabilities: ["company:manage"] as Permission[], companyId: 1, companyName: null, companySelected: true, profiles: [{ ...draftProfile, status: "ready" as const }], transientArchivedProfile: null, loading: false, error: false, formMode: "closed" as const, submitting: false, transitionTarget: null, activeSection: "general" as const, onSelectProfile: () => {}, onOpenCreate: () => {}, onOpenEdit: () => {}, onCloseForm: () => {}, onSubmitForm: () => {}, onTransition: () => {}, onRetry: () => {} };
+  const view = render(<I18nProvider><AssistantProfilesPanel {...props} selectedProfile={{ ...draftProfile, status: "ready" }}/></I18nProvider>);
+  await screen.findByText("Default assistant");
+  expect(view.container.querySelector(".assistant-profile-default-badge")).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "Set as default" })).toBeNull();
+  view.rerender(<I18nProvider><AssistantProfilesPanel {...props} selectedProfile={{ ...draftProfile, id: "assistant-2", status: "ready" }} profiles={[{ ...draftProfile, id: "assistant-2", status: "ready" }]}/></I18nProvider>);
+  await screen.findByRole("button", { name: "Set as default" });
 });
 
 test("refetches the canonical default after a default assignment conflict", async () => {
@@ -86,6 +98,6 @@ test("refetches the canonical default after a default assignment conflict", asyn
   render(<I18nProvider><AssistantProfilesPanel csrf="csrf" workspaceId="workspace-1" workspaceRole={null} capabilities={["company:manage"]} companyId={1} companyName={null} companySelected profiles={[{ ...draftProfile, status: "ready" }]} selectedProfile={{ ...draftProfile, status: "ready" }} transientArchivedProfile={null} loading={false} error={false} formMode="closed" submitting={false} transitionTarget={null} activeSection="general" onSelectProfile={() => {}} onOpenCreate={() => {}} onOpenEdit={() => {}} onCloseForm={() => {}} onSubmitForm={() => {}} onTransition={() => {}} onRetry={() => {}}/></I18nProvider>);
   await waitFor(() => expect(screen.getByRole("button", { name: "Set as default" })).toBeTruthy());
   fireEvent.click(screen.getByRole("button", { name: "Set as default" }));
-  await screen.findByText("Set as default");
+  await screen.findByText("Default assistant");
   expect(getDefault).toHaveBeenCalledTimes(2);
 });
