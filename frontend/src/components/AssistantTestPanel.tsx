@@ -35,8 +35,14 @@ export function AssistantTestPanel({ csrf, workspaceId, companyId, profile, capa
     generation.current += 1;
     controller.current?.abort();
     setPending(false); setMessage(""); setAnswer(null); setError(null);
-  }, [workspaceId, companyId, profile.id, profile.status, csrf, canPreview, canActive]);
-  useEffect(() => { if (canPreview || canActive) { if (mode === "preview" && !canPreview) setMode("active"); if (mode === "active" && !canActive) setMode("preview"); } }, [mode, canPreview, canActive]);
+  }, [workspaceId, companyId, profile.id, profile.status]);
+  useEffect(() => {
+    generation.current += 1;
+    controller.current?.abort();
+    setPending(false);
+    if (canPreview || canActive) { if (mode === "preview" && !canPreview) setMode("active"); if (mode === "active" && !canActive) setMode("preview"); }
+  }, [canPreview, canActive]);
+  useEffect(() => () => { generation.current += 1; controller.current?.abort(); }, []);
 
   const submit = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
@@ -57,11 +63,11 @@ export function AssistantTestPanel({ csrf, workspaceId, companyId, profile, capa
   return <section className="assistant-preview" aria-labelledby="assistant-test-title" aria-busy={pending}>
     <p className="atlas-eyebrow">{t("assistantTest.eyebrow")}</p><h2 id="assistant-test-title">{t("assistantTest.title")}</h2><p>{t("assistantTest.lead")}</p>
     {!available ? <p role="status">{t("assistantTest.noPermission")}</p> : <>
-      <div role="tablist" aria-label={t("assistantTest.modeLabel")}>
-        <button type="button" role="tab" aria-selected={mode === "preview"} disabled={!canPreview} onClick={() => setMode("preview")}>{t("assistantTest.preview")}</button>
-        <button type="button" role="tab" aria-selected={mode === "active"} disabled={!canActive} onClick={() => setMode("active")}>{t("assistantTest.active")}</button>
+      <div className="assistant-test-modes" role="tablist" aria-label={t("assistantTest.modeLabel")}>
+        <button className={`assistant-test-mode${mode === "preview" ? " is-selected" : ""}`} type="button" role="tab" aria-controls="assistant-test-content" aria-selected={mode === "preview"} disabled={!canPreview} onClick={() => setMode("preview")}>{t("assistantTest.preview")}</button>
+        <button className={`assistant-test-mode${mode === "active" ? " is-selected" : ""}`} type="button" role="tab" aria-controls="assistant-test-content" aria-selected={mode === "active"} disabled={!canActive} onClick={() => setMode("active")}>{t("assistantTest.active")}</button>
       </div>
-      <div role="tabpanel"><p>{t(mode === "preview" ? "assistantTest.previewLead" : "assistantTest.activeLead")}</p>{profile.status !== "ready" && <p role="status">{t("assistantTest.readyRequired")}</p>}
+      <div id="assistant-test-content" className="assistant-test-content" role="tabpanel"><p>{t(mode === "preview" ? "assistantTest.previewLead" : "assistantTest.activeLead")}</p>{profile.status !== "ready" && <p role="status">{t("assistantTest.readyRequired")}</p>}
         <form className="assistant-preview-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>{t("assistantTest.messageLabel")}</span><textarea value={message} maxLength={2_000} disabled={pending || profile.status !== "ready"} placeholder={t("assistantTest.placeholder")} onChange={(event) => setMessage(event.target.value)} /><small>{t("assistantTest.limit", { count: String(length) })}</small></label><button className="button button--primary" type="submit" disabled={pending || profile.status !== "ready" || length < 1 || length > 2_000}>{pending ? t("assistantTest.sending") : t("assistantTest.send")}</button></form>
       </div>
       {pending && <p role="status">{t("assistantTest.responding")}</p>}

@@ -83,3 +83,16 @@ test("EPIC038 freezes preview provider evidence and contains malicious source te
   assert.doesNotMatch(prompt, /TOOL DECLARATIONS:/);
   assert.ok(chunkUtf8Deterministically("😀 evidence", 8, 0).every(chunk => Buffer.byteLength(chunk.text, "utf8") <= 8));
 });
+
+test("EPIC048 permits non-factual intake questions while retaining strict factual grounding", () => {
+  const prompt = assistantModelPrompt(freezeAssistantExecution({
+    purpose: "preview",
+    behavior: { businessRole: "Asesor inmobiliario", objective: "Ayudar a encontrar una propiedad", audience: null, tone: "professional", assistantLanguage: "es", fallbackMessage: "No tengo información suficiente para responder con seguridad." },
+    knowledge: { company: { name: "Inmobiliaria", website: null, phone: "", email: "" }, business: { services: [], hours: "", locations: [] }, faq: [] },
+    message: "Hola, estoy buscando una casa para comprar en Mendoza. ¿Qué información necesitás para ayudarme?",
+  }));
+  assert.match(prompt, /ask brief clarifying or qualifying questions/);
+  assert.match(prompt, /do not state, imply, recommend, or invent company, listing, price, availability, schedule, inventory/);
+  assert.match(prompt, /Use only facts contained in COMPANY KNOWLEDGE/);
+  assert.match(prompt, /If COMPANY KNOWLEDGE does not support an answer, return FALLBACK MESSAGE exactly/);
+});
