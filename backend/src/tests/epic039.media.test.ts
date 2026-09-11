@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,68 +15,1249 @@ import { Worker } from "node:worker_threads";
 import { createDatabase } from "../config/database.js";
 import { runMigrations } from "../config/migrations.js";
 import { BinaryMediaInspector } from "../media/infrastructure/mediaInspector.js";
-import { LocalMediaStorage, rejectReparsePoint, type LocalMediaCleanupPort } from "../media/infrastructure/localMediaStorage.js";
+import {
+  LocalMediaStorage,
+  rejectReparsePoint,
+  type LocalMediaCleanupPort,
+} from "../media/infrastructure/localMediaStorage.js";
 import { MediaService } from "../media/services/mediaService.js";
-import { MediaDomainError, MEDIA_LIMITS, type MediaMetadataValue } from "../media/domain/media.js";
+import {
+  MediaDomainError,
+  MEDIA_LIMITS,
+  type MediaMetadataValue,
+} from "../media/domain/media.js";
 import { MediaRepository } from "../repositories/mediaRepository.js";
 import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
 import { createWorkspaceContext } from "../types/workspaceContext.js";
-import type { MediaAssociationOwnerResolver, MediaInspectorPort, MediaStoragePort } from "../media/application/ports.js";
+import type {
+  MediaAssociationOwnerResolver,
+  MediaInspectorPort,
+  MediaStoragePort,
+} from "../media/application/ports.js";
 import { productionAssistantCapabilityCatalog } from "../assistant/domain/assistantCapability.js";
 
-const png=Uint8Array.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,1]);
-async function* stream(...chunks:Uint8Array[]):AsyncGenerator<Uint8Array>{for(const chunk of chunks)yield chunk;}
-class Owners implements MediaAssociationOwnerResolver { public allowed=new Set<string>(); public owns(_c:ReturnType<typeof createWorkspaceContext>,company:number,type:"conversation_message"|"knowledge_source"|"tool_result"|"outbound_message",id:string):boolean{return this.allowed.has(`${company}:${type}:${id}`);} }
-function fixture(){const directory=mkdtempSync(join(tmpdir(),"atlas-media-")),db=createDatabase(":memory:"),context=createWorkspaceContext(new WorkspaceRepository(db).resolveDefault()),company=new CompanyRepository(db).create(context,{name:"Media",website:"https://media.test"}),owners=new Owners(),storage=new LocalMediaStorage(directory),service=new MediaService(new MediaRepository(db),storage,new BinaryMediaInspector(),owners,{now:()=>"2026-08-18T00:00:00.000Z"});return{directory,db,context,company,owners,storage,service};}
-function input(key:string,content:AsyncIterable<Uint8Array>=stream(png),metadata?:Readonly<Record<string,MediaMetadataValue>>){return{operation:"ingest" as const,idempotencyKey:key,declaredMediaType:"image/png",filename:"logo.png",...(metadata===undefined?{}:{metadata}),content};}
+const png = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1,
+]);
+async function* stream(...chunks: Uint8Array[]): AsyncGenerator<Uint8Array> {
+  for (const chunk of chunks) yield chunk;
+}
+class Owners implements MediaAssociationOwnerResolver {
+  public allowed = new Set<string>();
+  public owns(
+    _c: ReturnType<typeof createWorkspaceContext>,
+    company: number,
+    type:
+      | "conversation_message"
+      | "knowledge_source"
+      | "tool_result"
+      | "outbound_message",
+    id: string,
+  ): boolean {
+    return this.allowed.has(`${company}:${type}:${id}`);
+  }
+}
+function fixture() {
+  const directory = mkdtempSync(join(tmpdir(), "atlas-media-")),
+    db = createDatabase(":memory:"),
+    context = createWorkspaceContext(
+      new WorkspaceRepository(db).resolveDefault(),
+    ),
+    company = new CompanyRepository(db).create(context, {
+      name: "Media",
+      website: "https://media.test",
+    }),
+    owners = new Owners(),
+    storage = new LocalMediaStorage(directory),
+    service = new MediaService(
+      new MediaRepository(db),
+      storage,
+      new BinaryMediaInspector(),
+      owners,
+      { now: () => "2026-08-18T00:00:00.000Z" },
+    );
+  return { directory, db, context, company, owners, storage, service };
+}
+function input(
+  key: string,
+  content: AsyncIterable<Uint8Array> = stream(png),
+  metadata?: Readonly<Record<string, MediaMetadataValue>>,
+) {
+  return {
+    operation: "ingest" as const,
+    idempotencyKey: key,
+    declaredMediaType: "image/png",
+    filename: "logo.png",
+    ...(metadata === undefined ? {} : { metadata }),
+    content,
+  };
+}
 
-test("EPIC039 makes assets company-scoped safe projections while blobs retain physical authority",async()=>{const v=fixture();try{const asset=await v.service.store(v.context,v.company.id,input("one"));assert.match(asset.id,/^mas_/u);assert.equal(asset.companyId,v.company.id);assert.equal("storageReference" in asset,false);const blob=v.db.prepare("SELECT id,storage_reference FROM media_blobs").get()as{id:string;storage_reference:string};assert.match(blob.id,/^mbl_/u);assert.match(blob.storage_reference,/^mbl_/u);assert.equal(v.db.prepare("SELECT blob_id FROM media_assets WHERE id=?").get(asset.id)!==undefined,true);}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 makes assets company-scoped safe projections while blobs retain physical authority", async () => {
+  const v = fixture();
+  try {
+    const asset = await v.service.store(v.context, v.company.id, input("one"));
+    assert.match(asset.id, /^mas_/u);
+    assert.equal(asset.companyId, v.company.id);
+    assert.equal("storageReference" in asset, false);
+    const blob = v.db
+      .prepare("SELECT id,storage_reference FROM media_blobs")
+      .get() as { id: string; storage_reference: string };
+    assert.match(blob.id, /^mbl_/u);
+    assert.match(blob.storage_reference, /^mbl_/u);
+    assert.equal(
+      v.db
+        .prepare("SELECT blob_id FROM media_assets WHERE id=?")
+        .get(asset.id) !== undefined,
+      true,
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 streams bounded bytes, hashes them during storage, and never readies overflow",async()=>{const v=fixture();try{await assert.rejects(v.service.store(v.context,v.company.id,input("large",stream(png,new Uint8Array(MEDIA_LIMITS.maximumBytes)))),(e:unknown)=>e instanceof MediaDomainError&&e.code==="media_too_large");assert.equal((v.db.prepare("SELECT COUNT(*) count FROM media_assets WHERE status='ready'").get()as{count:number}).count,0);assert.equal((v.db.prepare("SELECT COUNT(*) count FROM media_blobs").get()as{count:number}).count,0);assert.deepEqual(readdirSync(v.directory),[]);const asset=await v.service.store(v.context,v.company.id,input("good"));assert.equal(asset.sizeBytes,png.byteLength);assert.equal((v.db.prepare("SELECT sha256_digest FROM media_blobs").get()as{sha256_digest:string}).sha256_digest.length,64);}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 streams bounded bytes, hashes them during storage, and never readies overflow", async () => {
+  const v = fixture();
+  try {
+    await assert.rejects(
+      v.service.store(
+        v.context,
+        v.company.id,
+        input("large", stream(png, new Uint8Array(MEDIA_LIMITS.maximumBytes))),
+      ),
+      (e: unknown) =>
+        e instanceof MediaDomainError && e.code === "media_too_large",
+    );
+    assert.equal(
+      (
+        v.db
+          .prepare(
+            "SELECT COUNT(*) count FROM media_assets WHERE status='ready'",
+          )
+          .get() as { count: number }
+      ).count,
+      0,
+    );
+    assert.equal(
+      (
+        v.db.prepare("SELECT COUNT(*) count FROM media_blobs").get() as {
+          count: number;
+        }
+      ).count,
+      0,
+    );
+    assert.deepEqual(readdirSync(v.directory), []);
+    const asset = await v.service.store(v.context, v.company.id, input("good"));
+    assert.equal(asset.sizeBytes, png.byteLength);
+    assert.equal(
+      (
+        v.db.prepare("SELECT sha256_digest FROM media_blobs").get() as {
+          sha256_digest: string;
+        }
+      ).sha256_digest.length,
+      64,
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 preserves overflow when close cleanup fails",async()=>{const directory=mkdtempSync(join(tmpdir(),"atlas-media-cleanup-")),cleanup:LocalMediaCleanupPort={close:async file=>{await file.close();throw new Error("close failure");},remove:async path=>rmSync(path,{force:true})};try{await assert.rejects(new LocalMediaStorage(directory,cleanup).stage("mbl_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",stream(new Uint8Array(MEDIA_LIMITS.maximumBytes+1))),(error:unknown)=>error instanceof MediaDomainError&&error.code==="media_too_large");assert.deepEqual(readdirSync(directory),[]);}finally{rmSync(directory,{recursive:true,force:true});}});
+test("EPIC039 preserves overflow when close cleanup fails", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "atlas-media-cleanup-")),
+    cleanup: LocalMediaCleanupPort = {
+      close: async (file) => {
+        await file.close();
+        throw new Error("close failure");
+      },
+      remove: async (path) => rmSync(path, { force: true }),
+    };
+  try {
+    await assert.rejects(
+      new LocalMediaStorage(directory, cleanup).stage(
+        "mbl_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        stream(new Uint8Array(MEDIA_LIMITS.maximumBytes + 1)),
+      ),
+      (error: unknown) =>
+        error instanceof MediaDomainError && error.code === "media_too_large",
+    );
+    assert.deepEqual(readdirSync(directory), []);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 preserves overflow when unlink cleanup fails",async()=>{const directory=mkdtempSync(join(tmpdir(),"atlas-media-cleanup-")),cleanup:LocalMediaCleanupPort={close:file=>file.close(),remove:async()=>{throw new Error("unlink failure");}};try{await assert.rejects(new LocalMediaStorage(directory,cleanup).stage("mbl_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",stream(new Uint8Array(MEDIA_LIMITS.maximumBytes+1))),(error:unknown)=>error instanceof MediaDomainError&&error.code==="media_too_large");assert.equal(readdirSync(directory).length,1);}finally{rmSync(directory,{recursive:true,force:true});}});
+test("EPIC039 preserves overflow when unlink cleanup fails", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "atlas-media-cleanup-")),
+    cleanup: LocalMediaCleanupPort = {
+      close: (file) => file.close(),
+      remove: async () => {
+        throw new Error("unlink failure");
+      },
+    };
+  try {
+    await assert.rejects(
+      new LocalMediaStorage(directory, cleanup).stage(
+        "mbl_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        stream(new Uint8Array(MEDIA_LIMITS.maximumBytes + 1)),
+      ),
+      (error: unknown) =>
+        error instanceof MediaDomainError && error.code === "media_too_large",
+    );
+    assert.equal(readdirSync(directory).length, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 persists operation idempotency and rejects divergent canonical requests",async()=>{const v=fixture();try{const first=await v.service.store(v.context,v.company.id,input("same")),again=await v.service.store(v.context,v.company.id,input("same"));assert.equal(again.id,first.id);await assert.rejects(v.service.store(v.context,v.company.id,{...input("same"),filename:"other.png"}),(e:unknown)=>e instanceof MediaDomainError&&e.code==="media_idempotency_conflict");assert.equal((v.db.prepare("SELECT COUNT(*) count FROM media_asset_events WHERE event_type='ready'").get()as{count:number}).count,1);}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 persists operation idempotency and rejects divergent canonical requests", async () => {
+  const v = fixture();
+  try {
+    const first = await v.service.store(v.context, v.company.id, input("same")),
+      again = await v.service.store(v.context, v.company.id, input("same"));
+    assert.equal(again.id, first.id);
+    await assert.rejects(
+      v.service.store(v.context, v.company.id, {
+        ...input("same"),
+        filename: "other.png",
+      }),
+      (e: unknown) =>
+        e instanceof MediaDomainError &&
+        e.code === "media_idempotency_conflict",
+    );
+    assert.equal(
+      (
+        v.db
+          .prepare(
+            "SELECT COUNT(*) count FROM media_asset_events WHERE event_type='ready'",
+          )
+          .get() as { count: number }
+      ).count,
+      1,
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 treats different bytes under the same key as an idempotency conflict",async()=>{const v=fixture();try{const first=await v.service.store(v.context,v.company.id,input("content-key"));await assert.rejects(v.service.store(v.context,v.company.id,input("content-key",stream(Uint8Array.from([...png,2])))),(error:unknown)=>error instanceof MediaDomainError&&error.code==="media_idempotency_conflict");const replay=await v.service.store(v.context,v.company.id,input("content-key"));assert.deepEqual(replay,first);}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 treats different bytes under the same key as an idempotency conflict", async () => {
+  const v = fixture();
+  try {
+    const first = await v.service.store(
+      v.context,
+      v.company.id,
+      input("content-key"),
+    );
+    await assert.rejects(
+      v.service.store(
+        v.context,
+        v.company.id,
+        input("content-key", stream(Uint8Array.from([...png, 2]))),
+      ),
+      (error: unknown) =>
+        error instanceof MediaDomainError &&
+        error.code === "media_idempotency_conflict",
+    );
+    const replay = await v.service.store(
+      v.context,
+      v.company.id,
+      input("content-key"),
+    );
+    assert.deepEqual(replay, first);
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 canonicalizes metadata keys recursively for content-aware replays",async()=>{const v=fixture();try{const first=await v.service.store(v.context,v.company.id,input("metadata",stream(png),{width:10,height:20})),replay=await v.service.store(v.context,v.company.id,input("metadata",stream(png),{height:20,width:10}));assert.equal(replay.id,first.id);const nested=await v.service.store(v.context,v.company.id,input("nested",stream(png),{frame:{width:10,height:20},pages:[1,2]})),nestedReplay=await v.service.store(v.context,v.company.id,input("nested",stream(png),{pages:[1,2],frame:{height:20,width:10}}));assert.equal(nestedReplay.id,nested.id);await assert.rejects(v.service.store(v.context,v.company.id,input("metadata",stream(png),{height:21,width:10})),(error:unknown)=>error instanceof MediaDomainError&&error.code==="media_idempotency_conflict");}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 canonicalizes metadata keys recursively for content-aware replays", async () => {
+  const v = fixture();
+  try {
+    const first = await v.service.store(
+        v.context,
+        v.company.id,
+        input("metadata", stream(png), { width: 10, height: 20 }),
+      ),
+      replay = await v.service.store(
+        v.context,
+        v.company.id,
+        input("metadata", stream(png), { height: 20, width: 10 }),
+      );
+    assert.equal(replay.id, first.id);
+    const nested = await v.service.store(
+        v.context,
+        v.company.id,
+        input("nested", stream(png), {
+          frame: { width: 10, height: 20 },
+          pages: [1, 2],
+        }),
+      ),
+      nestedReplay = await v.service.store(
+        v.context,
+        v.company.id,
+        input("nested", stream(png), {
+          pages: [1, 2],
+          frame: { height: 20, width: 10 },
+        }),
+      );
+    assert.equal(nestedReplay.id, nested.id);
+    await assert.rejects(
+      v.service.store(
+        v.context,
+        v.company.id,
+        input("metadata", stream(png), { height: 21, width: 10 }),
+      ),
+      (error: unknown) =>
+        error instanceof MediaDomainError &&
+        error.code === "media_idempotency_conflict",
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 concurrent same-key replay reports in-progress rather than a pending success",async()=>{const v=fixture();let release:()=>void=()=>undefined,entered:()=>void=()=>undefined;const gate=new Promise<void>(resolve=>{release=resolve;}),reserved=new Promise<void>(resolve=>{entered=resolve;});let first=true;const storage:MediaStoragePort={stage:(id,content)=>v.storage.stage(id,content),readTemporary:async(reference,maximum)=>{if(first){first=false;entered();await gate;}return v.storage.readTemporary(reference,maximum);},promote:(reference,blob)=>v.storage.promote(reference,blob),delete:reference=>v.storage.delete(reference),read:(reference,maximum)=>v.storage.read(reference,maximum)};const service=new MediaService(new MediaRepository(v.db),storage,new BinaryMediaInspector(),v.owners,{now:()=>"2026-08-18T00:00:00.000Z"});try{const pending=service.store(v.context,v.company.id,input("pending-key"));await reserved;await assert.rejects(service.store(v.context,v.company.id,input("pending-key")),(error:unknown)=>error instanceof MediaDomainError&&error.code==="media_idempotency_in_progress");release();const final=await pending,replay=await service.store(v.context,v.company.id,input("pending-key"));assert.deepEqual(replay,final);assert.equal(replay.status,"ready");}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 concurrent same-key replay reports in-progress rather than a pending success", async () => {
+  const v = fixture();
+  let release: () => void = () => undefined,
+    entered: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+    reserved = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+  let first = true;
+  const storage: MediaStoragePort = {
+    stage: (id, content) => v.storage.stage(id, content),
+    readTemporary: async (reference, maximum) => {
+      if (first) {
+        first = false;
+        entered();
+        await gate;
+      }
+      return v.storage.readTemporary(reference, maximum);
+    },
+    promote: (reference, blob) => v.storage.promote(reference, blob),
+    delete: (reference) => v.storage.delete(reference),
+    read: (reference, maximum) => v.storage.read(reference, maximum),
+  };
+  const service = new MediaService(
+    new MediaRepository(v.db),
+    storage,
+    new BinaryMediaInspector(),
+    v.owners,
+    { now: () => "2026-08-18T00:00:00.000Z" },
+  );
+  try {
+    const pending = service.store(
+      v.context,
+      v.company.id,
+      input("pending-key"),
+    );
+    await reserved;
+    await assert.rejects(
+      service.store(v.context, v.company.id, input("pending-key")),
+      (error: unknown) =>
+        error instanceof MediaDomainError &&
+        error.code === "media_idempotency_in_progress",
+    );
+    release();
+    const final = await pending,
+      replay = await service.store(
+        v.context,
+        v.company.id,
+        input("pending-key"),
+      );
+    assert.deepEqual(replay, final);
+    assert.equal(replay.status, "ready");
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 deduplicates only tenant-local blobs and supports deleted-content reingest with a new key",async()=>{const v=fixture();try{const secondCompany=new CompanyRepository(v.db).create(v.context,{name:"Other",website:"https://other.test"}),a=await v.service.store(v.context,v.company.id,input("a")),b=await v.service.store(v.context,v.company.id,input("b")),other=await v.service.store(v.context,secondCompany.id,input("other"));assert.equal((v.db.prepare("SELECT blob_id FROM media_assets WHERE id=?").get(a.id)as{blob_id:string}).blob_id,(v.db.prepare("SELECT blob_id FROM media_assets WHERE id=?").get(b.id)as{blob_id:string}).blob_id);assert.notEqual((v.db.prepare("SELECT blob_id FROM media_assets WHERE id=?").get(a.id)as{blob_id:string}).blob_id,(v.db.prepare("SELECT blob_id FROM media_assets WHERE id=?").get(other.id)as{blob_id:string}).blob_id);await v.service.delete(v.context,v.company.id,a.id);await v.service.delete(v.context,v.company.id,b.id);const replacement=await v.service.store(v.context,v.company.id,input("replacement"));assert.notEqual(replacement.id,a.id);}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 deduplicates only tenant-local blobs and supports deleted-content reingest with a new key", async () => {
+  const v = fixture();
+  try {
+    const secondCompany = new CompanyRepository(v.db).create(v.context, {
+        name: "Other",
+        website: "https://other.test",
+      }),
+      a = await v.service.store(v.context, v.company.id, input("a")),
+      b = await v.service.store(v.context, v.company.id, input("b")),
+      other = await v.service.store(
+        v.context,
+        secondCompany.id,
+        input("other"),
+      );
+    assert.equal(
+      (
+        v.db
+          .prepare("SELECT blob_id FROM media_assets WHERE id=?")
+          .get(a.id) as { blob_id: string }
+      ).blob_id,
+      (
+        v.db
+          .prepare("SELECT blob_id FROM media_assets WHERE id=?")
+          .get(b.id) as { blob_id: string }
+      ).blob_id,
+    );
+    assert.notEqual(
+      (
+        v.db
+          .prepare("SELECT blob_id FROM media_assets WHERE id=?")
+          .get(a.id) as { blob_id: string }
+      ).blob_id,
+      (
+        v.db
+          .prepare("SELECT blob_id FROM media_assets WHERE id=?")
+          .get(other.id) as { blob_id: string }
+      ).blob_id,
+    );
+    await v.service.delete(v.context, v.company.id, a.id);
+    await v.service.delete(v.context, v.company.id, b.id);
+    const replacement = await v.service.store(
+      v.context,
+      v.company.id,
+      input("replacement"),
+    );
+    assert.notEqual(replacement.id, a.id);
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 concurrent same-content ingestion retains one canonical blob and no provisional file",async()=>{const v=fixture();try{const [first,second]=await Promise.all([v.service.store(v.context,v.company.id,input("race-a")),v.service.store(v.context,v.company.id,input("race-b"))]);assert.notEqual(first.id,second.id);assert.equal((v.db.prepare("SELECT COUNT(*) count FROM media_blobs WHERE company_id=? AND state='active'").get(v.company.id)as{count:number}).count,1);assert.equal(readdirSync(v.directory).filter(name=>name.startsWith("mbl_")).length,1);}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 concurrent same-content ingestion retains one canonical blob and no provisional file", async () => {
+  const v = fixture();
+  try {
+    const [first, second] = await Promise.all([
+      v.service.store(v.context, v.company.id, input("race-a")),
+      v.service.store(v.context, v.company.id, input("race-b")),
+    ]);
+    assert.notEqual(first.id, second.id);
+    assert.equal(
+      (
+        v.db
+          .prepare(
+            "SELECT COUNT(*) count FROM media_blobs WHERE company_id=? AND state='active'",
+          )
+          .get(v.company.id) as { count: number }
+      ).count,
+      1,
+    );
+    assert.equal(
+      readdirSync(v.directory).filter((name) => name.startsWith("mbl_")).length,
+      1,
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 coordinates concurrent ingest through separate SQLite connections",async()=>{const directory=mkdtempSync(join(tmpdir(),"atlas-media-race-")),path=join(directory,"atlas.sqlite"),storageDirectory=join(directory,"media");const first=createDatabase(path),second=createDatabase(path);try{const context=createWorkspaceContext(new WorkspaceRepository(first).resolveDefault()),company=new CompanyRepository(first).create(context,{name:"Race",website:"https://race.test"}),owners=new Owners(),storage=new LocalMediaStorage(storageDirectory),a=new MediaService(new MediaRepository(first),storage,new BinaryMediaInspector(),owners,{now:()=>"2026-08-18T00:00:00.000Z"}),b=new MediaService(new MediaRepository(second),storage,new BinaryMediaInspector(),owners,{now:()=>"2026-08-18T00:00:00.000Z"});const values=await Promise.all([a.store(context,company.id,input("connection-a")),b.store(context,company.id,input("connection-b"))]);assert.equal(values.length,2);assert.equal((first.prepare("SELECT COUNT(*) count FROM media_blobs WHERE company_id=? AND state='active'").get(company.id)as{count:number}).count,1);assert.equal(readdirSync(storageDirectory).filter(name=>name.startsWith("mbl_")).length,1);}finally{first.close();second.close();rmSync(directory,{recursive:true,force:true});}});
+test("EPIC039 coordinates concurrent ingest through separate SQLite connections", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "atlas-media-race-")),
+    path = join(directory, "atlas.sqlite"),
+    storageDirectory = join(directory, "media");
+  const first = createDatabase(path),
+    second = createDatabase(path);
+  try {
+    const context = createWorkspaceContext(
+        new WorkspaceRepository(first).resolveDefault(),
+      ),
+      company = new CompanyRepository(first).create(context, {
+        name: "Race",
+        website: "https://race.test",
+      }),
+      owners = new Owners(),
+      storage = new LocalMediaStorage(storageDirectory),
+      a = new MediaService(
+        new MediaRepository(first),
+        storage,
+        new BinaryMediaInspector(),
+        owners,
+        { now: () => "2026-08-18T00:00:00.000Z" },
+      ),
+      b = new MediaService(
+        new MediaRepository(second),
+        storage,
+        new BinaryMediaInspector(),
+        owners,
+        { now: () => "2026-08-18T00:00:00.000Z" },
+      );
+    const values = await Promise.all([
+      a.store(context, company.id, input("connection-a")),
+      b.store(context, company.id, input("connection-b")),
+    ]);
+    assert.equal(values.length, 2);
+    assert.equal(
+      (
+        first
+          .prepare(
+            "SELECT COUNT(*) count FROM media_blobs WHERE company_id=? AND state='active'",
+          )
+          .get(company.id) as { count: number }
+      ).count,
+      1,
+    );
+    assert.equal(
+      readdirSync(storageDirectory).filter((name) => name.startsWith("mbl_"))
+        .length,
+      1,
+    );
+  } finally {
+    first.close();
+    second.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 fails closed before storage on tenant denial and association ownership denial",async()=>{const v=fixture();try{const other=createWorkspaceContext(new WorkspaceRepository(v.db).createForSystemUse({key:"other",name:"Other"})),asset=await v.service.store(v.context,v.company.id,input("asset"));await assert.rejects(v.service.open(other,v.company.id,asset.id),MediaDomainError);await assert.rejects(v.service.delete(other,v.company.id,asset.id),MediaDomainError);assert.throws(()=>v.service.attach(v.context,v.company.id,asset.id,"knowledge_source","missing"),MediaDomainError);v.owners.allowed.add(`${v.company.id}:knowledge_source:source`);const association=v.service.attach(v.context,v.company.id,asset.id,"knowledge_source","source");assert.match(association.id,/^maa_/u);await assert.rejects(v.service.delete(v.context,v.company.id,asset.id),(error:unknown)=>error instanceof MediaDomainError&&error.code==="media_asset_has_associations");assert.equal((v.db.prepare("SELECT status FROM media_assets WHERE id=?").get(asset.id)as{status:string}).status,"ready");assert.equal((v.db.prepare("SELECT COUNT(*) count FROM media_asset_events WHERE asset_id=? AND event_type='association_created'").get(asset.id)as{count:number}).count,1);}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 fails closed before storage on tenant denial and association ownership denial", async () => {
+  const v = fixture();
+  try {
+    const other = createWorkspaceContext(
+        new WorkspaceRepository(v.db).createForSystemUse({
+          key: "other",
+          name: "Other",
+        }),
+      ),
+      asset = await v.service.store(v.context, v.company.id, input("asset"));
+    await assert.rejects(
+      v.service.open(other, v.company.id, asset.id),
+      MediaDomainError,
+    );
+    await assert.rejects(
+      v.service.delete(other, v.company.id, asset.id),
+      MediaDomainError,
+    );
+    assert.throws(
+      () =>
+        v.service.attach(
+          v.context,
+          v.company.id,
+          asset.id,
+          "knowledge_source",
+          "missing",
+        ),
+      MediaDomainError,
+    );
+    v.owners.allowed.add(`${v.company.id}:knowledge_source:source`);
+    const association = v.service.attach(
+      v.context,
+      v.company.id,
+      asset.id,
+      "knowledge_source",
+      "source",
+    );
+    assert.match(association.id, /^maa_/u);
+    await assert.rejects(
+      v.service.delete(v.context, v.company.id, asset.id),
+      (error: unknown) =>
+        error instanceof MediaDomainError &&
+        error.code === "media_asset_has_associations",
+    );
+    assert.equal(
+      (
+        v.db
+          .prepare("SELECT status FROM media_assets WHERE id=?")
+          .get(asset.id) as { status: string }
+      ).status,
+      "ready",
+    );
+    assert.equal(
+      (
+        v.db
+          .prepare(
+            "SELECT COUNT(*) count FROM media_asset_events WHERE asset_id=? AND event_type='association_created'",
+          )
+          .get(asset.id) as { count: number }
+      ).count,
+      1,
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 serializes attach and delete through separate SQLite connections",async()=>{const directory=mkdtempSync(join(tmpdir(),"atlas-media-attach-race-")),path=join(directory,"atlas.sqlite"),first=createDatabase(path),second=createDatabase(path),storage=new LocalMediaStorage(join(directory,"media"));try{const context=createWorkspaceContext(new WorkspaceRepository(first).resolveDefault()),company=new CompanyRepository(first).create(context,{name:"Attach race",website:"https://attach-race.test"}),owners=new Owners(),a=new MediaService(new MediaRepository(first),storage,new BinaryMediaInspector(),owners,{now:()=>"2026-08-18T00:00:00.000Z"}),b=new MediaService(new MediaRepository(second),storage,new BinaryMediaInspector(),owners,{now:()=>"2026-08-18T00:00:00.000Z"}),asset=await a.store(context,company.id,input("attach-race"));owners.allowed.add(`${company.id}:tool_result:owner`);const [attached,deleted]=await Promise.allSettled([Promise.resolve(b.attach(context,company.id,asset.id,"tool_result","owner")),a.delete(context,company.id,asset.id)]);assert.equal(attached.status,"fulfilled");assert.equal(deleted.status,"rejected");assert.equal((first.prepare("SELECT status FROM media_assets WHERE id=?").get(asset.id)as{status:string}).status,"ready");assert.equal((first.prepare("SELECT COUNT(*) count FROM media_asset_associations WHERE asset_id=?").get(asset.id)as{count:number}).count,1);}finally{first.close();second.close();rmSync(directory,{recursive:true,force:true});}});
+test("EPIC039 serializes attach and delete through separate SQLite connections", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "atlas-media-attach-race-")),
+    path = join(directory, "atlas.sqlite"),
+    first = createDatabase(path),
+    second = createDatabase(path),
+    storage = new LocalMediaStorage(join(directory, "media"));
+  try {
+    const context = createWorkspaceContext(
+        new WorkspaceRepository(first).resolveDefault(),
+      ),
+      company = new CompanyRepository(first).create(context, {
+        name: "Attach race",
+        website: "https://attach-race.test",
+      }),
+      owners = new Owners(),
+      a = new MediaService(
+        new MediaRepository(first),
+        storage,
+        new BinaryMediaInspector(),
+        owners,
+        { now: () => "2026-08-18T00:00:00.000Z" },
+      ),
+      b = new MediaService(
+        new MediaRepository(second),
+        storage,
+        new BinaryMediaInspector(),
+        owners,
+        { now: () => "2026-08-18T00:00:00.000Z" },
+      ),
+      asset = await a.store(context, company.id, input("attach-race"));
+    owners.allowed.add(`${company.id}:tool_result:owner`);
+    const [attached, deleted] = await Promise.allSettled([
+      Promise.resolve(
+        b.attach(context, company.id, asset.id, "tool_result", "owner"),
+      ),
+      a.delete(context, company.id, asset.id),
+    ]);
+    assert.equal(attached.status, "fulfilled");
+    assert.equal(deleted.status, "rejected");
+    assert.equal(
+      (
+        first
+          .prepare("SELECT status FROM media_assets WHERE id=?")
+          .get(asset.id) as { status: string }
+      ).status,
+      "ready",
+    );
+    assert.equal(
+      (
+        first
+          .prepare(
+            "SELECT COUNT(*) count FROM media_asset_associations WHERE asset_id=?",
+          )
+          .get(asset.id) as { count: number }
+      ).count,
+      1,
+    );
+  } finally {
+    first.close();
+    second.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 races attach and delete through two real SQLite connections",async()=>{const directory=mkdtempSync(join(tmpdir(),"atlas-media-real-race-")),path=join(directory,"atlas.sqlite"),database=createDatabase(path);try{const context=createWorkspaceContext(new WorkspaceRepository(database).resolveDefault()),company=new CompanyRepository(database).create(context,{name:"Real race",website:"https://real-race.test"}),storage=new LocalMediaStorage(join(directory,"media")),service=new MediaService(new MediaRepository(database),storage,new BinaryMediaInspector(),new Owners(),{now:()=>"2026-08-18T00:00:00.000Z"});for(const winner of["attach","delete"]as const){const asset=await service.store(context,company.id,input(`real-race-${winner}`)),gate=new SharedArrayBuffer(20),state=new Int32Array(gate),run=(operation:"attach"|"delete",waitForStart:boolean)=>new Worker(new URL("./helpers/mediaAttachDeleteRaceWorker.ts",import.meta.url),{workerData:{path,workspaceId:context.workspaceId,companyId:company.id,assetId:asset.id,operation,gate,waitForStart}}),lead=run(winner,false),other=run(winner==="attach"?"delete":"attach",true),result=(worker:Worker)=>new Promise<string>((resolve,reject)=>{worker.on("message",message=>{if(message.kind==="result")resolve(message.result);});worker.on("error",reject);});Atomics.wait(state,2,0);Atomics.wait(state,3,0);Atomics.store(state,1,1);Atomics.notify(state,1);Atomics.wait(state,4,0);Atomics.store(state,0,1);Atomics.notify(state,0);const outcomes=await Promise.all([result(lead),result(other)]),detail=outcomes.join(",");if(winner==="attach"){assert.deepEqual(outcomes.sort(),["attach_success","media_asset_has_associations"]);assert.equal((database.prepare("SELECT status FROM media_assets WHERE id=?").get(asset.id)as{status:string}).status,"ready");assert.equal((database.prepare("SELECT COUNT(*) count FROM media_asset_associations WHERE asset_id=?").get(asset.id)as{count:number}).count,1);assert.equal((database.prepare("SELECT COUNT(*) count FROM media_asset_events WHERE asset_id=? AND event_type='association_created'").get(asset.id)as{count:number}).count,1);}else{assert.deepEqual(outcomes.sort(),["delete_success","media_not_associable"]);assert.equal((database.prepare("SELECT status FROM media_assets WHERE id=?").get(asset.id)as{status:string}).status,"deleted");assert.equal((database.prepare("SELECT COUNT(*) count FROM media_asset_associations WHERE asset_id=?").get(asset.id)as{count:number}).count,0);assert.equal((database.prepare("SELECT COUNT(*) count FROM media_asset_events WHERE asset_id=? AND event_type='association_created'").get(asset.id)as{count:number}).count,0);}}}finally{database.close();rmSync(directory,{recursive:true,force:true});}});
+test("EPIC039 races attach and delete through two real SQLite connections", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "atlas-media-real-race-")),
+    path = join(directory, "atlas.sqlite"),
+    database = createDatabase(path);
+  try {
+    const context = createWorkspaceContext(
+        new WorkspaceRepository(database).resolveDefault(),
+      ),
+      company = new CompanyRepository(database).create(context, {
+        name: "Real race",
+        website: "https://real-race.test",
+      }),
+      storage = new LocalMediaStorage(join(directory, "media")),
+      service = new MediaService(
+        new MediaRepository(database),
+        storage,
+        new BinaryMediaInspector(),
+        new Owners(),
+        { now: () => "2026-08-18T00:00:00.000Z" },
+      );
+    for (const winner of ["attach", "delete"] as const) {
+      const asset = await service.store(
+          context,
+          company.id,
+          input(`real-race-${winner}`),
+        ),
+        gate = new SharedArrayBuffer(20),
+        state = new Int32Array(gate),
+        run = (operation: "attach" | "delete", waitForStart: boolean) =>
+          new Worker(
+            new URL(
+              "./helpers/mediaAttachDeleteRaceWorker.ts",
+              import.meta.url,
+            ),
+            {
+              workerData: {
+                path,
+                workspaceId: context.workspaceId,
+                companyId: company.id,
+                assetId: asset.id,
+                operation,
+                gate,
+                waitForStart,
+              },
+            },
+          ),
+        lead = run(winner, false),
+        other = run(winner === "attach" ? "delete" : "attach", true),
+        result = (worker: Worker) =>
+          new Promise<string>((resolve, reject) => {
+            worker.on("message", (message) => {
+              if (message.kind === "result") resolve(message.result);
+            });
+            worker.on("error", reject);
+          });
+      Atomics.wait(state, 2, 0);
+      Atomics.wait(state, 3, 0);
+      Atomics.store(state, 1, 1);
+      Atomics.notify(state, 1);
+      Atomics.wait(state, 4, 0);
+      Atomics.store(state, 0, 1);
+      Atomics.notify(state, 0);
+      const outcomes = await Promise.all([result(lead), result(other)]),
+        detail = outcomes.join(",");
+      if (winner === "attach") {
+        assert.deepEqual(outcomes.sort(), [
+          "attach_success",
+          "media_asset_has_associations",
+        ]);
+        assert.equal(
+          (
+            database
+              .prepare("SELECT status FROM media_assets WHERE id=?")
+              .get(asset.id) as { status: string }
+          ).status,
+          "ready",
+        );
+        assert.equal(
+          (
+            database
+              .prepare(
+                "SELECT COUNT(*) count FROM media_asset_associations WHERE asset_id=?",
+              )
+              .get(asset.id) as { count: number }
+          ).count,
+          1,
+        );
+        assert.equal(
+          (
+            database
+              .prepare(
+                "SELECT COUNT(*) count FROM media_asset_events WHERE asset_id=? AND event_type='association_created'",
+              )
+              .get(asset.id) as { count: number }
+          ).count,
+          1,
+        );
+      } else {
+        assert.deepEqual(outcomes.sort(), [
+          "delete_success",
+          "media_not_associable",
+        ]);
+        assert.equal(
+          (
+            database
+              .prepare("SELECT status FROM media_assets WHERE id=?")
+              .get(asset.id) as { status: string }
+          ).status,
+          "deleted",
+        );
+        assert.equal(
+          (
+            database
+              .prepare(
+                "SELECT COUNT(*) count FROM media_asset_associations WHERE asset_id=?",
+              )
+              .get(asset.id) as { count: number }
+          ).count,
+          0,
+        );
+        assert.equal(
+          (
+            database
+              .prepare(
+                "SELECT COUNT(*) count FROM media_asset_events WHERE asset_id=? AND event_type='association_created'",
+              )
+              .get(asset.id) as { count: number }
+          ).count,
+          0,
+        );
+      }
+    }
+  } finally {
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 refuses associations for archived or deleted assets and preserves immutable event history",async()=>{const v=fixture();try{const archived=await v.service.store(v.context,v.company.id,input("archived"));v.service.archive(v.context,v.company.id,archived.id);assert.throws(()=>v.service.attach(v.context,v.company.id,archived.id,"tool_result","x"),MediaDomainError);const deleted=await v.service.store(v.context,v.company.id,input("deleted"));await v.service.delete(v.context,v.company.id,deleted.id);assert.throws(()=>v.service.attach(v.context,v.company.id,deleted.id,"tool_result","x"),MediaDomainError);assert.deepEqual(new MediaRepository(v.db).listEvents(v.context,v.company.id,deleted.id),["reserved","ready","deleted"]);}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 refuses associations for archived or deleted assets and preserves immutable event history", async () => {
+  const v = fixture();
+  try {
+    const archived = await v.service.store(
+      v.context,
+      v.company.id,
+      input("archived"),
+    );
+    v.service.archive(v.context, v.company.id, archived.id);
+    assert.throws(
+      () =>
+        v.service.attach(
+          v.context,
+          v.company.id,
+          archived.id,
+          "tool_result",
+          "x",
+        ),
+      MediaDomainError,
+    );
+    const deleted = await v.service.store(
+      v.context,
+      v.company.id,
+      input("deleted"),
+    );
+    await v.service.delete(v.context, v.company.id, deleted.id);
+    assert.throws(
+      () =>
+        v.service.attach(
+          v.context,
+          v.company.id,
+          deleted.id,
+          "tool_result",
+          "x",
+        ),
+      MediaDomainError,
+    );
+    assert.deepEqual(
+      new MediaRepository(v.db).listEvents(v.context, v.company.id, deleted.id),
+      ["reserved", "ready", "deleted"],
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 retains a same-tenant blob until its final reference is deleted",async()=>{const v=fixture();try{const first=await v.service.store(v.context,v.company.id,input("first")),second=await v.service.store(v.context,v.company.id,input("second")),reference=(v.db.prepare("SELECT storage_reference FROM media_blobs").get()as{storage_reference:string}).storage_reference;assert.equal(existsSync(join(v.directory,reference)),true);await v.service.delete(v.context,v.company.id,first.id);assert.equal(existsSync(join(v.directory,reference)),true);await v.service.delete(v.context,v.company.id,second.id);assert.equal(existsSync(join(v.directory,reference)),false);assert.deepEqual(new MediaRepository(v.db).listEvents(v.context,v.company.id,second.id),["reserved","ready","deleted","physical_reclaim_marked","physical_reclaim_finalized"]);}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 retains a same-tenant blob until its final reference is deleted", async () => {
+  const v = fixture();
+  try {
+    const first = await v.service.store(
+        v.context,
+        v.company.id,
+        input("first"),
+      ),
+      second = await v.service.store(v.context, v.company.id, input("second")),
+      reference = (
+        v.db.prepare("SELECT storage_reference FROM media_blobs").get() as {
+          storage_reference: string;
+        }
+      ).storage_reference;
+    assert.equal(existsSync(join(v.directory, reference)), true);
+    await v.service.delete(v.context, v.company.id, first.id);
+    assert.equal(existsSync(join(v.directory, reference)), true);
+    await v.service.delete(v.context, v.company.id, second.id);
+    assert.equal(existsSync(join(v.directory, reference)), false);
+    assert.deepEqual(
+      new MediaRepository(v.db).listEvents(v.context, v.company.id, second.id),
+      [
+        "reserved",
+        "ready",
+        "deleted",
+        "physical_reclaim_marked",
+        "physical_reclaim_finalized",
+      ],
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 local storage specifically rejects a readable external file through a reparse path",async()=>{const directory=mkdtempSync(join(tmpdir(),"atlas-media-store-")),outside=mkdtempSync(join(tmpdir(),"atlas-media-outside-")),storage=new LocalMediaStorage(directory),reference="mbl_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";try{writeFileSync(join(outside,"secret.bin"),"external-bytes");try{symlinkSync(join(outside,"secret.bin"),join(directory,reference),"file");await assert.rejects(storage.read(reference,100),(error:unknown)=>error instanceof MediaDomainError&&error.code==="media_unsafe_reparse");assert.equal(existsSync(join(directory,reference)),true);}catch(error:unknown){if((error as NodeJS.ErrnoException).code!=="EPERM")throw error;assert.throws(()=>rejectReparsePoint({isSymbolicLink:()=>true}),(value:unknown)=>value instanceof MediaDomainError&&value.code==="media_unsafe_reparse");}}finally{rmSync(directory,{recursive:true,force:true});rmSync(outside,{recursive:true,force:true});}});
+test("EPIC039 local storage specifically rejects a readable external file through a reparse path", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "atlas-media-store-")),
+    outside = mkdtempSync(join(tmpdir(), "atlas-media-outside-")),
+    storage = new LocalMediaStorage(directory),
+    reference = "mbl_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  try {
+    writeFileSync(join(outside, "secret.bin"), "external-bytes");
+    try {
+      symlinkSync(
+        join(outside, "secret.bin"),
+        join(directory, reference),
+        "file",
+      );
+      await assert.rejects(
+        storage.read(reference, 100),
+        (error: unknown) =>
+          error instanceof MediaDomainError &&
+          error.code === "media_unsafe_reparse",
+      );
+      assert.equal(existsSync(join(directory, reference)), true);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      assert.throws(
+        () => rejectReparsePoint({ isSymbolicLink: () => true }),
+        (value: unknown) =>
+          value instanceof MediaDomainError &&
+          value.code === "media_unsafe_reparse",
+      );
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 failure paths clean staged storage and never expose ready assets",async()=>{const v=fixture();const failing:MediaStoragePort={stage:async()=>{throw new Error("write failed");},readTemporary:(reference,maximum)=>v.storage.readTemporary(reference,maximum),promote:(reference,blob)=>v.storage.promote(reference,blob),delete:reference=>v.storage.delete(reference),read:(reference,maximum)=>v.storage.read(reference,maximum)};const service=new MediaService(new MediaRepository(v.db),failing,new BinaryMediaInspector(),v.owners,{now:()=>"2026-08-18T00:00:00.000Z"});try{await assert.rejects(service.store(v.context,v.company.id,input("failure")));assert.equal((v.db.prepare("SELECT COUNT(*) count FROM media_assets WHERE status='ready'").get()as{count:number}).count,0);}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 failure paths clean staged storage and never expose ready assets", async () => {
+  const v = fixture();
+  const failing: MediaStoragePort = {
+    stage: async () => {
+      throw new Error("write failed");
+    },
+    readTemporary: (reference, maximum) =>
+      v.storage.readTemporary(reference, maximum),
+    promote: (reference, blob) => v.storage.promote(reference, blob),
+    delete: (reference) => v.storage.delete(reference),
+    read: (reference, maximum) => v.storage.read(reference, maximum),
+  };
+  const service = new MediaService(
+    new MediaRepository(v.db),
+    failing,
+    new BinaryMediaInspector(),
+    v.owners,
+    { now: () => "2026-08-18T00:00:00.000Z" },
+  );
+  try {
+    await assert.rejects(
+      service.store(v.context, v.company.id, input("failure")),
+    );
+    assert.equal(
+      (
+        v.db
+          .prepare(
+            "SELECT COUNT(*) count FROM media_assets WHERE status='ready'",
+          )
+          .get() as { count: number }
+      ).count,
+      0,
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 leaves failed physical reclaim durable and a later sweep finalizes it",async()=>{const v=fixture();let fail=true;const storage:MediaStoragePort={stage:(id,content)=>v.storage.stage(id,content),readTemporary:(reference,maximum)=>v.storage.readTemporary(reference,maximum),promote:(reference,blob)=>v.storage.promote(reference,blob),delete:async reference=>{if(fail)throw new Error("storage unavailable");return v.storage.delete(reference);},read:(reference,maximum)=>v.storage.read(reference,maximum)};const service=new MediaService(new MediaRepository(v.db),storage,new BinaryMediaInspector(),v.owners,{now:()=>"2026-08-18T00:00:00.000Z"});try{const asset=await service.store(v.context,v.company.id,input("reclaim"));await assert.rejects(service.delete(v.context,v.company.id,asset.id));assert.equal((v.db.prepare("SELECT state FROM media_blobs").get()as{state:string}).state,"reclaim_pending");fail=false;await service.sweepPendingReclaims(v.context,v.company.id);assert.equal((v.db.prepare("SELECT state FROM media_blobs").get()as{state:string}).state,"reclaimed");await service.sweepPendingReclaims(v.context,v.company.id);assert.equal((v.db.prepare("SELECT state FROM media_blobs").get()as{state:string}).state,"reclaimed");}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 leaves failed physical reclaim durable and a later sweep finalizes it", async () => {
+  const v = fixture();
+  let fail = true;
+  const storage: MediaStoragePort = {
+    stage: (id, content) => v.storage.stage(id, content),
+    readTemporary: (reference, maximum) =>
+      v.storage.readTemporary(reference, maximum),
+    promote: (reference, blob) => v.storage.promote(reference, blob),
+    delete: async (reference) => {
+      if (fail) throw new Error("storage unavailable");
+      return v.storage.delete(reference);
+    },
+    read: (reference, maximum) => v.storage.read(reference, maximum),
+  };
+  const service = new MediaService(
+    new MediaRepository(v.db),
+    storage,
+    new BinaryMediaInspector(),
+    v.owners,
+    { now: () => "2026-08-18T00:00:00.000Z" },
+  );
+  try {
+    const asset = await service.store(
+      v.context,
+      v.company.id,
+      input("reclaim"),
+    );
+    await assert.rejects(service.delete(v.context, v.company.id, asset.id));
+    assert.equal(
+      (v.db.prepare("SELECT state FROM media_blobs").get() as { state: string })
+        .state,
+      "reclaim_pending",
+    );
+    fail = false;
+    await service.sweepPendingReclaims(v.context, v.company.id);
+    assert.equal(
+      (v.db.prepare("SELECT state FROM media_blobs").get() as { state: string })
+        .state,
+      "reclaimed",
+    );
+    await service.sweepPendingReclaims(v.context, v.company.id);
+    assert.equal(
+      (v.db.prepare("SELECT state FROM media_blobs").get() as { state: string })
+        .state,
+      "reclaimed",
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 recovers an interrupted reclaim after physical deletion before finalization",async()=>{const v=fixture();let crash=true;const storage:MediaStoragePort={stage:(id,content)=>v.storage.stage(id,content),readTemporary:(reference,maximum)=>v.storage.readTemporary(reference,maximum),promote:(reference,blob)=>v.storage.promote(reference,blob),delete:async reference=>{await v.storage.delete(reference);if(crash)throw new Error("simulated crash");},read:(reference,maximum)=>v.storage.read(reference,maximum)};const service=new MediaService(new MediaRepository(v.db),storage,new BinaryMediaInspector(),v.owners,{now:()=>"2026-08-18T00:00:00.000Z"});try{const asset=await service.store(v.context,v.company.id,input("crash-reclaim"));await assert.rejects(service.delete(v.context,v.company.id,asset.id));assert.equal((v.db.prepare("SELECT state FROM media_blobs").get()as{state:string}).state,"reclaim_pending");crash=false;await service.sweepPendingReclaims(v.context,v.company.id);assert.equal((v.db.prepare("SELECT state FROM media_blobs").get()as{state:string}).state,"reclaimed");}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 recovers an interrupted reclaim after physical deletion before finalization", async () => {
+  const v = fixture();
+  let crash = true;
+  const storage: MediaStoragePort = {
+    stage: (id, content) => v.storage.stage(id, content),
+    readTemporary: (reference, maximum) =>
+      v.storage.readTemporary(reference, maximum),
+    promote: (reference, blob) => v.storage.promote(reference, blob),
+    delete: async (reference) => {
+      await v.storage.delete(reference);
+      if (crash) throw new Error("simulated crash");
+    },
+    read: (reference, maximum) => v.storage.read(reference, maximum),
+  };
+  const service = new MediaService(
+    new MediaRepository(v.db),
+    storage,
+    new BinaryMediaInspector(),
+    v.owners,
+    { now: () => "2026-08-18T00:00:00.000Z" },
+  );
+  try {
+    const asset = await service.store(
+      v.context,
+      v.company.id,
+      input("crash-reclaim"),
+    );
+    await assert.rejects(service.delete(v.context, v.company.id, asset.id));
+    assert.equal(
+      (v.db.prepare("SELECT state FROM media_blobs").get() as { state: string })
+        .state,
+      "reclaim_pending",
+    );
+    crash = false;
+    await service.sweepPendingReclaims(v.context, v.company.id);
+    assert.equal(
+      (v.db.prepare("SELECT state FROM media_blobs").get() as { state: string })
+        .state,
+      "reclaimed",
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 inspector failures clean staged bytes and preserve failed provenance",async()=>{const v=fixture(),inspector:MediaInspectorPort={inspect:()=>{throw new MediaDomainError("media_type_unsupported");}},service=new MediaService(new MediaRepository(v.db),v.storage,inspector,v.owners,{now:()=>"2026-08-18T00:00:00.000Z"});try{await assert.rejects(service.store(v.context,v.company.id,input("inspect")),MediaDomainError);assert.equal(readdirSync(v.directory).length,0);assert.equal((v.db.prepare("SELECT status FROM media_assets WHERE company_id=?").get(v.company.id)as{status:string}).status,"failed");}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 inspector failures clean staged bytes and preserve failed provenance", async () => {
+  const v = fixture(),
+    inspector: MediaInspectorPort = {
+      inspect: () => {
+        throw new MediaDomainError("media_type_unsupported");
+      },
+    },
+    service = new MediaService(
+      new MediaRepository(v.db),
+      v.storage,
+      inspector,
+      v.owners,
+      { now: () => "2026-08-18T00:00:00.000Z" },
+    );
+  try {
+    await assert.rejects(
+      service.store(v.context, v.company.id, input("inspect")),
+      MediaDomainError,
+    );
+    assert.equal(readdirSync(v.directory).length, 0);
+    assert.equal(
+      (
+        v.db
+          .prepare("SELECT status FROM media_assets WHERE company_id=?")
+          .get(v.company.id) as { status: string }
+      ).status,
+      "failed",
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 migration preserves the 0049 contract through the current 0069 head",()=>{const directory=mkdtempSync(join(tmpdir(),"atlas-media-migration-")),path=join(directory,"atlas.sqlite");let db=new DatabaseSync(path);try{db.exec("PRAGMA foreign_keys=ON");runMigrations(db,48);const checksum=(db.prepare("SELECT checksum FROM schema_migrations WHERE id=48").get()as{checksum:string}).checksum;db.close();db=new DatabaseSync(path);db.exec("PRAGMA foreign_keys=ON");runMigrations(db);assert.deepEqual((db.prepare("SELECT id,name FROM schema_migrations WHERE id>=48 ORDER BY id").all()as Array<{id:number;name:string}>).map(row=>({id:row.id,name:row.name})),[{id:48,name:"0048_knowledge_retrieval_v2"},{id:49,name:"0049_media_asset_core"},{id:50,name:"0050_whatsapp_inbound_media"},{id:51,name:"0051_media_audio_support"},{id:52,name:"0052_whatsapp_inbound_media_recovery_lease"},{id:53,name:"0053_whatsapp_inbound_media_retry_diagnostics"},{id:54,name:"0054_scheduling_external_calendar_operations"},{id:55,name:"0055_external_write_operation_booking_reference"},{id:56,name:"0056_meta_embedded_signup_attempts"},{id:57,name:"0057_whatsapp_integration_connection_link"},{id:58,name:"0058_meta_embedded_signup_resolved_connection"},{id:59,name:"0059_conversation_handoff_authority"},{id:60,name:"0060_voice_ai_whatsapp"},{id:62,name:"0062_voice_read_events"},{id:63,name:"0063_proactive_actions"},{id:64,name:"0064_proactive_runtime_boundary"},{id:65,name:"0065_proactive_operation_state_compatibility"},{id:66,name:"0066_billing_workspace_account_catalog"},{id:67,name:"0067_billing_subscription_entitlements"},{id:68,name:"0068_billing_operations_provider_events_reconciliation"},{id:69,name:"0069_shared_rate_limit_windows"}]);assert.equal((db.prepare("SELECT checksum FROM schema_migrations WHERE id=48").get()as{checksum:string}).checksum,checksum);const inventory=(db.prepare("SELECT id,name,checksum FROM schema_migrations ORDER BY id").all()as Array<{id:number;name:string;checksum:string}>).map(row=>({...row}));runMigrations(db);assert.deepEqual((db.prepare("SELECT id,name,checksum FROM schema_migrations ORDER BY id").all()as Array<{id:number;name:string;checksum:string}>).map(row=>({...row})),inventory);}finally{db.close();rmSync(directory,{recursive:true,force:true});}});
+test("EPIC039 migration preserves the 0049 contract through the current 0070 head", () => {
+  const directory = mkdtempSync(join(tmpdir(), "atlas-media-migration-")),
+    path = join(directory, "atlas.sqlite");
+  let db = new DatabaseSync(path);
+  try {
+    db.exec("PRAGMA foreign_keys=ON");
+    runMigrations(db, 48);
+    const checksum = (
+      db
+        .prepare("SELECT checksum FROM schema_migrations WHERE id=48")
+        .get() as { checksum: string }
+    ).checksum;
+    db.close();
+    db = new DatabaseSync(path);
+    db.exec("PRAGMA foreign_keys=ON");
+    runMigrations(db);
+    assert.deepEqual(
+      (
+        db
+          .prepare(
+            "SELECT id,name FROM schema_migrations WHERE id>=48 ORDER BY id",
+          )
+          .all() as Array<{ id: number; name: string }>
+      ).map((row) => ({ id: row.id, name: row.name })),
+      [
+        { id: 48, name: "0048_knowledge_retrieval_v2" },
+        { id: 49, name: "0049_media_asset_core" },
+        { id: 50, name: "0050_whatsapp_inbound_media" },
+        { id: 51, name: "0051_media_audio_support" },
+        { id: 52, name: "0052_whatsapp_inbound_media_recovery_lease" },
+        { id: 53, name: "0053_whatsapp_inbound_media_retry_diagnostics" },
+        { id: 54, name: "0054_scheduling_external_calendar_operations" },
+        { id: 55, name: "0055_external_write_operation_booking_reference" },
+        { id: 56, name: "0056_meta_embedded_signup_attempts" },
+        { id: 57, name: "0057_whatsapp_integration_connection_link" },
+        { id: 58, name: "0058_meta_embedded_signup_resolved_connection" },
+        { id: 59, name: "0059_conversation_handoff_authority" },
+        { id: 60, name: "0060_voice_ai_whatsapp" },
+        { id: 62, name: "0062_voice_read_events" },
+        { id: 63, name: "0063_proactive_actions" },
+        { id: 64, name: "0064_proactive_runtime_boundary" },
+        { id: 65, name: "0065_proactive_operation_state_compatibility" },
+        { id: 66, name: "0066_billing_workspace_account_catalog" },
+        { id: 67, name: "0067_billing_subscription_entitlements" },
+        {
+          id: 68,
+          name: "0068_billing_operations_provider_events_reconciliation",
+        },
+        { id: 69, name: "0069_shared_rate_limit_windows" },
+        { id: 70, name: "0070_conversation_actor_reads" },
+      ],
+    );
+    assert.equal(
+      (
+        db
+          .prepare("SELECT checksum FROM schema_migrations WHERE id=48")
+          .get() as { checksum: string }
+      ).checksum,
+      checksum,
+    );
+    const inventory = (
+      db
+        .prepare("SELECT id,name,checksum FROM schema_migrations ORDER BY id")
+        .all() as Array<{ id: number; name: string; checksum: string }>
+    ).map((row) => ({ ...row }));
+    runMigrations(db);
+    assert.deepEqual(
+      (
+        db
+          .prepare("SELECT id,name,checksum FROM schema_migrations ORDER BY id")
+          .all() as Array<{ id: number; name: string; checksum: string }>
+      ).map((row) => ({ ...row })),
+      inventory,
+    );
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
-test("EPIC039 declares the complete immutable migration inventory through the 0069 head",()=>{const db=createDatabase(":memory:");try{const rows=db.prepare("SELECT id,name,checksum FROM schema_migrations ORDER BY id").all()as Array<{id:number;name:string;checksum:string}>;assert.deepEqual(rows.map(row=>row.id),[...Array.from({length:60},(_,index)=>index+1),62,63,64,65,66,67,68,69]);assert.equal(rows.at(-1)?.name,"0069_shared_rate_limit_windows");assert.equal(new Set(rows.map(row=>row.name)).size,68);assert.equal(rows.every(row=>/^[a-f0-9]{64}$/u.test(row.checksum)),true);}finally{db.close();}});
+test("EPIC039 declares the complete immutable migration inventory through the 0070 head", () => {
+  const db = createDatabase(":memory:");
+  try {
+    const rows = db
+      .prepare("SELECT id,name,checksum FROM schema_migrations ORDER BY id")
+      .all() as Array<{ id: number; name: string; checksum: string }>;
+    assert.deepEqual(
+      rows.map((row) => row.id),
+      [
+        ...Array.from({ length: 60 }, (_, index) => index + 1),
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+      ],
+    );
+    assert.equal(rows.at(-1)?.name, "0070_conversation_actor_reads");
+    assert.equal(new Set(rows.map((row) => row.name)).size, 69);
+    assert.equal(
+      rows.every((row) => /^[a-f0-9]{64}$/u.test(row.checksum)),
+      true,
+    );
+  } finally {
+    db.close();
+  }
+});
 
-test("EPIC039 fixes the current migration checksum while historical migrations remain immutable",()=>{const db=createDatabase(":memory:");try{const rows=(db.prepare("SELECT id,checksum FROM schema_migrations WHERE id IN (53,54) ORDER BY id").all()as Array<{id:number;checksum:string}>).map(row=>({...row}));assert.deepEqual(rows,[{id:53,checksum:"fc18657ead9bc24c23805fbfed6ad2dbabb464ead25a4c89d86063111dbf64bb"},{id:54,checksum:"90dc3b873774c533c9f565f60576b58c02bbf3532bbe2b5a98562f6c1e9cb882"}]);}finally{db.close();}});
+test("EPIC039 fixes the current migration checksum while historical migrations remain immutable", () => {
+  const db = createDatabase(":memory:");
+  try {
+    const rows = (
+      db
+        .prepare(
+          "SELECT id,checksum FROM schema_migrations WHERE id IN (53,54) ORDER BY id",
+        )
+        .all() as Array<{ id: number; checksum: string }>
+    ).map((row) => ({ ...row }));
+    assert.deepEqual(rows, [
+      {
+        id: 53,
+        checksum:
+          "fc18657ead9bc24c23805fbfed6ad2dbabb464ead25a4c89d86063111dbf64bb",
+      },
+      {
+        id: 54,
+        checksum:
+          "90dc3b873774c533c9f565f60576b58c02bbf3532bbe2b5a98562f6c1e9cb882",
+      },
+    ]);
+  } finally {
+    db.close();
+  }
+});
 
-test("EPIC039 keeps knowledge conversation live data and assistant capabilities outside media authority",async()=>{const v=fixture();try{const asset=await v.service.store(v.context,v.company.id,input("boundary"));assert.equal((v.db.prepare("SELECT COUNT(*) count FROM knowledge_sources").get()as{count:number}).count,0);assert.equal((v.db.prepare("SELECT COUNT(*) count FROM conversations").get()as{count:number}).count,0);assert.equal((v.db.prepare("SELECT COUNT(*) count FROM live_data_observations").get()as{count:number}).count,0);assert.equal(productionAssistantCapabilityCatalog.list().some(value=>value.key.includes("media")),false);assert.equal((await v.service.open(v.context,v.company.id,asset.id))[0],png[0]);}finally{v.db.close();rmSync(v.directory,{recursive:true,force:true});}});
+test("EPIC039 keeps knowledge conversation live data and assistant capabilities outside media authority", async () => {
+  const v = fixture();
+  try {
+    const asset = await v.service.store(
+      v.context,
+      v.company.id,
+      input("boundary"),
+    );
+    assert.equal(
+      (
+        v.db.prepare("SELECT COUNT(*) count FROM knowledge_sources").get() as {
+          count: number;
+        }
+      ).count,
+      0,
+    );
+    assert.equal(
+      (
+        v.db.prepare("SELECT COUNT(*) count FROM conversations").get() as {
+          count: number;
+        }
+      ).count,
+      0,
+    );
+    assert.equal(
+      (
+        v.db
+          .prepare("SELECT COUNT(*) count FROM live_data_observations")
+          .get() as { count: number }
+      ).count,
+      0,
+    );
+    assert.equal(
+      productionAssistantCapabilityCatalog
+        .list()
+        .some((value) => value.key.includes("media")),
+      false,
+    );
+    assert.equal(
+      (await v.service.open(v.context, v.company.id, asset.id))[0],
+      png[0],
+    );
+  } finally {
+    v.db.close();
+    rmSync(v.directory, { recursive: true, force: true });
+  }
+});

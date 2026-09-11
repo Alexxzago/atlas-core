@@ -83,6 +83,7 @@ export interface ConversationInboxProjection {
   readonly controlVersion: number;
   readonly updatedAt: string;
   readonly participant: string | null;
+  readonly unreadCount: number;
   readonly preview: string | null;
   readonly deliveryCategory: "received" | "sent" | null;
   readonly lastActivityAt: string;
@@ -97,6 +98,7 @@ export interface ConversationDetailProjection extends ConversationInboxProjectio
 export interface ConversationDetailMessageProjection {
   readonly messageId: string;
   readonly participant: string;
+  readonly senderRole: "customer" | "assistant" | "operator";
   readonly deliveryCategory: "received" | "sent";
   readonly content: string;
   readonly createdAt: string;

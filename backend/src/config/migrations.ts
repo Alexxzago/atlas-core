@@ -2151,6 +2151,21 @@ const migrations: Migration[] = [
     );
     CREATE INDEX idx_shared_rate_limit_windows_expiry ON shared_rate_limit_windows(expires_at);
   `);}},
+  { id:70,name:"0070_conversation_actor_reads",checksumSource:"conversation-inbox-actor-read-position-tenant-scoped-v1",apply(database):void{database.exec(`
+    CREATE TABLE conversation_actor_reads(
+      workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      actor_user_id TEXT NOT NULL CHECK(length(actor_user_id) BETWEEN 1 AND 128),read_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      PRIMARY KEY(workspace_id,company_id,conversation_id,actor_user_id),
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_conversation_actor_reads_actor ON conversation_actor_reads(workspace_id,company_id,actor_user_id,conversation_id);
+    CREATE TRIGGER conversation_actor_reads_scope_insert BEFORE INSERT ON conversation_actor_reads
+    WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id)
+    BEGIN SELECT RAISE(ABORT,'Conversation actor read scope is invalid'); END;
+    CREATE TRIGGER conversation_actor_reads_scope_update BEFORE UPDATE OF workspace_id,company_id,conversation_id ON conversation_actor_reads
+    WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id)
+    BEGIN SELECT RAISE(ABORT,'Conversation actor read scope is invalid'); END;
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import type { UserId } from "../../identity/domain/user.js";
+import { decodeConversationInboxCursor, encodeConversationInboxCursor, type ConversationInboxFilters, type ConversationInboxPage } from "../domain/conversationInbox.js";
 import type { AssistantResponseFinalizationResult, ConversationRepositoryPort } from "../application/ports.js";
 import {
   conversationId,
@@ -93,15 +94,25 @@ export class ConversationService {
     const current = this.get(context, companyIdValue, conversationIdValue);
     return this.conversations.finalizeAssistantResponse(context, current.companyId, current.id, input.inboundMessageId, input.outboundParticipantId, input.executionRecordId, input.authorityGeneration, input.content, input.idempotencyKey, input.occurredAt, input.whatsAppConnectionId ?? null);
   }
-  public listInbox(context: WorkspaceContext, companyIdValue: unknown, actorId?: UserId): ConversationInboxProjection[] {
+  public listInbox(context: WorkspaceContext, companyIdValue: unknown, actorId: UserId, input: unknown): ConversationInboxPage<ConversationInboxProjection> {
     const companyId = parseCompanyId(companyIdValue);
-    return this.conversations.listConversationInbox(context, companyId).map((value) => Object.freeze({ ...value, controlledByCurrentActor: actorId === undefined ? false : this.conversations.isConversationControlledBy(context, companyId, value.conversationId, actorId) }));
+    if (!this.conversations.hasCompany(context, companyId)) throw new ConversationNotFoundError("Company was not found.");
+    const parsed = inboxInput(input);
+    const cursor = parsed.cursor === null ? null : decodeConversationInboxCursor(parsed.cursor, context.workspaceId, companyId, parsed.filters);
+    if (parsed.cursor !== null && cursor === null) throw new ConversationValidationError("Conversation cursor is invalid.");
+    const page = this.conversations.listConversationInboxPage(context, companyId, actorId, parsed.filters, cursor === null ? null : { activity: cursor.a, id: cursor.i }, parsed.limit);
+    const next = page.nextCursor === null ? null : JSON.parse(page.nextCursor) as { activity: string; id: string };
+    return Object.freeze({ items: Object.freeze(page.items), nextCursor: next === null ? null : encodeConversationInboxCursor({ w: context.workspaceId, c: companyId, a: next.activity, i: next.id, ...parsed.filters }) });
   }
   public detail(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, actorId?: UserId): ConversationDetailProjection {
     const companyId = parseCompanyId(companyIdValue), id = parseConversationId(conversationIdValue);
-    const detail = this.conversations.findConversationDetail(context, companyId, id);
+    const detail = this.conversations.findConversationDetail(context, companyId, id, actorId ?? ("anonymous" as UserId));
     if (!detail) throw new ConversationNotFoundError("Conversation was not found.");
     return Object.freeze({ ...detail, controlledByCurrentActor: actorId === undefined ? false : this.conversations.isConversationControlledBy(context, companyId, detail.conversationId, actorId) });
+  }
+  public markRead(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, actorId: UserId): void {
+    const companyId = parseCompanyId(companyIdValue), id = parseConversationId(conversationIdValue);
+    if (!this.conversations.markConversationRead(context, companyId, id, actorId, this.clock.now())) throw new ConversationNotFoundError("Conversation was not found.");
   }
 
   public validateOpen(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): Conversation {
@@ -116,6 +127,21 @@ function parseCompanyId(value: unknown): number {
   if (!Number.isSafeInteger(parsed) || parsed < 1) throw new ConversationValidationError("Company ID is invalid.");
   return parsed;
 }
+
+function inboxInput(value: unknown): { readonly filters: ConversationInboxFilters; readonly cursor: string | null; readonly limit: number } {
+  const record = value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const one = (key: string): string | null => record[key] === undefined ? null : typeof record[key] === "string" ? record[key] : invalidInbox();
+  const controlState = one("controlState"), state = one("state"), channel = one("channel"), cursor = one("cursor");
+  if (controlState !== null && controlState !== "automated" && controlState !== "human_required" && controlState !== "human_controlled") invalidInbox();
+  if (state !== null && state !== "open" && state !== "closed") invalidInbox();
+  if (channel !== null && channel !== "internal" && channel !== "web_chat" && channel !== "whatsapp") invalidInbox();
+  const unreadOnly = record.unreadOnly === undefined ? false : record.unreadOnly === "true";
+  if (record.unreadOnly !== undefined && record.unreadOnly !== "true" && record.unreadOnly !== "false") invalidInbox();
+  const limit = record.limit === undefined ? 30 : typeof record.limit === "string" && /^\d+$/.test(record.limit) ? Number(record.limit) : invalidInbox();
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) invalidInbox();
+  return { filters: { controlState: controlState as ConversationInboxFilters["controlState"], state: state as ConversationInboxFilters["state"], channel: channel as ConversationInboxFilters["channel"], unreadOnly }, cursor, limit };
+}
+function invalidInbox(): never { throw new ConversationValidationError("Conversation inbox query is invalid."); }
 
 function parseConversationId(value: unknown): ReturnType<typeof conversationId> {
   if (typeof value !== "string") throw new ConversationValidationError("Conversation ID is invalid.");
