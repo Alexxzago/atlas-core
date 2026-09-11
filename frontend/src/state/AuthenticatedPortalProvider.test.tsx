@@ -35,6 +35,47 @@ test("restores the sole workspace and exposes the tenant selectors", async () =>
   expect(portal.current?.needsWorkspaceSelection).toBe(false);
   expect(portal.current?.needsCompany).toBe(true);
   expect(portal.current?.hasSelectedCompany).toBe(false);
+  expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/workspaces/workspace/select"))).toHaveLength(0);
+});
+
+test("coalesces concurrent selection of the same workspace without retrying a real failure", async () => {
+  const portal: { current: AuthenticatedPortalContextValue | null } = { current: null };
+  let resolveSelection!: (value: Response) => void;
+  const fetchMock = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/workspaces") && !url.includes("/selected")) return Promise.resolve(json([workspace, { ...workspace, id: "other" }]));
+    if (url.endsWith("/workspaces/selected")) return Promise.resolve(json(null));
+    if (url.endsWith("/workspaces/other/select")) return new Promise<Response>((resolve) => { resolveSelection = resolve; });
+    if (url.endsWith("/workspaces/other/companies")) return Promise.resolve(json([]));
+    return Promise.resolve(new Response("", { status: 404 }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  function Consumer(): null { portal.current = useAuthenticatedPortal(); return null; }
+  render(<AuthenticatedPortalProvider csrf="csrf"><Consumer /></AuthenticatedPortalProvider>);
+  await waitFor(() => expect(portal.current?.needsWorkspaceSelection).toBe(true));
+  const first = portal.current!.selectWorkspace("other"), second = portal.current!.selectWorkspace("other");
+  expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/workspaces/other/select"))).toHaveLength(1);
+  resolveSelection(json({ ...workspace, id: "other" }));
+  expect(await first).toBe(true);
+  expect(await second).toBe(true);
+});
+
+test("a real selection failure remains recoverable without an automatic loop", async () => {
+  const portal: { current: AuthenticatedPortalContextValue | null } = { current: null };
+  const fetchMock = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/workspaces") && !url.includes("/selected")) return Promise.resolve(json([workspace, { ...workspace, id: "other" }]));
+    if (url.endsWith("/workspaces/selected")) return Promise.resolve(json(null));
+    if (url.endsWith("/workspaces/other/select")) return Promise.resolve(new Response(JSON.stringify({ error: "Workspace operation is not available." }), { status: 404, headers: { "content-type": "application/json" } }));
+    return Promise.resolve(new Response("", { status: 404 }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  function Consumer(): null { portal.current = useAuthenticatedPortal(); return null; }
+  render(<AuthenticatedPortalProvider csrf="csrf"><Consumer /></AuthenticatedPortalProvider>);
+  await waitFor(() => expect(portal.current?.needsWorkspaceSelection).toBe(true));
+  expect(await portal.current!.selectWorkspace("other")).toBe(false);
+  await waitFor(() => expect(portal.current?.state.notice?.key).toBe("portal.resourceUnavailable"));
+  expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/workspaces/other/select"))).toHaveLength(1);
 });
 
 test("keeps a sole workspace in loading while automatic restoration is pending", async () => {

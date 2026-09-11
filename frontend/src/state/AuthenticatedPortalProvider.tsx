@@ -52,12 +52,13 @@ export function AuthenticatedPortalProvider({ csrf, children }: Props): React.JS
   const profileAbort = useRef<AbortController | null>(null);
   const mutationAbort = useRef<AbortController | null>(null);
   const stateRef = useRef(state);
+  const workspaceSelectionPromise = useRef<{ readonly workspaceId:string; readonly promise:Promise<boolean> }|null>(null);
   stateRef.current = state;
 
   const nextRequest = (generation: number, workspaceId?: string, companyId?: number, profileId?: string): RequestContext => ({ requestId: ++sequence.current, generation, ...(workspaceId === undefined ? {} : { workspaceId }), ...(companyId === undefined ? {} : { companyId }), ...(profileId === undefined ? {} : { profileId }) });
   const nextMutation = (operation: ProfileMutationOperation, generation: number, workspaceId: string, companyId: number, profileId?: string): ProfileMutationContext => ({ ...nextRequest(generation, workspaceId, companyId, profileId), operation });
   const abortProfiles = (): void => { profilesAbort.current?.abort(); profileAbort.current?.abort(); mutationAbort.current?.abort(); };
-  const abortTenant = (): void => { workspaceAbort.current?.abort(); companiesAbort.current?.abort(); companyCreateAbort.current?.abort(); abortProfiles(); workspaceSelectionIntent.current = ++sequence.current; companySelectionIntent.current = ++sequence.current; };
+  const abortTenant = (): void => { workspaceAbort.current?.abort(); companiesAbort.current?.abort(); companyCreateAbort.current?.abort(); abortProfiles(); workspaceSelectionPromise.current=null; workspaceSelectionIntent.current = ++sequence.current; companySelectionIntent.current = ++sequence.current; };
 
   const refresh = useCallback(async (): Promise<void> => {
     try { dispatch({ type: "workspacesLoaded", workspaces: await atlasApi.listWorkspaces() }); }
@@ -77,12 +78,14 @@ export function AuthenticatedPortalProvider({ csrf, children }: Props): React.JS
     if (current.selectedWorkspace) void loadCompanies(current.selectedWorkspace, current.workspaceGeneration);
   };
 
-  const selectWorkspace = async (workspaceId: string): Promise<boolean> => {
-    abortTenant(); const request = nextRequest(stateRef.current.workspaceGeneration + 1, workspaceId); workspaceSelectionIntent.current = request.requestId;
-    const controller = new AbortController(); workspaceAbort.current = controller; dispatch({ type: "workspaceSelectionRequested", workspaceId, request });
-    try { const workspace = await atlasApi.selectWorkspace(csrf, workspaceId, controller.signal); if (!isCurrentIntent(workspaceSelectionIntent.current, request.requestId)) return false; dispatch({ type: "workspaceSelectionSucceeded", request, workspace }); await loadCompanies(workspace, request.generation); return isCurrentIntent(workspaceSelectionIntent.current, request.requestId); }
-    catch (error: unknown) { if (aborted(error)) { dispatch({ type: "requestAborted" }); return false; } dispatch({ type: "workspaceSelectionNotFound", request }); return false; }
+  const beginWorkspaceSelection = (workspaceId:string,persisted?:WorkspaceSummary):Promise<boolean> => {
+    const current=stateRef.current,existing=workspaceSelectionPromise.current;
+    if(current.selectedWorkspace?.id===workspaceId&&current.pendingWorkspaceId===null)return Promise.resolve(true);
+    if(existing?.workspaceId===workspaceId)return existing.promise;
+    const promise=(async():Promise<boolean>=>{abortTenant();const request=nextRequest(stateRef.current.workspaceGeneration+1,workspaceId);workspaceSelectionIntent.current=request.requestId;const controller=new AbortController();workspaceAbort.current=controller;dispatch({type:"workspaceSelectionRequested",workspaceId,request});try{const workspace=persisted??await atlasApi.selectWorkspace(csrf,workspaceId,controller.signal);if(!isCurrentIntent(workspaceSelectionIntent.current,request.requestId))return false;dispatch({type:"workspaceSelectionSucceeded",request,workspace});await loadCompanies(workspace,request.generation);return isCurrentIntent(workspaceSelectionIntent.current,request.requestId);}catch(error:unknown){if(aborted(error)){dispatch({type:"requestAborted"});return false;}dispatch({type:"workspaceSelectionNotFound",request});return false;}})();
+    workspaceSelectionPromise.current={workspaceId,promise};void promise.then(()=>{if(workspaceSelectionPromise.current?.promise===promise)workspaceSelectionPromise.current=null;});return promise;
   };
+  const selectWorkspace = (workspaceId:string):Promise<boolean> => beginWorkspaceSelection(workspaceId);
 
   useEffect(() => {
     if (state.workspacesLoading || state.workspaceError || state.initialWorkspaceResolved) return;
@@ -91,7 +94,7 @@ export function AuthenticatedPortalProvider({ csrf, children }: Props): React.JS
       let persisted: WorkspaceSummary | null = null;
       try { persisted = await atlasApi.selectedWorkspace(); } catch { /* The single-workspace fallback remains safe. */ }
       const workspace = initialWorkspace(state.workspaces, persisted);
-      if (workspace) await selectWorkspace(workspace.id);
+      if (workspace) await beginWorkspaceSelection(workspace.id,persisted&&persisted.id===workspace.id?workspace:undefined);
       if (current) dispatch({ type: "initialWorkspaceResolved" });
     })();
     return () => { current = false; };
