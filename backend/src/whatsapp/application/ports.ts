@@ -58,5 +58,6 @@ export interface WhatsAppCredentialResolverPort {
 /** Resolves a linked Integration Connection synchronously so WhatsApp runtime callers remain fail-closed. */
 export interface WhatsAppLinkedIntegrationCredentialRepositoryPort {
   findIntegrationConnectionId(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId): string | null;
+  findLinkedIntegrationSecret(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId): string | null;
   findReadyLinkedIntegrationSecret(context: WorkspaceContext, companyId: number, connectionId: WhatsAppConnectionId): string | null;
 }

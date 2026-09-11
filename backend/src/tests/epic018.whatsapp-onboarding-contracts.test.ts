@@ -184,6 +184,37 @@ test("EPIC-018 replacing credentials deactivates an active connection, requires 
   } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); database.close(); }
 });
 
+test("EPIC-049 derives a safe credential source and rejects manual writes for Meta-managed connections", () => {
+  const context = createWorkspaceContext({ id: 1, publicId: "wsp_default", key: "default", name: "Default", timezone: null, defaultLocale: null, createdAt: now });
+  const connection = reconstructWhatsAppConnection({ id: connectionId, workspaceId: context.workspaceId, companyId: 7, assistantProfileId: assistantProfileId("asp_9123456789abcdef0123456789abcdef"), phoneNumberId: "phone", whatsappBusinessAccountId: "waba", status: "inactive", createdAt: now, updatedAt: now });
+  let legacyWrites = 0;
+  const credentials = { findCredentials: () => null, replaceCredentials: () => null };
+  const service = new WhatsAppConnectionService(
+    { findById: () => ({ id: 7 }) } as never,
+    {} as never,
+    { findById: () => connection, findByIdForRecovery: () => connection, findByPhoneNumberId: () => null, listByCompany: () => [connection], replaceCredentialsAndDeactivate: () => { legacyWrites += 1; return connection; } } as never,
+    { now: () => now },
+    { credentials, states: { findOperationalState: () => null, replaceOperationalState: () => null }, cipher: { encrypt: () => "cipher", decrypt: () => "token" }, resolver: { resolve: () => "token" }, validator: { validateConnection: async () => ({ status: "valid" as const }) }, knowledge: {} as never, linked: { findIntegrationConnectionId: () => "inc_private", findLinkedIntegrationSecret: () => "ciphertext", findReadyLinkedIntegrationSecret: () => "ciphertext" } }
+  );
+  const meta = service.status(context, 7, connection.id);
+  assert.equal(meta.credentialsConfigured, true);
+  assert.equal(meta.credentialSource, "meta_embedded");
+  assert.equal(JSON.stringify(meta).includes("inc_private"), false);
+  assert.equal(JSON.stringify(meta).includes("ciphertext"), false);
+  assert.throws(() => service.configureCredentials(context, 7, connection.id, { accessToken: "new-token" }), { name: "WhatsAppConnectionMetaReconnectRequiredError" });
+  assert.equal(legacyWrites, 0);
+
+  const metaMissingSecret = new WhatsAppConnectionService({ findById: () => ({ id: 7 }) } as never, {} as never, { findById: () => connection } as never, { now: () => now }, { credentials, states: { findOperationalState: () => null, replaceOperationalState: () => null }, cipher: { encrypt: () => "cipher", decrypt: () => "token" }, resolver: { resolve: () => null }, validator: { validateConnection: async () => ({ status: "valid" as const }) }, knowledge: {} as never, linked: { findIntegrationConnectionId: () => "inc_private", findLinkedIntegrationSecret: () => null, findReadyLinkedIntegrationSecret: () => null } });
+  const missingSecretStatus = metaMissingSecret.status(context, 7, connection.id);
+  assert.deepEqual({ credentialSource: missingSecretStatus.credentialSource, credentialsConfigured: missingSecretStatus.credentialsConfigured }, { credentialSource: "meta_embedded", credentialsConfigured: false });
+
+  const manual = new WhatsAppConnectionService({ findById: () => ({ id: 7 }) } as never, {} as never, { findById: () => connection } as never, { now: () => now }, { credentials: { findCredentials: () => ({ whatsAppConnectionId: connection.id, encryptedAccessToken: "cipher", createdAt: now, updatedAt: now }), replaceCredentials: () => null }, states: { findOperationalState: () => null, replaceOperationalState: () => null }, cipher: { encrypt: () => "cipher", decrypt: () => "token" }, resolver: { resolve: () => "token" }, validator: { validateConnection: async () => ({ status: "valid" as const }) }, knowledge: {} as never });
+  assert.equal(manual.status(context, 7, connection.id).credentialSource, "manual");
+  const none = new WhatsAppConnectionService({ findById: () => ({ id: 7 }) } as never, {} as never, { findById: () => connection } as never, { now: () => now }, { credentials, states: { findOperationalState: () => null, replaceOperationalState: () => null }, cipher: { encrypt: () => "cipher", decrypt: () => "token" }, resolver: { resolve: () => null }, validator: { validateConnection: async () => ({ status: "valid" as const }) }, knowledge: {} as never });
+  assert.equal(none.status(context, 7, connection.id).credentialSource, "none");
+  assert.equal(none.status(context, 7, connection.id).credentialsConfigured, false);
+});
+
 
 test("WhatsApp configuration update preserves credentials and requires revalidation when provider identifiers change", () => {
   const database = createDatabase(":memory:");

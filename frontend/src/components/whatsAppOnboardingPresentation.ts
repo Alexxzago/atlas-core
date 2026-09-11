@@ -21,7 +21,7 @@ export function mapWhatsAppFailureToCustomerMessage(code: string | null): WhatsA
 export function buildWhatsAppOnboardingViewModel(status: WhatsAppConnectionOperationalStatus): WhatsAppOnboardingViewModel {
   const valid = status.validationState === "valid";
   const active = status.connection.status === "active";
-  const currentStage: WhatsAppStageId = !status.credentialsConfigured || status.validationState === "invalid" ? "credential" : !valid ? "validation" : !active ? "activation" : "working";
+  const currentStage: WhatsAppStageId = status.credentialSource === "meta_embedded" && !status.credentialsConfigured ? "meta" : !status.credentialsConfigured ? "credential" : !valid ? "validation" : !active ? "activation" : "working";
   const ordered: readonly WhatsAppStageId[] = ["meta", "connection", "credential", "validation", "activation", "working"];
   const stages = ordered.map((id): WhatsAppStage => ({ id, state: buildWhatsAppStageState(id, currentStage, status) }));
   const nextAction: WhatsAppNextAction = currentStage === "credential" ? "saveCredential" : currentStage === "validation" ? "validate" : currentStage === "activation" ? "activate" : "test";

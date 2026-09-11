@@ -102,7 +102,7 @@ function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmi
     if (route.name === "settings") return <WorkspaceMembershipPortal csrf={csrf} currentUserId={userId} currentUserEmail={email} workspaces={state.workspaces} selectedWorkspace={state.selectedWorkspace} pendingWorkspaceId={state.pendingWorkspaceId} loading={state.workspacesLoading} error={state.workspaceError} onSelectWorkspace={(id) => { void selectWorkspace(id).then((selected) => { if (selected) navigate("/companies", { replace: true }); }); }} onWorkspacesChanged={() => void refresh()} onActiveWorkspaceLeft={clearWorkspace}/>;
     if (route.name === "company-assistant" || route.name === "company-assistant-section") return <div className="assistant-detail-view" key={assistantContextKey}>{testPanel ?? assistantPanel}</div>;
     if (route.name === "company-knowledge") return knowledgePanel;
-    if (route.name === "company-channels") return <>{requestedCompanyId && <ChannelHub companyId={requestedCompanyId} onNavigate={navigate}/>}</>;
+    if (route.name === "company-channels") return <>{requestedCompanyId && <ChannelHub companyId={requestedCompanyId} workspaceId={state.selectedWorkspace?.id ?? null} onNavigate={navigate}/>}</>;
     if (route.name === "company-web-chat") return <><ContextBackLink href={`/companies/${requestedCompanyId}/channels`} label={t("channels.back")} onNavigate={(event)=>{event.preventDefault();navigate(`/companies/${requestedCompanyId}/channels`);}}/>{webChatPanel}</>;
     if (route.name === "company-whatsapp") return whatsappPanel;
     return <></>;
