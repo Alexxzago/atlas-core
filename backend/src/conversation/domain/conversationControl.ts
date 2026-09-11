@@ -82,6 +82,7 @@ export interface ConversationInboxProjection {
   readonly resolvedBy: string | null;
   readonly controlVersion: number;
   readonly updatedAt: string;
+  readonly contactLabel: string;
   readonly participant: string | null;
   readonly unreadCount: number;
   readonly preview: string | null;

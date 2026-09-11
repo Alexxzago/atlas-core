@@ -10,5 +10,5 @@ export function mapConversationState(item: ConversationInboxItem): ConversationS
   if (item.controlState === "automated") return "automated";
   return "unknown";
 }
-export function buildConversationListItem(item: ConversationInboxItem): ConversationListItemViewModel { return { id:item.conversationId, identity:item.participant?.trim()||null, preview:item.preview?.trim()||null, channel:item.channel, state:mapConversationState(item), lastActivityAt:item.lastActivityAt||null, unreadCount:item.unreadCount }; }
+export function buildConversationListItem(item: ConversationInboxItem): ConversationListItemViewModel { return { id:item.conversationId, identity:item.contactLabel.trim()||null, preview:item.preview?.trim()||null, channel:item.channel, state:mapConversationState(item), lastActivityAt:item.lastActivityAt||null, unreadCount:item.unreadCount }; }
 export function buildConversationInboxViewModel(items: readonly ConversationInboxItem[]): readonly ConversationListItemViewModel[] { return items.map(buildConversationListItem).sort((a,b)=>(b.lastActivityAt??"").localeCompare(a.lastActivityAt??"")); }

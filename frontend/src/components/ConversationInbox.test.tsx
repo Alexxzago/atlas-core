@@ -24,6 +24,7 @@ const item = {
   resolvedAt: null,
   controlVersion: 1,
   updatedAt: "2026-01-01T00:00:00Z",
+  contactLabel: "Customer",
   participant: "Customer",
   preview: "Hello",
   deliveryCategory: null,
@@ -254,7 +255,7 @@ test("aborts obsolete company and workspace feed requests without applying old s
     if (url.includes("/feed")) return Promise.resolve(json(feed("new-tail")));
     if (url.endsWith("/conversations"))
       return Promise.resolve(
-        json(inbox([{ ...item, participant: "Current company" }])),
+        json(inbox([{ ...item, contactLabel: "Current company", participant: "Current company" }])),
       );
     return Promise.resolve(json(item));
   });
