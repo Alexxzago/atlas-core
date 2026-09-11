@@ -25,6 +25,10 @@ export class ConversationControlService {
     return this.apply(context, actorId, companyIdValue, conversationIdValue, input, "resolve");
   }
 
+  public resume(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown): ConversationControl {
+    return this.apply(context, actorId, companyIdValue, conversationIdValue, input, "resume");
+  }
+
   private input(companyIdValue: unknown, conversationIdValue: unknown, input: unknown): { companyId: number; expectedVersion: number; operationId: string } {
     const companyId = typeof companyIdValue === "number" ? companyIdValue : typeof companyIdValue === "string" && /^\d+$/.test(companyIdValue) ? Number(companyIdValue) : NaN;
     if (!Number.isSafeInteger(companyId) || companyId < 1 || typeof conversationIdValue !== "string") throw new ConversationControlValidationError("Conversation is invalid.");
@@ -36,7 +40,7 @@ export class ConversationControlService {
     } catch { throw new ConversationControlValidationError("Expected version and operation id are required."); }
   }
 
-  private apply(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown, operation: "takeover" | "release" | "resolve"): ConversationControl {
+  private apply(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown, operation: "takeover" | "release" | "resolve" | "resume"): ConversationControl {
     const { companyId, expectedVersion, operationId } = this.input(companyIdValue, conversationIdValue, input);
     if (typeof conversationIdValue !== "string") throw new ConversationControlValidationError("Conversation is invalid.");
     const result = this.controls.applyConversationControlOperation(context, companyId, conversationIdValue as never, { operationId, operation, actorId, expectedVersion, occurredAt: this.clock.now() });

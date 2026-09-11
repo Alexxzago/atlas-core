@@ -62,7 +62,7 @@ interface ContextualConversationReadControllers {
   playback?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
   markRead?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
 }
-interface ContextualConversationControlControllers { takeover: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; release: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; resolve: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; }
+interface ContextualConversationControlControllers { takeover: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; release: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; resolve: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; resume: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; }
 
 interface AuthorizedCompanyDependencies {
   authentication: AuthenticationService;
@@ -244,6 +244,7 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     router.post("/:workspaceId/companies/:companyId/conversations/:conversationId/takeover", authorize("conversation:manage", true, conversationControls.takeover));
     router.post("/:workspaceId/companies/:companyId/conversations/:conversationId/release", authorize("conversation:manage", true, conversationControls.release));
     router.post("/:workspaceId/companies/:companyId/conversations/:conversationId/resolve", authorize("conversation:manage", true, conversationControls.resolve));
+    router.post("/:workspaceId/companies/:companyId/conversations/:conversationId/resume", authorize("conversation:manage", true, conversationControls.resume));
   }
   const webChat = dependencies.webChatConnectionControllers;
   if (webChat) {

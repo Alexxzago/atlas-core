@@ -581,7 +581,7 @@ test("EPIC046 migrates fresh and staged file-backed databases, backfills unmanag
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
     db.close(); db = new DatabaseSync(path); db.exec("PRAGMA foreign_keys=ON"); runMigrations(db);
     const head = db.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as {id:number;name:string};
-    assert.equal(head.id, 70); assert.equal(head.name, "0070_conversation_actor_reads");
+    assert.equal(head.id, 71); assert.equal(head.name, "0071_conversation_resume_operation");
   } finally { if (db.isOpen) db.close(); rmSync(directory, {recursive:true, force:true}); }
 });
 

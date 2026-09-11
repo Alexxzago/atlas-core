@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { UserId } from "../../identity/domain/user.js";
 import { conversationControlState, type ConversationControlState } from "./conversationControl.js";
 
-export type ConversationControlOperation = "takeover" | "release" | "resolve";
+export type ConversationControlOperation = "takeover" | "release" | "resolve" | "resume";
 
 export type ConversationControlOperationOutcome =
   | "applied"
@@ -36,6 +36,7 @@ export type ConversationAuthorityTransition =
   | { readonly kind: "takeover"; readonly actorId: UserId }
   | { readonly kind: "release"; readonly actorId: UserId }
   | { readonly kind: "resolve"; readonly actorId: UserId }
+  | { readonly kind: "resume"; readonly actorId: UserId }
   | { readonly kind: "operator_activity"; readonly actorId: UserId };
 
 export type ConversationControlAtomicResult =
@@ -75,6 +76,7 @@ const operations: readonly ConversationControlOperation[] = [
   "takeover",
   "release",
   "resolve",
+  "resume",
 ];
 
 const outcomes: readonly ConversationControlOperationOutcome[] = [
@@ -207,6 +209,21 @@ export function applyConversationAuthorityTransition(
       ...current,
       state: "human_controlled",
       controllingActorId: actorId,
+      version: current.version + 1,
+      authorityGeneration: current.authorityGeneration + 1,
+    });
+  }
+
+  if (transition.kind === "resume") {
+    if (current.state !== "human_required") {
+      throw new ConversationAuthorityDomainError(
+        "Conversation does not require human attention.",
+      );
+    }
+
+    return reconstructConversationAuthority({
+      ...current,
+      state: "automated",
       version: current.version + 1,
       authorityGeneration: current.authorityGeneration + 1,
     });
