@@ -60,6 +60,7 @@ interface ContextualConversationReadControllers {
   feed?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
   voice?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
   playback?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
+  markRead?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
 }
 interface ContextualConversationControlControllers { takeover: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; release: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; resolve: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; }
 
@@ -236,6 +237,7 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     if (conversationReads.voice) router.get("/:workspaceId/companies/:companyId/conversations/:conversationId/messages/:messageId/voice", authorize("company:read", false, conversationReads.voice));
     if (conversationReads.playback) router.get("/:workspaceId/companies/:companyId/conversations/:conversationId/messages/:messageId/voice/playback", authorize("company:read", false, conversationReads.playback));
     router.get("/:workspaceId/companies/:companyId/conversations/:conversationId", authorize("company:read", false, conversationReads.get));
+    if (conversationReads.markRead) router.post("/:workspaceId/companies/:companyId/conversations/:conversationId/read", authorize("company:read", true, conversationReads.markRead));
   }
   const conversationControls = dependencies.conversationControlControllers ?? productionConversationControlControllers;
   if (conversationControls) {

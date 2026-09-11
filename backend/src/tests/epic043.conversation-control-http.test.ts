@@ -143,7 +143,7 @@ test("EPIC043 PASS6A public conversation HTTP projections are actor-relative and
     assert.equal((await post(value.ids.controlledOther.id, "takeover", 1, "other-take", "operator-2")).status, 200);
     const list = await fetch(http.path(value.company.id, ""), { headers: http.headers() });
     assert.equal(list.status, 200); assert.equal(list.headers.get("cache-control"), "no-store, private"); assert.equal(list.headers.get("pragma"), "no-cache");
-    const entries = await list.json() as Array<{ conversationId: string; controlState: string; controlledByCurrentActor: boolean }>;
+    const entries = (await list.json() as { items: Array<{ conversationId: string; controlState: string; controlledByCurrentActor: boolean }> }).items;
     const byId = new Map(entries.map((entry) => [entry.conversationId, [entry.controlState, entry.controlledByCurrentActor]]));
     assert.deepEqual(byId.get(value.ids.automated.id), ["automated", false]);
     assert.deepEqual(byId.get(value.ids.required.id), ["human_required", false]);

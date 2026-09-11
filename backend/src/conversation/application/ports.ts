@@ -3,6 +3,7 @@ import type { UserId } from "../../identity/domain/user.js";
 import type { Conversation, ConversationId, ConversationMessage, ConversationMessageId, ConversationParticipant, ConversationParticipantId } from "../domain/conversation.js";
 import type { ConversationControl, ConversationDetailProjection, ConversationInboxProjection } from "../domain/conversationControl.js";
 import type { ConversationControlAtomicCommand, ConversationControlAtomicResult } from "../domain/conversationAuthority.js";
+import type { ConversationInboxFilters, ConversationInboxPage } from "../domain/conversationInbox.js";
 
 export interface ConversationEventFeedEntry { readonly sequence: number; readonly eventId: string; readonly conversationId: ConversationId; readonly type: string; readonly controlVersion: number | null; readonly authorityGeneration: number | null; readonly relatedMessageId: string | null; readonly occurredAt: string; }
 
@@ -41,7 +42,9 @@ export interface ConversationRepositoryPort {
   updateConversationResolution(context: WorkspaceContext, companyId: number, conversationId: ConversationId, expectedVersion: number, resolvedAt: string, resolvedBy: string, updatedAt: string): ConversationControl | null;
   clearConversationResolution(context: WorkspaceContext, companyId: number, conversationId: ConversationId, expectedVersion: number, updatedAt: string): ConversationControl | null;
   listConversationInbox(context: WorkspaceContext, companyId: number): ConversationInboxProjection[];
-  findConversationDetail(context: WorkspaceContext, companyId: number, conversationId: ConversationId): ConversationDetailProjection | null;
+  listConversationInboxPage(context: WorkspaceContext, companyId: number, actorId: UserId, filters: ConversationInboxFilters, cursor: { readonly activity: string; readonly id: string } | null, limit: number): ConversationInboxPage<ConversationInboxProjection>;
+  findConversationDetail(context: WorkspaceContext, companyId: number, conversationId: ConversationId, actorId?: UserId): ConversationDetailProjection | null;
+  markConversationRead(context: WorkspaceContext, companyId: number, conversationId: ConversationId, actorId: UserId, readAt: string): boolean;
   isConversationControlledBy(context: WorkspaceContext, companyId: number, conversationId: ConversationId, actorId: UserId): boolean;
   conversationEventTail(context: WorkspaceContext, companyId: number): number;
   listConversationEventsAfter(context: WorkspaceContext, companyId: number, afterSequence: number, limit: number): readonly ConversationEventFeedEntry[];
