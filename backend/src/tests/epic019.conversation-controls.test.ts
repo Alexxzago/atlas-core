@@ -82,7 +82,7 @@ test("EPIC-019 scopes control and safe inbox/detail projections by Company and w
     assert.equal(value.conversations.findConversationControl(value.secondary, value.first.id, first.id), null);
     assert.equal(value.conversations.ensureConversationControl(value.primary, value.second.id, first.id), null);
     const inbox = value.conversations.listConversationInbox(value.primary, value.first.id);
-    assert.deepEqual(inbox.map((entry) => [entry.conversationId, entry.participant, entry.preview, entry.deliveryCategory]), [[first.id, "masked", "Reply", "sent"]]);
+    assert.deepEqual(inbox.map((entry) => [entry.conversationId, entry.participant, entry.preview, entry.deliveryCategory]), [[first.id, "Cliente de WhatsApp", "Reply", "sent"]]);
     assert.deepEqual(inbox.map((entry) => [entry.controlState, entry.attentionReason, entry.controllingActorId, entry.takenAt, entry.releasedAt, entry.lastOperatorActivityAt, entry.resolvedAt, entry.resolvedBy, entry.controlVersion, entry.updatedAt]), [["automated", null, null, null, null, null, null, null, 1, at]]);
     assert.equal((value.database.prepare("SELECT COUNT(*) AS count FROM conversation_controls WHERE conversation_id=?").get(first.id) as { count: number }).count, 1);
     assert.deepEqual(value.conversations.listConversationInbox(value.secondary, value.foreign.id).map((entry) => entry.conversationId), [foreign.id]);
@@ -93,7 +93,7 @@ test("EPIC-019 scopes control and safe inbox/detail projections by Company and w
     assert.equal((value.database.prepare("SELECT COUNT(*) AS count FROM conversation_controls WHERE conversation_id=?").get(second.id) as { count: number }).count, 1);
     const detail = value.conversations.findConversationDetail(value.primary, value.first.id, first.id)!;
     assert.deepEqual([detail.controlState, detail.attentionReason, detail.controllingActorId, detail.takenAt, detail.releasedAt, detail.lastOperatorActivityAt, detail.resolvedAt, detail.resolvedBy, detail.controlVersion, detail.updatedAt], ["automated", null, null, null, null, null, null, null, 1, at]);
-    assert.deepEqual(detail.messages.map((message) => [message.deliveryCategory, message.content, message.participant]), [["received", "A".repeat(400), "masked"], ["sent", "Reply", "masked"]]);
+    assert.deepEqual(detail.messages.map((message) => [message.deliveryCategory, message.content, message.participant]), [["received", "A".repeat(400), "customer"], ["sent", "Reply", "assistant"]]);
     assert.equal(JSON.stringify(detail).includes("15551234567"), false);
     assert.equal(JSON.stringify(detail).includes("provider-secret"), false);
     assert.equal(second.channel, "web_chat");
