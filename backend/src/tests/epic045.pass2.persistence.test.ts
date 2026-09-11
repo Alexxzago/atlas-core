@@ -863,7 +863,7 @@ test("EPIC045 PASS2 preserves outbound rowids on 0062 upgrade and restart", () =
           )
           .get() as { id: number; name: string }
       ).name,
-      "0070_conversation_actor_reads",
+      "0071_conversation_resume_operation",
     );
     assert.equal(
       (

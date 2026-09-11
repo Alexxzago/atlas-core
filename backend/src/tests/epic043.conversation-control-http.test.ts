@@ -57,6 +57,7 @@ function fixture() {
       takeover: (context, actor) => createConversationControlController(controls, context, actor, "takeover"),
       release: (context, actor) => createConversationControlController(controls, context, actor, "release"),
       resolve: (context, actor) => createConversationControlController(controls, context, actor, "resolve"),
+      resume: (context, actor) => createConversationControlController(controls, context, actor, "resume"),
     },
   }));
   return { database, app, company, other, foreign, ids };
@@ -66,7 +67,7 @@ async function running(value: ReturnType<typeof fixture>) {
   const server = value.app.listen(0, "127.0.0.1");
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const path = (companyId: number, id: string, action?: "takeover" | "release" | "resolve") => `${origin}/workspaces/wsp_primary/companies/${companyId}/conversations/${id}${action ? `/${action}` : ""}`;
+  const path = (companyId: number, id: string, action?: "takeover" | "release" | "resolve" | "resume") => `${origin}/workspaces/wsp_primary/companies/${companyId}/conversations/${id}${action ? `/${action}` : ""}`;
   const headers = (actor = "operator-1") => ({ "content-type": "application/json", cookie: `atlas=${actor}`, origin, "sec-fetch-site": "same-origin", "x-csrf-token": "csrf" });
   return { origin, path, headers, close: async () => { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); value.database.close(); } };
 }
@@ -79,7 +80,7 @@ function noPrivate(value: unknown): void {
 test("EPIC043 PASS6A control mutation bodies require exactly expectedVersion and operationId", async () => {
   const value = fixture(), http = await running(value);
   try {
-    for (const action of ["takeover", "release", "resolve"] as const) {
+    for (const action of ["takeover", "release", "resolve", "resume"] as const) {
       const url = http.path(value.company.id, value.ids.mutation.id, action), headers = http.headers();
       for (const body of [{ expectedVersion: 1 }, { expectedVersion: 1, operationId: "" }, { operationId: "op" }, { expectedVersion: 1, operationId: "op", extra: true }]) assert.equal((await fetch(url, { method: "POST", headers, body: JSON.stringify(body) })).status, 400);
       assert.equal((await fetch(url, { method: "POST", headers, body: "{" })).status, 400);
@@ -91,7 +92,7 @@ test("EPIC043 PASS6A control mutation bodies require exactly expectedVersion and
 
 test("EPIC043 PASS6A takeover, release, and resolve retain durable HTTP replay snapshots", async () => {
   const value = fixture(), http = await running(value);
-  const post = (id: string, action: "takeover" | "release" | "resolve", expectedVersion: number, operationId: string, actor = "operator-1", companyId = value.company.id) => fetch(http.path(companyId, id, action), { method: "POST", headers: http.headers(actor), body: JSON.stringify({ expectedVersion, operationId }) });
+  const post = (id: string, action: "takeover" | "release" | "resolve" | "resume", expectedVersion: number, operationId: string, actor = "operator-1", companyId = value.company.id) => fetch(http.path(companyId, id, action), { method: "POST", headers: http.headers(actor), body: JSON.stringify({ expectedVersion, operationId }) });
   try {
     const takeover = await post(value.ids.mutation.id, "takeover", 1, "takeover-first");
     assert.equal(takeover.status, 200);
@@ -130,6 +131,16 @@ test("EPIC043 PASS6A takeover, release, and resolve retain durable HTTP replay s
     assert.equal(resolveReplay.status, 200); assert.deepEqual((await resolveReplay.json() as { control: { controlState: string; controlVersion: number; authorityGeneration: number } }).control, { controlState: "automated", controlledByCurrentActor: false, attentionReason: null, takenAt: null, releasedAt: null, lastOperatorActivityAt: null, resolvedAt: at, controlVersion: 3, authorityGeneration: 3, updatedAt: at });
     assert.equal((await post(value.ids.resolve.id, "resolve", 4, "resolve-wrong", "operator-2")).status, 404);
     assert.equal((await post(value.ids.resolve.id, "resolve", 4, "resolve-foreign", "operator-1", value.other.id)).status, 404);
+
+    assert.equal((await post(value.ids.required.id, "takeover", 1, "resume-take")).status, 200);
+    assert.equal((await post(value.ids.required.id, "release", 2, "resume-release")).status, 200);
+    const resumed = await post(value.ids.required.id, "resume", 3, "resume-op");
+    assert.equal(resumed.status, 200);
+    assert.deepEqual((await resumed.json() as { control: { controlState: string; controlVersion: number; authorityGeneration: number } }).control, { controlState: "automated", controlledByCurrentActor: false, attentionReason: null, takenAt: "2026-08-26T12:00:00.000Z", releasedAt: at, lastOperatorActivityAt: null, resolvedAt: null, controlVersion: 4, authorityGeneration: 4, updatedAt: at });
+    assert.deepEqual({ ...(value.database.prepare("SELECT operation,outcome,resulting_control_state,resulting_version,resulting_authority_generation FROM conversation_control_operations WHERE conversation_id=? AND operation_id='resume-op'").get(value.ids.required.id) as Record<string, unknown>) }, { operation: "resume", outcome: "applied", resulting_control_state: "automated", resulting_version: 4, resulting_authority_generation: 4 });
+    assert.deepEqual({ ...(value.database.prepare("SELECT event_type,control_version,authority_generation FROM conversation_events WHERE conversation_id=? AND related_operation_id='resume-op'").get(value.ids.required.id) as Record<string, unknown>) }, { event_type: "automation_resumed", control_version: 4, authority_generation: 4 });
+    assert.equal((await post(value.ids.required.id, "resume", 3, "resume-op")).status, 200);
+    assert.equal((await post(value.ids.required.id, "resume", 4, "resume-after-automated")).status, 404);
   } finally { await http.close(); }
 });
 

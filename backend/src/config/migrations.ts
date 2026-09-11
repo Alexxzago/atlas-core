@@ -2166,6 +2166,40 @@ const migrations: Migration[] = [
     WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id)
     BEGIN SELECT RAISE(ABORT,'Conversation actor read scope is invalid'); END;
   `);}},
+  { id:71,name:"0071_conversation_resume_operation",checksumSource:"conversation-direct-human-required-resume-operation-v1|preserve-control-operation-ledger-and-events",apply(database):void{database.exec(`
+    DROP TRIGGER conversation_events_scope_insert;
+    DROP TRIGGER conversation_control_operations_scope_insert;
+    DROP TRIGGER conversation_control_operations_no_update;
+    DROP TRIGGER conversation_control_operations_no_delete;
+    CREATE TABLE conversation_control_operations_v2(
+      workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      operation_id TEXT NOT NULL CHECK(length(operation_id) BETWEEN 1 AND 200),actor_user_id TEXT NOT NULL CHECK(length(actor_user_id) BETWEEN 1 AND 128),
+      operation TEXT NOT NULL CHECK(operation IN ('takeover','release','resolve','resume')),
+      request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),expected_version INTEGER NOT NULL CHECK(expected_version > 0),
+      outcome TEXT NOT NULL CHECK(outcome IN ('applied','stale_version','controlled_by_other','not_controller')),result_category TEXT NOT NULL CHECK(result_category IN ('success','conflict','not_found')),
+      resulting_control_state TEXT CHECK(resulting_control_state IS NULL OR resulting_control_state IN ('automated','human_required','human_controlled')),
+      resulting_version INTEGER CHECK(resulting_version IS NULL OR resulting_version > 0),resulting_authority_generation INTEGER CHECK(resulting_authority_generation IS NULL OR resulting_authority_generation > 0),
+      resulting_controller_relation TEXT CHECK(resulting_controller_relation IS NULL OR resulting_controller_relation IN ('current_actor','other_actor','none')),occurred_at TEXT NOT NULL,
+      CHECK((outcome='applied' AND result_category='success') OR (outcome='stale_version' AND result_category='conflict') OR (outcome IN ('controlled_by_other','not_controller') AND result_category='not_found')),
+      PRIMARY KEY(workspace_id,company_id,conversation_id,operation_id),FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    INSERT INTO conversation_control_operations_v2 SELECT * FROM conversation_control_operations;
+    DROP TABLE conversation_control_operations;
+    ALTER TABLE conversation_control_operations_v2 RENAME TO conversation_control_operations;
+    CREATE INDEX idx_conversation_control_operations_conversation ON conversation_control_operations(workspace_id,company_id,conversation_id,occurred_at,operation_id);
+    CREATE TRIGGER conversation_control_operations_scope_insert BEFORE INSERT ON conversation_control_operations
+    WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id)
+    BEGIN SELECT RAISE(ABORT,'Conversation control operation scope is invalid'); END;
+    CREATE TRIGGER conversation_control_operations_no_update BEFORE UPDATE ON conversation_control_operations
+    BEGIN SELECT RAISE(ABORT,'Conversation control operations are append-only'); END;
+    CREATE TRIGGER conversation_control_operations_no_delete BEFORE DELETE ON conversation_control_operations
+    BEGIN SELECT RAISE(ABORT,'Conversation control operations are append-only'); END;
+    CREATE TRIGGER conversation_events_scope_insert BEFORE INSERT ON conversation_events
+    WHEN NOT EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id WHERE c.id=NEW.conversation_id AND c.company_id=NEW.company_id AND co.workspace_id=NEW.workspace_id)
+      OR (NEW.related_message_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM conversation_messages m WHERE m.id=NEW.related_message_id AND m.conversation_id=NEW.conversation_id))
+      OR (NEW.related_operation_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM conversation_control_operations o WHERE o.workspace_id=NEW.workspace_id AND o.company_id=NEW.company_id AND o.conversation_id=NEW.conversation_id AND o.operation_id=NEW.related_operation_id))
+    BEGIN SELECT RAISE(ABORT,'Conversation event scope is invalid'); END;
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

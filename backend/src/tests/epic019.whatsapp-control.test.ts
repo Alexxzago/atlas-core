@@ -104,6 +104,24 @@ test("EPIC-019 initially human-controlled inbound remains manual after concurren
   assert.equal(value.controls.current.resolvedAt, null);
 });
 
+test("EPIC-019 initially human-required inbound remains manual after direct resume", async () => {
+  const value = setup("human_required", async () => { throw new Error("turn must not execute"); });
+  const initial = value.controls.current;
+  let ensures = 0;
+  value.controls.ensureConversationControl = () => ensures++ === 0 ? initial : value.controls.current;
+  value.controls.clearConversationResolution = () => {
+    value.controls.current = control("automated", false);
+    return value.controls.current;
+  };
+
+  await value.service.receive(payload("wamid-resumed"));
+
+  assert.equal(value.added(), 1);
+  assert.equal(value.executions(), 0);
+  assert.equal(value.controls.current.state, "automated");
+  assert.equal(value.controls.current.resolvedAt, null);
+});
+
 test("EPIC-019 duplicate inbound delivery does not execute the turn twice", async () => {
   const value = setup("automated", async (hooks) => { await hooks.afterInbound?.(inbound); return { inbound, outbound: { id: conversationMessageId("cmsg_1123456789abcdef0123456789abcdef"), content: "Answer" }, response: { outcome: "answered", answer: "Answer" } }; });
   await value.service.receive(payload("wamid-duplicate")); await value.service.receive(payload("wamid-duplicate"));

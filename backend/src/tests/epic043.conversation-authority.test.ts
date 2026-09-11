@@ -200,6 +200,15 @@ test("EPIC043 release preserves pending-human semantics and resolve returns auth
   });
 });
 
+test("EPIC043 resume returns authority to Atlas only from human-required", () => {
+  assert.deepEqual(applyConversationAuthorityTransition(required(8, 12), { kind: "resume", actorId: actor1 }), {
+    state: "automated", controllingActorId: null, version: 9, authorityGeneration: 13,
+  });
+  for (const current of [automated(8, 12), controlled(actor1, 8, 12)]) {
+    assert.throws(() => applyConversationAuthorityTransition(current, { kind: "resume", actorId: actor1 }), ConversationAuthorityDomainError);
+  }
+});
+
 test("EPIC043 operator activity changes neither control version nor authority generation", () => {
   const current = controlled(actor1, 11, 17);
 
@@ -225,7 +234,7 @@ test("EPIC043 operator activity changes neither control version nor authority ge
 });
 
 test("EPIC043 uses closed operation outcome and event vocabularies", () => {
-  for (const operation of ["takeover", "release", "resolve"] as const) {
+  for (const operation of ["takeover", "release", "resolve", "resume"] as const) {
     assert.equal(conversationControlOperation(operation), operation);
   }
 
