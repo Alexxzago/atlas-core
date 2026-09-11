@@ -269,7 +269,7 @@ test("aborts obsolete company and workspace feed requests without applying old s
   expect(oldSignal?.aborted).toBe(true);
 });
 
-test("explains that Atlas is paused and offers takeover or direct reactivation", async () => {
+test("explains that attention is active and offers takeover without a resume action", async () => {
   window.localStorage.setItem("atlas.locale", "es");
   const required = { ...item, controlState: "human_required" as const, attentionReason: "automation_failure" as const, messages: [] };
   const fetch = vi.fn((input: string | URL | Request) => {
@@ -281,34 +281,32 @@ test("explains that Atlas is paused and offers takeover or direct reactivation",
   vi.stubGlobal("fetch", fetch);
   render(view());
   fireEvent.click(await screen.findByText("Customer"));
-  expect(await screen.findByText(/Atlas está pausado en esta conversación/)).toBeTruthy();
-  expect(screen.getByText(/Los mensajes nuevos del cliente seguirán llegando a la bandeja/)).toBeTruthy();
-  expect(screen.getByText(/Tomá la conversación para revisarla o reactivá Atlas/)).toBeTruthy();
+  expect(await screen.findByText(/Necesita atención\. Atlas sigue atendiendo automáticamente/)).toBeTruthy();
+  expect(screen.getByText(/Tomá la conversación si necesitás intervenir personalmente/)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Tomar esta conversación" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Reactivar Atlas" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Reactivar Atlas" })).toBeNull();
+  expect(fetch.mock.calls.some(([input]) => /\/(takeover|release|resolve|resume)$/.test(String(input)))).toBe(false);
 });
 
-test("reactivation posts a durable resume operation and updates the selected control", async () => {
-  const required = { ...item, controlState: "human_required" as const, attentionReason: "automation_failure" as const, messages: [] };
-  const resumed = { ...required, controlState: "automated" as const, attentionReason: null, controlVersion: 2, authorityGeneration: 2 };
-  let resumeBody = "", isResumed = false;
+test("releases a controlled conversation once before selecting another conversation", async () => {
+  const controlled = { ...item, controlState: "human_controlled" as const, controlledByCurrentActor: true, messages: [] };
+  const next = { ...item, conversationId: "conversation-next", contactLabel: "Next customer", participant: "Next customer", messages: [] };
+  let releases = 0;
   const fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/feed")) return Promise.resolve(json(feed("tail")));
-    if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([required])));
-    if (url.includes("/resume")) { resumeBody = String(init?.body); isResumed = true; return Promise.resolve(json({ control: resumed })); }
-    if (url.endsWith("/conversation-safe")) return Promise.resolve(json(isResumed ? resumed : required));
+    if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled, next])));
+    if (url.includes("/release")) { releases += 1; return Promise.resolve(json({ control: { ...controlled, controlState: "human_required", controlledByCurrentActor: false } })); }
+    if (url.endsWith("/conversation-safe")) return Promise.resolve(json(controlled));
+    if (url.endsWith("/conversation-next")) return Promise.resolve(json(next));
     return Promise.resolve(json({}));
   });
   vi.stubGlobal("fetch", fetch);
   render(view());
   fireEvent.click(await screen.findByText("Customer"));
-  fireEvent.click(await screen.findByRole("button", { name: "Reactivate Atlas" }));
-  await waitFor(() => expect(resumeBody).not.toBe(""));
-  const resume = JSON.parse(resumeBody) as { expectedVersion: number; operationId: string };
-  expect(resume.expectedVersion).toBe(1);
-  expect(resume.operationId.length).toBeGreaterThan(0);
-  await screen.findByRole("button", { name: "Take over this conversation" });
+  fireEvent.click(await screen.findByText("Next customer"));
+  await screen.findByRole("heading", { name: "Next customer", level: 2 });
+  expect(releases).toBe(1);
 });
 
 test("takeover sends a durable operation id and the current controller can still send", async () => {

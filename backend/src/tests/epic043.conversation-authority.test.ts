@@ -113,7 +113,7 @@ test("EPIC043 reconstructs only valid conversation authority states", () => {
   );
 });
 
-test("EPIC043 handoff changes authority only when leaving automated", () => {
+test("EPIC043 handoff marks attention without changing Atlas authority", () => {
   const fromAutomated = applyConversationAuthorityTransition(
     automated(4, 7),
     { kind: "handoff_requested" },
@@ -123,14 +123,14 @@ test("EPIC043 handoff changes authority only when leaving automated", () => {
     state: "human_required",
     controllingActorId: null,
     version: 5,
-    authorityGeneration: 8,
+    authorityGeneration: 7,
   });
 
   assert.deepEqual(
-    applyConversationAuthorityTransition(required(5, 8), {
+    applyConversationAuthorityTransition(required(5, 7), {
       kind: "handoff_requested",
     }),
-    required(5, 8),
+    required(5, 7),
   );
 
   assert.deepEqual(
