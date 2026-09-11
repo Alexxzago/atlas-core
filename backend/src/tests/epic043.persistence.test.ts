@@ -688,3 +688,17 @@ test("EPIC043 durable assistant finalizer commits once before a later takeover a
     assert.equal(value.firstRepository.findConversationControl(value.context, value.company.id, value.conversation.id)?.state, "human_controlled");
   } finally { value.first.close(); value.second.close(); rmSync(value.directory, { recursive: true, force: true }); }
 });
+
+test("EPIC043 finalizes and authorizes a WhatsApp reply while attention remains human-required", () => {
+  const value = finalizerFixture("human-required");
+  try {
+    value.firstRepository.ensureConversationControl(value.context, value.company.id, value.conversation.id);
+    value.first.prepare("UPDATE conversation_controls SET state='human_required',attention_reason='automation_failure',version=2 WHERE conversation_id=?").run(value.conversation.id);
+    const finalized = value.firstRepository.finalizeAssistantResponse(value.context, value.company.id, value.conversation.id, value.inbound.id, value.assistant.id, value.recordId, 1, "Answer", "reply-human-required", at, value.connectionId);
+    assert.equal(finalized.kind, "finalized");
+    const delivery = new OutboundDeliveryRepository(value.first).leaseReady("human-required-worker", at, "2026-08-26T13:00:00.000Z", 1)[0]!;
+    assert.equal(new OutboundDeliveryRepository(value.first).authorizeLease(delivery.id, "human-required-worker", at), true);
+    assert.equal(new OutboundDeliveryRepository(value.first).beginSend(delivery.id, "human-required-worker", at), true);
+    assert.equal(value.firstRepository.findConversationControl(value.context, value.company.id, value.conversation.id)?.state, "human_required");
+  } finally { value.first.close(); value.second.close(); rmSync(value.directory, { recursive: true, force: true }); }
+});

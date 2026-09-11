@@ -8,6 +8,7 @@ import { InMemoryConversationTurnLock, OperationalConversationTurnInProgressErro
 import { OperationalAssistantRuntime } from "../assistant/services/operationalAssistantRuntime.js";
 import { createDatabase } from "../config/database.js";
 import { ConversationService } from "../conversation/services/conversationService.js";
+import { reconstructConversationControl } from "../conversation/domain/conversationControl.js";
 import { AssistantExecutionRecordRepository } from "../repositories/assistantExecutionRecordRepository.js";
 import { AssistantProfileRepository } from "../repositories/assistantProfileRepository.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
@@ -34,14 +35,14 @@ function setup(published = true) {
   const database = createDatabase(":memory:"), workspaces = new WorkspaceRepository(database), primary = createWorkspaceContext(workspaces.resolveDefault()), secondary = createWorkspaceContext(workspaces.createForSystemUse({ key: "secondary", name: "Secondary" }));
   const companies = new CompanyRepository(database), company = companies.create(primary, { name: "Example", website: "https://example.test", status: "ready" }), other = companies.create(secondary, { name: "Other", website: "https://other.test", status: "ready" });
   if (published) publishKnowledgeFixture(database, primary, company.id, { company: { name: company.name, website: company.website, phone: "", email: "" }, business: { services: ["Sales"], hours: "Always", locations: [] }, faq: [] });
-  const clock = new Clock(), conversationService = new ConversationService(new ConversationRepository(database), clock), conversation = conversationService.open(primary, company.id);
+  const clock = new Clock(), conversationRepository = new ConversationRepository(database), conversationService = new ConversationService(conversationRepository, clock), conversation = conversationService.open(primary, company.id);
   const inbound = conversationService.addParticipant(primary, company.id, conversation.id, { type: "opaque-customer" });
   const outbound = conversationService.addParticipant(primary, company.id, conversation.id, { type: "opaque-responder" });
   const profiles = new AssistantProfileRepository(database), ready = profile(company.id); profiles.create(primary, company.id, ready);
   const execution = new Execution(), records = new AssistantExecutionRecordRepository(database), runtime = new OperationalAssistantRuntime(execution, records, clock);
-  const service = new OperationalConversationTurnService(companies, new CompanyKnowledgeRepository(database), profiles, conversationService, runtime, new InMemoryConversationTurnLock(), "test", 2);
+  const service = new OperationalConversationTurnService(companies, new CompanyKnowledgeRepository(database), profiles, conversationService, runtime, new InMemoryConversationTurnLock(), "test", 2, undefined, undefined, undefined, undefined, conversationRepository);
   const input = (content = "Question") => ({ assistantProfileId: ready.id, inboundParticipantId: inbound.id, outboundParticipantId: outbound.id, content });
-  return { database, primary, secondary, company, other, clock, conversationService, conversation, inbound, outbound, execution, records, service, input };
+  return { database, primary, secondary, company, other, clock, conversationRepository, conversationService, conversation, inbound, outbound, execution, records, service, input };
 }
 
 test("EPIC-016.3 persists inbound, bounded chronological history, execution record, and linked outbound", async () => {
@@ -99,4 +100,19 @@ test("EPIC-016.3 serializes concurrent turns for one conversation in a process",
     await assert.rejects(() => service.execute(primary, company.id, conversation.id, input("Second")), OperationalConversationTurnInProgressError);
     release(); await first;
   } finally { database.close(); }
+});
+
+test("EPIC-016.3 persisted human-required inbound messages continue through runtime and finalization", async () => {
+  const value = setup();
+  try {
+    const authority = value.conversationRepository.ensureConversationControl(value.primary, value.company.id, value.conversation.id)!;
+    value.conversationRepository.updateConversationControl(value.primary, value.company.id, reconstructConversationControl({ ...authority, state: "human_required", attentionReason: "automation_failure", version: authority.version + 1, updatedAt: value.clock.now() }), authority.version);
+    const first = value.conversationService.addMessage(value.primary, value.company.id, value.conversation.id, { senderParticipantId: value.inbound.id, direction: "inbound", content: "First" });
+    const firstResult = await value.service.executePersistedInbound(value.primary, value.company.id, value.conversation.id, { assistantProfileId: value.input().assistantProfileId, outboundParticipantId: value.outbound.id, replyIdempotencyKey: "human-required-first" }, first);
+    const second = value.conversationService.addMessage(value.primary, value.company.id, value.conversation.id, { senderParticipantId: value.inbound.id, direction: "inbound", content: "Second" });
+    const secondResult = await value.service.executePersistedInbound(value.primary, value.company.id, value.conversation.id, { assistantProfileId: value.input().assistantProfileId, outboundParticipantId: value.outbound.id, replyIdempotencyKey: "human-required-second" }, second);
+    assert.deepEqual([firstResult.outbound.content, secondResult.outbound.content, value.execution.request?.message], ["Grounded answer", "Grounded answer", "Second"]);
+    assert.equal((value.database.prepare("SELECT COUNT(*) AS count FROM assistant_execution_records WHERE purpose='operational_execution' AND state='answered'").get() as { count: number }).count, 2);
+    assert.equal(value.conversationRepository.findConversationControl(value.primary, value.company.id, value.conversation.id)?.state, "human_required");
+  } finally { value.database.close(); }
 });

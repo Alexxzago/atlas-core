@@ -14,6 +14,7 @@ import type { ConversationToolMemoryCoordinator } from "../../conversationIntell
 import type { LexicalKnowledgeRetrievalService } from "../../knowledgeV2/services/knowledgeRetrievalService.js";
 import type { SafeConversationAttachmentService } from "../../media/services/safeConversationAttachmentService.js";
 import type { ConversationRepositoryPort } from "../../conversation/application/ports.js";
+import { allowsAutomation } from "../../conversation/domain/conversationAuthority.js";
 
 export class OperationalConversationTurnValidationError extends Error {}
 export class OperationalConversationTurnNotFoundError extends Error {}
@@ -100,7 +101,7 @@ export class OperationalConversationTurnService {
       const knowledge = this.knowledge.loadCurrentVersion(context, scopedCompanyId);
       if (!knowledge) throw new OperationalConversationTurnKnowledgeUnavailableError("Published knowledge is unavailable.");
        const authority = this.controls?.ensureConversationControl(context, scopedCompanyId, conversation.id);
-       if (authority && authority.state !== "automated") throw new OperationalConversationTurnSuppressedError(inbound);
+       if (!allowsAutomation(authority)) throw new OperationalConversationTurnSuppressedError(inbound);
        const semanticInbound = this.semantic?.resolveInbound(context, scopedCompanyId, inbound) ?? inbound;
         const history = historyFor(this.conversations.listMessages(context, scopedCompanyId, conversation.id), this.historyLimit, context, scopedCompanyId, this.semantic);
       if (await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
@@ -143,7 +144,7 @@ export class OperationalConversationTurnService {
       const knowledge = this.knowledge.loadCurrentVersion(context, scopedCompanyId);
       if (!knowledge) throw new OperationalConversationTurnKnowledgeUnavailableError("Published knowledge is unavailable.");
        const authority = this.controls?.ensureConversationControl(context, scopedCompanyId, conversation.id);
-       if ((authority && authority.state !== "automated") || await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
+       if (!allowsAutomation(authority) || await hooks?.beforeRuntime?.(inbound) === false) throw new OperationalConversationTurnSuppressedError(inbound);
        const semanticInbound = this.semantic?.resolveInbound(context, scopedCompanyId, inbound) ?? inbound;
          const intelligenceResult = this.intelligence ? await this.intelligence.apply(context, scopedCompanyId, semanticInbound) : null;
         const memory = intelligenceResult?.state ? conversationWorkingMemory(intelligenceResult.state) : "";
