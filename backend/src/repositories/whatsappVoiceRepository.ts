@@ -847,7 +847,7 @@ export class WhatsAppVoiceRepository implements VoiceRepositoryPort {
       const savedTranscript = transcriptResult.transcript;
       const eligible =
         current.voice_ai_enabled === 1 &&
-        current.control_state === "automated" &&
+         current.control_state !== "human_controlled" &&
         current.authority_generation ===
           current.expected_authority_generation &&
         current.execution_state === "pending" &&
@@ -953,7 +953,7 @@ export class WhatsAppVoiceRepository implements VoiceRepositoryPort {
         return { kind: "lease_lost" };
       }
       const allowed =
-        current.control_state === "automated" &&
+         current.control_state !== "human_controlled" &&
         current.authority_generation ===
           current.expected_authority_generation &&
         current.voice_ai_enabled === 1 &&
@@ -1017,7 +1017,7 @@ export class WhatsAppVoiceRepository implements VoiceRepositoryPort {
         return null;
       }
       const allowed =
-        current.control_state === "automated" &&
+         current.control_state !== "human_controlled" &&
         current.authority_generation ===
           current.expected_authority_generation &&
         current.voice_ai_enabled === 1 &&

@@ -31,6 +31,12 @@ export interface ConversationAuthoritySnapshot {
   readonly authorityGeneration: number;
 }
 
+export function allowsAutomation(
+  authority: Pick<ConversationAuthoritySnapshot, "state"> | null | undefined,
+): boolean {
+  return authority?.state !== "human_controlled";
+}
+
 export type ConversationAuthorityTransition =
   | { readonly kind: "handoff_requested" }
   | { readonly kind: "takeover"; readonly actorId: UserId }

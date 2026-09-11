@@ -202,7 +202,7 @@ export class ConversationRepository implements ConversationRepositoryPort {
       const currentControl = this.db.prepare("SELECT * FROM conversation_controls WHERE conversation_id=?").get(id) as ControlRow;
       const owned = this.db.prepare("SELECT id FROM assistant_execution_records WHERE id=? AND company_id=? AND purpose='operational_execution' AND json_extract(execution_snapshot_json,'$.conversationId')=? AND json_extract(execution_snapshot_json,'$.authorityGeneration')=?").get(executionRecordId, companyId, id, authorityGeneration);
       if (!owned) { this.db.exec("COMMIT"); return Object.freeze({ kind: "execution_not_owned" }); }
-      if (currentControl.state !== "automated" || currentControl.authority_generation !== authorityGeneration) {
+      if (currentControl.state === "human_controlled" || currentControl.authority_generation !== authorityGeneration) {
         const blocked = this.db.prepare("SELECT id FROM conversation_events WHERE workspace_id=? AND company_id=? AND conversation_id=? AND event_type='automation_blocked' AND related_message_id=?").get(context.workspaceId, companyId, id, inboundMessageId);
         if (!blocked) this.db.prepare("INSERT INTO conversation_events(id,workspace_id,company_id,conversation_id,event_type,actor_user_id,control_version,authority_generation,related_message_id,related_operation_id,occurred_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(`cev_${randomUUID().replaceAll("-", "")}`, context.workspaceId, companyId, id, "automation_blocked", null, currentControl.version, currentControl.authority_generation, inboundMessageId, null, occurredAt);
         this.db.exec("COMMIT");
