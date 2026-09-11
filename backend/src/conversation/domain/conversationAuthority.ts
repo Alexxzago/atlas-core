@@ -191,7 +191,7 @@ export function applyConversationAuthorityTransition(
       ...current,
       state: "human_required",
       version: current.version + 1,
-      authorityGeneration: current.authorityGeneration + 1,
+      authorityGeneration: current.authorityGeneration,
     });
   }
 

@@ -94,7 +94,7 @@ export class WhatsAppWebhookService {
         try {
           const current = this.controls?.ensureConversationControl(context, connection.companyId, binding.conversationId);
           this.reopenForInbound(context, connection.companyId, binding.conversationId);
-          if (current && current.state !== "automated") { const completedAt = this.clock.now(); this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", "unsupported", completedAt); this.events.updateState(event.id, "claimed", "completed", completedAt); continue; }
+          if (current?.state === "human_controlled") { const completedAt = this.clock.now(); this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", "unsupported", completedAt); this.events.updateState(event.id, "claimed", "completed", completedAt); continue; }
           const turn = await this.turns.executePersistedInbound(context, connection.companyId, binding.conversationId, { assistantProfileId, outboundParticipantId: assistantParticipantId, replyIdempotencyKey, whatsAppConnectionId: connection.id, whatsAppPhoneNumberId: connection.phoneNumberId }, inbound, { beforeRuntime: () => this.allowsAutomation(context, connection.companyId, binding.conversationId) });
           if (turn.response.outcome === "safe_fallback") this.markHumanRequired(context, connection.companyId, binding.conversationId);
           if (this.outbound) await this.outbound.deliverWhatsAppText(context, connection.companyId, { conversationId: binding.conversationId, conversationMessageId: turn.outbound.id, whatsAppConnectionId: connection.id, recipientWaId });
@@ -154,7 +154,7 @@ export class WhatsAppWebhookService {
     const inbound = captured.inbound;
     let turn: Awaited<ReturnType<OperationalConversationTurnService["executePersistedInbound"]>> | undefined;
     try {
-      if (initialControl && initialControl.state !== "automated") {
+      if (initialControl?.state === "human_controlled") {
         this.reopenForInbound(context, connection.companyId, binding.conversationId);
       } else {
         this.reopenForInbound(context, connection.companyId, binding.conversationId);
@@ -184,7 +184,7 @@ export class WhatsAppWebhookService {
     let inbound: import("../../conversation/domain/conversation.js").ConversationMessage | undefined;
     let turn: Awaited<ReturnType<OperationalConversationTurnService["execute"]>> | undefined;
     try {
-      if (initialControl && initialControl.state !== "automated") { inbound = this.conversations!.addMessage(context, connection.companyId, binding.conversationId, { senderParticipantId: binding.customerParticipantId, direction: "inbound", content: message.text }); this.reopenForInbound(context, connection.companyId, binding.conversationId); }
+      if (initialControl?.state === "human_controlled") { inbound = this.conversations!.addMessage(context, connection.companyId, binding.conversationId, { senderParticipantId: binding.customerParticipantId, direction: "inbound", content: message.text }); this.reopenForInbound(context, connection.companyId, binding.conversationId); }
       else { turn = await this.turns!.execute(context, connection.companyId, binding.conversationId, { assistantProfileId: connection.assistantProfileId, inboundParticipantId: binding.customerParticipantId, outboundParticipantId: binding.assistantParticipantId, content: message.text }, { afterInbound: (created) => { inbound = created; this.reopenForInbound(context, connection.companyId, binding.conversationId); }, beforeRuntime: () => this.allowsAutomation(context, connection.companyId, binding.conversationId) }); inbound = turn.inbound; }
     } catch (error: unknown) { if (error instanceof OperationalConversationTurnSuppressedError) inbound = error.inbound; else { this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events!.updateState(claimed.event.id, "claimed", "failed", this.clock.now()); throw error; } }
     if (!inbound) { this.events!.updateState(claimed.event.id, "claimed", "failed", this.clock.now()); return; }
@@ -205,13 +205,13 @@ export class WhatsAppWebhookService {
     if (!this.controls) return;
     const current = this.controls.findConversationControl(context, companyId, conversationId);
     if (!current || current.state !== "automated") return;
-    const updated = reconstructConversationControl({ ...current, state: "human_required", attentionReason: "automation_failure", version: current.version + 1, authorityGeneration: current.authorityGeneration + 1, updatedAt: this.clock.now() });
+    const updated = reconstructConversationControl({ ...current, state: "human_required", attentionReason: "automation_failure", version: current.version + 1, authorityGeneration: current.authorityGeneration, updatedAt: this.clock.now() });
     this.controls.updateConversationControl(context, companyId, updated, current.version);
   }
 
   private allowsAutomation(context: { workspaceId: number; workspaceKey: string }, companyId: number, conversationId: import("../../conversation/domain/conversation.js").ConversationId): boolean {
     const current = this.controls?.findConversationControl(context, companyId, conversationId);
-    return !current || current.state === "automated";
+    return !current || current.state !== "human_controlled";
   }
 
   private createInboundRecord(connectionId: import("../domain/whatsappConnection.js").WhatsAppConnectionId, conversationMessageId: string, wamid: string, now: string): void {

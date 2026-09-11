@@ -48,10 +48,10 @@ test("EPIC-019 automated inbound executes once, clears resolution, and preserves
   assert.equal(value.executions(), 1); assert.equal(value.added(), 0); assert.equal(value.controls.clearCalls, 1); assert.equal(value.controls.current.state, "automated"); assert.equal(value.controls.current.resolvedAt, null);
 });
 
-test("EPIC-019 human-required inbound persists without runtime and preserves control", async () => {
-  const value = setup("human_required", async () => { throw new Error("must not execute"); });
+test("EPIC-019 human-required inbound executes Atlas normally and preserves attention", async () => {
+  const value = setup("human_required", async (hooks) => { await hooks.afterInbound?.(inbound); assert.equal(await hooks.beforeRuntime?.(inbound), true); return { inbound, outbound: { id: conversationMessageId("cmsg_1123456789abcdef0123456789abcdef"), content: "Answer" }, response: { outcome: "answered", answer: "Answer" } }; });
   await value.service.receive(payload());
-  assert.equal(value.executions(), 0); assert.equal(value.added(), 1); assert.equal(value.controls.current.state, "human_required");
+  assert.equal(value.executions(), 1); assert.equal(value.added(), 0); assert.equal(value.controls.current.state, "human_required");
 });
 
 test("EPIC-019 human-controlled inbound persists without runtime and preserves controller", async () => {
@@ -62,7 +62,12 @@ test("EPIC-019 human-controlled inbound persists without runtime and preserves c
 
 test("EPIC-019 inbound resolution reopen preserves every control state", async () => {
   for (const state of ["human_required", "human_controlled"] as const) {
-    const value = setup(state, async () => { throw new Error("must not execute"); });
+    const value = setup(state, async (hooks) => {
+      if (state === "human_controlled") throw new Error("must not execute");
+      await hooks.afterInbound?.(inbound);
+      assert.equal(await hooks.beforeRuntime?.(inbound), true);
+      return { inbound, outbound: { id: conversationMessageId("cmsg_1123456789abcdef0123456789abcdef"), content: "Answer" }, response: { outcome: "answered", answer: "Answer" } };
+    });
     await value.service.receive(payload(`wamid-${state}`));
     assert.equal(value.controls.current.state, state); assert.equal(value.controls.current.resolvedAt, null); assert.equal(value.controls.current.resolvedBy, null);
   }
@@ -86,13 +91,13 @@ test("EPIC-019 final recheck suppresses runtime after concurrent human takeover"
   assert.equal(value.executions(), 1); assert.equal(value.controls.current.state, "human_controlled");
 });
 
-test("EPIC-019 initially human-controlled inbound remains manual after concurrent return to automated", async () => {
+test("EPIC-019 inbound received under human control is not replayed after release to human-required", async () => {
   const value = setup("human_controlled", async () => { throw new Error("turn must not execute"); });
   const initial = value.controls.current;
   let ensures = 0;
   value.controls.ensureConversationControl = () => ensures++ === 0 ? initial : value.controls.current;
   value.controls.clearConversationResolution = () => {
-    value.controls.current = control("automated", false);
+    value.controls.current = control("human_required", false);
     return value.controls.current;
   };
 
@@ -100,25 +105,7 @@ test("EPIC-019 initially human-controlled inbound remains manual after concurren
 
   assert.equal(value.added(), 1);
   assert.equal(value.executions(), 0);
-  assert.equal(value.controls.current.state, "automated");
-  assert.equal(value.controls.current.resolvedAt, null);
-});
-
-test("EPIC-019 initially human-required inbound remains manual after direct resume", async () => {
-  const value = setup("human_required", async () => { throw new Error("turn must not execute"); });
-  const initial = value.controls.current;
-  let ensures = 0;
-  value.controls.ensureConversationControl = () => ensures++ === 0 ? initial : value.controls.current;
-  value.controls.clearConversationResolution = () => {
-    value.controls.current = control("automated", false);
-    return value.controls.current;
-  };
-
-  await value.service.receive(payload("wamid-resumed"));
-
-  assert.equal(value.added(), 1);
-  assert.equal(value.executions(), 0);
-  assert.equal(value.controls.current.state, "automated");
+  assert.equal(value.controls.current.state, "human_required");
   assert.equal(value.controls.current.resolvedAt, null);
 });
 
