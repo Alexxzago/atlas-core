@@ -67,6 +67,14 @@ test("shows behavior fields without general fields and requires archive confirma
   expect(onTransition).toHaveBeenCalledWith(expect.objectContaining({ id: "assistant-1" }), "archived");
 });
 
+test("keeps operational tabs free of general and behavior summaries", () => {
+  render(<I18nProvider><AssistantProfilesPanel csrf="csrf" workspaceId="workspace-1" workspaceRole={null} capabilities={["company:read"]} companyId={1} companyName={null} companySelected profiles={[{ ...draftProfile, status: "ready" }]} selectedProfile={{ ...draftProfile, status: "ready" }} transientArchivedProfile={null} loading={false} error={false} formMode="closed" submitting={false} transitionTarget={null} activeSection="capabilities" onSelectProfile={() => {}} onOpenCreate={() => {}} onOpenEdit={() => {}} onCloseForm={() => {}} onSubmitForm={() => {}} onTransition={() => {}} onRetry={() => {}}/></I18nProvider>);
+  expect(screen.getByRole("link", { name: "Capabilities" }).getAttribute("aria-current")).toBe("page");
+  expect(screen.queryByText("Assistant role")).toBeNull();
+  expect(screen.queryByText("Response tone")).toBeNull();
+  expect(screen.queryByText("Welcome message")).toBeNull();
+});
+
 test("uses only the confirmed default assignment and disables duplicate default actions", async () => {
   let resolveDefault!: (value: { companyId:number; assistantProfileId:string; version:number; assignedAt:string; updatedAt:string; assignedByActorId:null; source:null }) => void;
   const pending = new Promise<{ companyId:number; assistantProfileId:string; version:number; assignedAt:string; updatedAt:string; assignedByActorId:null; source:null }>((resolve) => { resolveDefault = resolve; });
