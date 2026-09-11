@@ -170,6 +170,7 @@ export interface WebChatConnection {
 export type WhatsAppConnectionStatus = "active" | "inactive";
 export type WhatsAppValidationState = "not_validated" | "valid" | "invalid";
 export type WhatsAppHealthState = "inactive" | "healthy" | "degraded";
+export type WhatsAppCredentialSource = "none" | "manual" | "meta_embedded";
 
 export interface WhatsAppConnection {
   id: string;
@@ -196,6 +197,7 @@ export interface UpdateWhatsAppConnectionInput {
 export interface WhatsAppConnectionOperationalStatus {
   connection: WhatsAppConnection;
   credentialsConfigured: boolean;
+  credentialSource: WhatsAppCredentialSource;
   validationState: WhatsAppValidationState;
   validatedAt: string | null;
   validationFailureCode: string | null;
