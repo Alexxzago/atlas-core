@@ -26,7 +26,7 @@ test("shows WhatsApp operational state and the correct next action", async () =>
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ assistant: { status: "ready", evaluatedAt: null, blockers: [] }, whatsApp: [{ connectionId: "wac_active", status: "active", validationState: "valid", healthState: "healthy" }], voice: { status: "unavailable" } }), { headers: { "content-type": "application/json" } })));
   render(<I18nProvider><ChannelHub companyId={7} workspaceId="wsp" onNavigate={() => {}} /></I18nProvider>);
   expect(await screen.findByText("WhatsApp is active.")).toBeTruthy();
-  expect(screen.getAllByText("Set up WhatsApp").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Continue setup").length).toBeGreaterThan(0);
 });
 
 test("prioritizes attention over active and remains neutral until status is confirmed", async () => {
