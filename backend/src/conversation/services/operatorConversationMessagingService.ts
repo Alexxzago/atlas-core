@@ -15,6 +15,7 @@ export class OperatorConversationMessageNotFoundError extends Error {}
 
 export interface OperatorConversationMessageResult {
   readonly messageId: string;
+  readonly message: { readonly messageId: string; readonly content: string; readonly createdAt: string };
   readonly delivery: { readonly id: string; readonly state: "pending" | "accepted" | "uncertain" };
 }
 
@@ -34,7 +35,7 @@ export class OperatorConversationMessagingService {
     if (persisted.kind === "idempotency_mismatch") throw new OperatorConversationMessageValidationError("Message idempotency key is invalid.");
     if (persisted.kind === "created" && this.intelligence) await this.intelligence.apply(context, companyId, persisted.message);
     const delivery = await this.outbound.deliverWhatsAppText(context, companyId, { conversationId: conversation.id, conversationMessageId: persisted.message.id, whatsAppConnectionId: binding.whatsAppConnectionId, recipientWaId: binding.waId });
-    return Object.freeze({ messageId: persisted.message.id, delivery });
+    return Object.freeze({ messageId: persisted.message.id, message: { messageId: persisted.message.id, content: persisted.message.content, createdAt: persisted.message.createdAt }, delivery });
   }
 
 }
