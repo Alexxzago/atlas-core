@@ -282,6 +282,8 @@ test("explains that attention is active and offers takeover without a resume act
   render(view());
   fireEvent.click(await screen.findByText("Customer"));
   expect(await screen.findByText(/Necesita atención\. Atlas sigue atendiendo automáticamente/)).toBeTruthy();
+  expect(screen.getAllByText("Atendida por Atlas").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Necesita atención").length).toBeGreaterThan(0);
   expect(screen.getByText(/Tomá la conversación si necesitás intervenir personalmente/)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Tomar esta conversación" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Reactivar Atlas" })).toBeNull();
@@ -317,7 +319,7 @@ test("takeover sends a durable operation id and the current controller can still
     messages: [],
   };
   let takeoverBody = "",
-    sent = false,
+    sends = 0,
     taken = false;
   const fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
@@ -333,7 +335,7 @@ test("takeover sends a durable operation id and the current controller can still
       return Promise.resolve(json({ control: controlled }));
     }
     if (url.includes("/messages")) {
-      sent = true;
+      sends += 1;
       return Promise.resolve(
         json({
           messageId: "message",
@@ -366,7 +368,59 @@ test("takeover sends a durable operation id and the current controller can still
     target: { value: "Reply" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
-  await waitFor(() => expect(sent).toBe(true));
+  await waitFor(() => expect(sends).toBe(1));
+  expect((screen.getByRole("textbox", { name: "Your reply" }) as HTMLTextAreaElement).value).toBe("");
+});
+
+test("keeps the loaded conversation and clears the composer when an operator send succeeds but refresh fails", async () => {
+  const controlled = { ...item, controlState: "human_controlled" as const, controlledByCurrentActor: true, messages: [] };
+  let detailCalls = 0, posts = 0;
+  const fetch = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/feed")) return Promise.resolve(json(feed("tail")));
+    if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
+    if (url.endsWith("/messages")) { posts += 1; return Promise.resolve(json({ messageId: "sent", delivery: { id: "delivery", state: "pending" } })); }
+    if (url.endsWith("/conversation-safe")) { detailCalls += 1; return detailCalls === 1 ? Promise.resolve(json(controlled)) : Promise.resolve(json({}, 500)); }
+    return Promise.resolve(json({}));
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(view("workspace", 1, ["company:read", "conversation:manage", "conversation:message:send"]));
+  fireEvent.click(await screen.findByText("Customer"));
+  const composer = await screen.findByRole("textbox", { name: "Your reply" });
+  fireEvent.change(composer, { target: { value: "Sent once" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
+  await screen.findByText("We could not refresh new messages. Showing the last confirmed conversation.");
+  expect((screen.getByRole("textbox", { name: "Your reply" }) as HTMLTextAreaElement).value).toBe("");
+  expect(screen.getByRole("heading", { name: "Customer", level: 2 })).toBeTruthy();
+  expect(posts).toBe(1);
+});
+
+test("follows new timeline messages only while the operator remains at the bottom", async () => {
+  vi.useFakeTimers();
+  const first = { ...item, messages: [{ messageId: "one", senderRole: "customer" as const, deliveryCategory: "received" as const, content: "First", createdAt: "2026-01-01T00:00:00Z", delivery: null }] };
+  const second = { ...first, messages: [...first.messages, { messageId: "two", senderRole: "assistant" as const, deliveryCategory: "sent" as const, content: "Second", createdAt: "2026-01-01T00:00:01Z", delivery: null }] };
+  let feeds = 0, details = 0;
+  const fetch = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/feed")) return Promise.resolve(json(feeds++ === 0 ? feed("tail") : feed("next", [{ eventId: "message", type: "assistant_message_created", conversationId: item.conversationId, occurredAt: "2026-01-01T00:00:01Z", controlVersion: 1, authorityGeneration: 1, relatedMessageId: "two" }] )));
+    if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([item])));
+    if (url.endsWith("/conversation-safe")) return Promise.resolve(json(details++ === 0 ? first : second));
+    return Promise.resolve(json({}));
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(view());
+  await flush();
+  fireEvent.click(screen.getByText("Customer"));
+  await flush();
+  const timeline = screen.getByRole("list", { name: "Messages" });
+  Object.defineProperties(timeline, { scrollHeight: { configurable: true, value: 400 }, clientHeight: { configurable: true, value: 100 } });
+  (timeline as HTMLOListElement).scrollTop = 0;
+  fireEvent.scroll(timeline);
+  await act(async () => { await vi.advanceTimersByTimeAsync(3_000); await Promise.resolve(); await Promise.resolve(); });
+  expect(screen.getByText("New messages")).toBeTruthy();
+  expect((timeline as HTMLOListElement).scrollTop).toBe(0);
+  fireEvent.click(screen.getByRole("button", { name: "New messages" }));
+  expect((timeline as HTMLOListElement).scrollTop).toBe(400);
 });
 
 test("uses stable operation ids for retries, new ids for new actions, and hides controller actions for another actor", async () => {
