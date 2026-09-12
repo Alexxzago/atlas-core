@@ -339,6 +339,7 @@ test("takeover sends a durable operation id and the current controller can still
       return Promise.resolve(
         json({
           messageId: "message",
+          message: { messageId: "message", content: "Reply", createdAt: "2026-01-01T00:00:01Z" },
           delivery: { id: "delivery", state: "pending" },
         }),
       );
@@ -380,7 +381,7 @@ test("keeps the loaded conversation and clears the composer when an operator sen
     const url = String(input);
     if (url.includes("/feed")) return Promise.resolve(json(feed("tail")));
     if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
-    if (url.endsWith("/messages")) { posts += 1; return Promise.resolve(json({ messageId: "sent", delivery: { id: "delivery", state: "pending" } })); }
+    if (url.endsWith("/messages")) { posts += 1; return Promise.resolve(json({ messageId: "sent", message: { messageId: "sent", content: "Sent once", createdAt: "2026-01-01T00:00:01Z" }, delivery: { id: "delivery", state: "pending" } })); }
     if (url.endsWith("/conversation-safe")) { detailCalls += 1; return detailCalls === 1 ? Promise.resolve(json(controlled)) : Promise.resolve(json({}, 500)); }
     return Promise.resolve(json({}));
   });
@@ -432,7 +433,7 @@ test("preserves a sent conversation when the later feed refresh cannot load deta
     const url = String(input);
     if (url.includes("/feed")) return Promise.resolve(json(feeds++ === 0 ? feed("tail") : feed("next", [{ eventId: "later", type: "operator_message_created", conversationId: item.conversationId, occurredAt: "2026-01-01T00:00:01Z", controlVersion: 1, authorityGeneration: 1, relatedMessageId: "sent" }] )));
     if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
-    if (url.endsWith("/messages")) { posts += 1; return Promise.resolve(json({ messageId: "sent", delivery: { id: "delivery", state: "pending" } })); }
+    if (url.endsWith("/messages")) { posts += 1; return Promise.resolve(json({ messageId: "sent", message: { messageId: "sent", content: "Sent", createdAt: "2026-01-01T00:00:01Z" }, delivery: { id: "delivery", state: "pending" } })); }
     if (url.endsWith("/conversation-safe")) return Promise.resolve(json(details++ < 2 ? controlled : {},  details < 3 ? 200 : 500));
     return Promise.resolve(json({}));
   });
@@ -494,7 +495,7 @@ test("sends only plain Enter and ignores Shift, IME, blank, and repeated Enter",
   fireEvent.keyDown(composer, { key: "Enter" });
   fireEvent.keyDown(composer, { key: "Enter" });
   expect(posts).toBe(1);
-  resolvePost(json({ messageId: "sent", delivery: { id: "delivery", state: "pending" } }));
+  resolvePost(json({ messageId: "sent", message: { messageId: "sent", content: "Send once", createdAt: "2026-01-01T00:00:01Z" }, delivery: { id: "delivery", state: "pending" } }));
   await flush();
   expect((screen.getByRole("textbox", { name: "Your reply" }) as HTMLTextAreaElement).value).toBe("");
 });
@@ -527,6 +528,76 @@ test("keeps the DOM composer empty and refreshes one optimistic delivery from pe
   expect(screen.getByText("Delivered")).toBeTruthy();
   expect(screen.getAllByText("hola")).toHaveLength(1);
   expect(posts).toBe(1);
+});
+
+test("clears immediately on Enter without making authority controls busy, then retains the confirmed pending message", async () => {
+  const controlled = { ...item, controlState: "human_controlled" as const, controlledByCurrentActor: true, messages: [] };
+  let posts = 0, resolvePost!: (response: Response) => void;
+  const fetch = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/feed")) return Promise.resolve(json(feed("tail")));
+    if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
+    if (url.endsWith("/messages")) { posts += 1; return new Promise<Response>((resolve) => { resolvePost = resolve; }); }
+    return Promise.resolve(json(controlled));
+  });
+  vi.stubGlobal("fetch", fetch);
+  const rendered = render(view("workspace", 1, ["company:read", "conversation:manage", "conversation:message:send"]));
+  fireEvent.click(await screen.findByText("Customer"));
+  const composer = await screen.findByRole("textbox", { name: "Your reply" });
+  fireEvent.change(composer, { target: { value: "hola" } });
+  fireEvent.keyDown(composer, { key: "Enter" });
+  expect(posts).toBe(1);
+  expect((composer as HTMLTextAreaElement).value).toBe("");
+  expect(screen.getByRole("button", { name: "Sending…" })).toHaveProperty("disabled", true);
+  expect(screen.getByRole("button", { name: "Leave pending for follow-up" })).toHaveProperty("disabled", false);
+  expect(screen.getByRole("button", { name: "Return this conversation to Atlas" })).toHaveProperty("disabled", false);
+  expect(rendered.container.querySelector(".conversation-workspace")?.getAttribute("aria-busy")).not.toBe("true");
+  resolvePost(json({ messageId: "sent", message: { messageId: "sent", content: "hola", createdAt: "2026-01-01T00:00:01Z" }, delivery: { id: "delivery", state: "pending" } }));
+  await screen.findByText("Pending");
+  expect((composer as HTMLTextAreaElement).value).toBe("");
+  expect(posts).toBe(1);
+});
+
+test("clears immediately on the send button and restores a failed draft only when unchanged", async () => {
+  const controlled = { ...item, controlState: "human_controlled" as const, controlledByCurrentActor: true, messages: [] };
+  let rejectPost!: (reason: unknown) => void;
+  const fetch = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/feed")) return Promise.resolve(json(feed("tail")));
+    if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
+    if (url.endsWith("/messages")) return new Promise<Response>((_resolve, reject) => { rejectPost = reject; });
+    return Promise.resolve(json(controlled));
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(view("workspace", 1, ["company:read", "conversation:manage", "conversation:message:send"]));
+  fireEvent.click(await screen.findByText("Customer"));
+  const composer = await screen.findByRole("textbox", { name: "Your reply" });
+  fireEvent.change(composer, { target: { value: "hola" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
+  expect((composer as HTMLTextAreaElement).value).toBe("");
+  rejectPost(new TypeError("offline"));
+  await waitFor(() => expect((composer as HTMLTextAreaElement).value).toBe("hola"));
+});
+
+test("does not overwrite a newer draft when a pending send fails", async () => {
+  const controlled = { ...item, controlState: "human_controlled" as const, controlledByCurrentActor: true, messages: [] };
+  let rejectPost!: (reason: unknown) => void;
+  const fetch = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/feed")) return Promise.resolve(json(feed("tail")));
+    if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
+    if (url.endsWith("/messages")) return new Promise<Response>((_resolve, reject) => { rejectPost = reject; });
+    return Promise.resolve(json(controlled));
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(view("workspace", 1, ["company:read", "conversation:manage", "conversation:message:send"]));
+  fireEvent.click(await screen.findByText("Customer"));
+  const composer = await screen.findByRole("textbox", { name: "Your reply" });
+  fireEvent.change(composer, { target: { value: "hola" } });
+  fireEvent.keyDown(composer, { key: "Enter" });
+  fireEvent.change(composer, { target: { value: "nuevo" } });
+  rejectPost(new TypeError("offline"));
+  await waitFor(() => expect((composer as HTMLTextAreaElement).value).toBe("nuevo"));
 });
 
 test("uses stable operation ids for retries, new ids for new actions, and hides controller actions for another actor", async () => {
