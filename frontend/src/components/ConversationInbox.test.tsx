@@ -499,6 +499,36 @@ test("sends only plain Enter and ignores Shift, IME, blank, and repeated Enter",
   expect((screen.getByRole("textbox", { name: "Your reply" }) as HTMLTextAreaElement).value).toBe("");
 });
 
+test("keeps the DOM composer empty and refreshes one optimistic delivery from pending to delivered", async () => {
+  vi.useFakeTimers();
+  const controlled = { ...item, controlState: "human_controlled" as const, controlledByCurrentActor: true, messages: [] };
+  const delivered = { ...controlled, messages: [{ messageId: "sent", senderRole: "operator" as const, deliveryCategory: "sent" as const, content: "hola", createdAt: "2026-01-01T00:00:01Z", delivery: { state: "delivered" as const, updatedAt: "2026-01-01T00:00:02Z", safeErrorCategory: null } }] };
+  let feeds = 0, details = 0, posts = 0;
+  const fetch = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/feed")) return Promise.resolve(json(feeds++ === 0 ? feed("tail") : feed("next", [{ eventId: "delivery", type: "delivery_state_changed", conversationId: item.conversationId, occurredAt: "2026-01-01T00:00:02Z", controlVersion: 1, authorityGeneration: 1, relatedMessageId: "sent" }] )));
+    if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
+    if (url.endsWith("/messages")) { posts += 1; return Promise.resolve(json({ messageId: "sent", message: { messageId: "sent", content: "hola", createdAt: "2026-01-01T00:00:01Z" }, delivery: { id: "delivery", state: "pending" } })); }
+    if (url.endsWith("/conversation-safe")) return Promise.resolve(json(details++ < 2 ? controlled : delivered));
+    return Promise.resolve(json({}));
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(view("workspace", 1, ["company:read", "conversation:manage", "conversation:message:send"]));
+  await flush();
+  fireEvent.click(screen.getByText("Customer"));
+  await flush();
+  const composer = screen.getByRole("textbox", { name: "Your reply" });
+  fireEvent.change(composer, { target: { value: "hola" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
+  await flush();
+  expect(screen.getByText("Pending")).toBeTruthy();
+  expect((screen.getByRole("textbox", { name: "Your reply" }) as HTMLTextAreaElement).value).toBe("");
+  await act(async () => { await vi.advanceTimersByTimeAsync(3_000); await Promise.resolve(); await Promise.resolve(); });
+  expect(screen.getByText("Delivered")).toBeTruthy();
+  expect(screen.getAllByText("hola")).toHaveLength(1);
+  expect(posts).toBe(1);
+});
+
 test("uses stable operation ids for retries, new ids for new actions, and hides controller actions for another actor", async () => {
   const controlled = {
     ...item,

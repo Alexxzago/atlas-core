@@ -59,7 +59,7 @@ export interface ConversationInboxFilters { controlState?: ConversationControlSt
 export interface ConversationControlResponse { control: Pick<ConversationInboxItem, "controlState" | "controlledByCurrentActor" | "attentionReason" | "takenAt" | "releasedAt" | "lastOperatorActivityAt" | "resolvedAt" | "controlVersion" | "updatedAt">; outcome?: "resolved"; }
 export interface ConversationFeedEvent { eventId: string; type: string; conversationId: string; occurredAt: string; controlVersion: number | null; authorityGeneration: number | null; relatedMessageId: string | null; }
 export interface ConversationFeedResponse { events: ConversationFeedEvent[]; nextCursor: string; hasMore: boolean; resyncRequired: boolean; }
-export interface OperatorConversationMessageResult { messageId: string; delivery: { id: string; state: "pending" | "accepted" | "uncertain" }; }
+export interface OperatorConversationMessageResult { messageId: string; message: { messageId: string; content: string; createdAt: string }; delivery: { id: string; state: "pending" | "accepted" | "uncertain" }; }
 
 export type KnowledgeSourceKind="manual_text"|"public_url"|"pdf";
 export interface KnowledgeRevision { id:string;sourceId:string;revisionNumber:number;status:"pending"|"ready"|"failed";mediaType:string;normalizedText:string|null;extractedKnowledge:{services:string[];hours:string;locations:string[];faq:Array<{question:string;answer:string}>}|null;failureCode:string|null;createdAt:string;completedAt:string|null; }
