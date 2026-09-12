@@ -2,16 +2,21 @@ import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import express from "express";
+import { createOperatorConversationMessageController } from "../controllers/operatorConversationMessagingController.js";
+import { OperatorConversationMessagingService } from "../conversation/services/operatorConversationMessagingService.js";
 import { configureProductionConversationMessageController, createAuthorizedCompaniesRouter } from "../routes/authorizedCompanies.js";
 
 test("EPIC-019 operator message endpoint enforces authorized mutation controls and exposes only the safe DTO", async () => {
-  let sends = 0; const delivered = new Set<string>();
-  configureProductionConversationMessageController(() => (req, res) => {
-    const input = req.body as { content?: unknown; idempotencyKey?: unknown };
-    if (typeof input.content !== "string" || !input.content.trim() || typeof input.idempotencyKey !== "string" || !input.idempotencyKey.trim()) { res.status(400).json({ error: "Message is invalid." }); return; }
-    if (!delivered.has(input.idempotencyKey)) { delivered.add(input.idempotencyKey); sends += 1; }
-    res.status(201).json({ messageId: "cmsg_0123456789abcdef0123456789abcdef", delivery: { id: "odl_0123456789abcdef0123456789abcdef", state: "accepted" } });
-  });
+  let sends = 0; const persisted = new Map<string, { id: string; content: string; createdAt: string }>();
+  const service = new OperatorConversationMessagingService(
+    { validateOpen: () => ({ id: "cnv_0123456789abcdef0123456789abcdef" }) } as never,
+    { persistOperatorMessage: (_context: unknown, _company: unknown, _conversation: unknown, _actor: unknown, content: string, key: string) => { const replay = persisted.get(key); if (replay) return { kind: "replayed", message: replay }; sends += 1; const message = { id: "cmsg_0123456789abcdef0123456789abcdef", content, createdAt: "2026-01-01T00:00:01.000Z" }; persisted.set(key, message); return { kind: "created", message }; } } as never,
+    {} as never,
+    { findBindingByConversation: () => ({ whatsAppConnectionId: "wac_0123456789abcdef0123456789abcdef", waId: "15551234567" }) } as never,
+    { deliverWhatsAppText: async () => ({ id: "odl_0123456789abcdef0123456789abcdef", state: "accepted" as const }) } as never,
+    { now: () => "2026-01-01T00:00:00.000Z" },
+  );
+  configureProductionConversationMessageController((context, actor) => createOperatorConversationMessageController(service, context, actor));
   const app = express(); app.use(express.json());
   app.use("/workspaces", createAuthorizedCompaniesRouter({
     authentication: { cookieName: () => "atlas", current: (raw: string) => raw === "valid" ? { userId: "operator" } : null, validateCsrf: (_raw: string, csrf: string) => csrf === "csrf" } as never,
@@ -30,7 +35,7 @@ test("EPIC-019 operator message endpoint enforces authorized mutation controls a
     assert.equal((await fetch(path, { method: "POST", headers: { ...headers, origin: "https://foreign.test" }, body: JSON.stringify({ content: "Hello", idempotencyKey: "one" }) })).status, 404);
     assert.equal((await fetch(path, { method: "POST", headers, body: JSON.stringify({ content: "", idempotencyKey: "one" }) })).status, 400);
     const first = await fetch(path, { method: "POST", headers, body: JSON.stringify({ content: "Hello", idempotencyKey: "one" }) });
-    assert.equal(first.status, 201); assert.deepEqual(await first.json(), { messageId: "cmsg_0123456789abcdef0123456789abcdef", delivery: { id: "odl_0123456789abcdef0123456789abcdef", state: "accepted" } });
+    assert.equal(first.status, 201); assert.deepEqual(await first.json(), { messageId: "cmsg_0123456789abcdef0123456789abcdef", message: { messageId: "cmsg_0123456789abcdef0123456789abcdef", content: "Hello", createdAt: "2026-01-01T00:00:01.000Z" }, delivery: { id: "odl_0123456789abcdef0123456789abcdef", state: "accepted" } });
     const duplicate = await fetch(path, { method: "POST", headers, body: JSON.stringify({ content: "Hello", idempotencyKey: "one" }) }); assert.equal(duplicate.status, 201); assert.equal(sends, 1);
   } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
 });
