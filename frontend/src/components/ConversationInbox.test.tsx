@@ -358,6 +358,7 @@ test("takeover sends a durable operation id and the current controller can still
     await screen.findByRole("button", { name: "Take over this conversation" }),
   );
   await screen.findByRole("textbox", { name: "Your reply" });
+  expect(screen.getAllByText("Handled by you")).toHaveLength(2);
   const takeover = JSON.parse(takeoverBody) as {
     expectedVersion: number;
     operationId: string;
@@ -423,6 +424,81 @@ test("follows new timeline messages only while the operator remains at the botto
   expect((timeline as HTMLOListElement).scrollTop).toBe(400);
 });
 
+test("preserves a sent conversation when the later feed refresh cannot load detail", async () => {
+  vi.useFakeTimers();
+  const controlled = { ...item, controlState: "human_controlled" as const, controlledByCurrentActor: true, messages: [{ messageId: "before", senderRole: "customer" as const, deliveryCategory: "received" as const, content: "Before", createdAt: "2026-01-01T00:00:00Z", delivery: null }] };
+  let feeds = 0, details = 0, posts = 0;
+  const fetch = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/feed")) return Promise.resolve(json(feeds++ === 0 ? feed("tail") : feed("next", [{ eventId: "later", type: "operator_message_created", conversationId: item.conversationId, occurredAt: "2026-01-01T00:00:01Z", controlVersion: 1, authorityGeneration: 1, relatedMessageId: "sent" }] )));
+    if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
+    if (url.endsWith("/messages")) { posts += 1; return Promise.resolve(json({ messageId: "sent", delivery: { id: "delivery", state: "pending" } })); }
+    if (url.endsWith("/conversation-safe")) return Promise.resolve(json(details++ < 2 ? controlled : {},  details < 3 ? 200 : 500));
+    return Promise.resolve(json({}));
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(view("workspace", 1, ["company:read", "conversation:manage", "conversation:message:send"]));
+  await flush();
+  fireEvent.click(screen.getByText("Customer"));
+  await flush();
+  fireEvent.change(screen.getByRole("textbox", { name: "Your reply" }), { target: { value: "Sent" } });
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Your reply" }), { key: "Enter" });
+  await flush();
+  expect(posts).toBe(1);
+  expect((screen.getByRole("textbox", { name: "Your reply" }) as HTMLTextAreaElement).value).toBe("");
+  await act(async () => { await vi.advanceTimersByTimeAsync(3_000); await Promise.resolve(); await Promise.resolve(); });
+  expect(screen.getByText("Before")).toBeTruthy();
+  expect(screen.getByText("We could not refresh new messages. Showing the last confirmed conversation.")).toBeTruthy();
+  expect(posts).toBe(1);
+});
+
+test("projects release authority into both row and detail before a stale refresh", async () => {
+  const controlled = { ...item, controlState: "human_controlled" as const, controlledByCurrentActor: true, messages: [] };
+  const released = { ...controlled, controlState: "human_required" as const, controlledByCurrentActor: false };
+  const fetch = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/feed")) return Promise.resolve(json(feed("tail")));
+    if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
+    if (url.includes("/release")) return Promise.resolve(json({ control: released }));
+    return Promise.resolve(json(controlled));
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(view());
+  fireEvent.click(await screen.findByText("Customer"));
+  fireEvent.click(await screen.findByRole("button", { name: "Leave pending for follow-up" }));
+  await screen.findByText("Needs attention");
+  expect(screen.getAllByText("Handled by Atlas").length).toBeGreaterThanOrEqual(2);
+  expect(screen.getAllByText("Needs attention").length).toBeGreaterThanOrEqual(2);
+});
+
+test("sends only plain Enter and ignores Shift, IME, blank, and repeated Enter", async () => {
+  const controlled = { ...item, controlState: "human_controlled" as const, controlledByCurrentActor: true, messages: [] };
+  let posts = 0, resolvePost!: (response: Response) => void;
+  const fetch = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/feed")) return Promise.resolve(json(feed("tail")));
+    if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
+    if (url.endsWith("/messages")) { posts += 1; return new Promise<Response>((resolve) => { resolvePost = resolve; }); }
+    return Promise.resolve(json(controlled));
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(view("workspace", 1, ["company:read", "conversation:manage", "conversation:message:send"]));
+  fireEvent.click(await screen.findByText("Customer"));
+  const composer = await screen.findByRole("textbox", { name: "Your reply" });
+  fireEvent.keyDown(composer, { key: "Enter" });
+  fireEvent.keyDown(composer, { key: "Enter", isComposing: true });
+  fireEvent.change(composer, { target: { value: "Line one\n" } });
+  fireEvent.keyDown(composer, { key: "Enter", shiftKey: true });
+  expect(posts).toBe(0);
+  fireEvent.change(composer, { target: { value: "Send once" } });
+  fireEvent.keyDown(composer, { key: "Enter" });
+  fireEvent.keyDown(composer, { key: "Enter" });
+  expect(posts).toBe(1);
+  resolvePost(json({ messageId: "sent", delivery: { id: "delivery", state: "pending" } }));
+  await flush();
+  expect((screen.getByRole("textbox", { name: "Your reply" }) as HTMLTextAreaElement).value).toBe("");
+});
+
 test("uses stable operation ids for retries, new ids for new actions, and hides controller actions for another actor", async () => {
   const controlled = {
     ...item,
@@ -459,7 +535,7 @@ test("uses stable operation ids for retries, new ids for new actions, and hides 
   fireEvent.click(
     screen.getByRole("button", { name: "Return this conversation to Atlas" }),
   );
-  await screen.findByText("We could not load this conversation.");
+  await screen.findByText("We could not refresh new messages. Showing the last confirmed conversation.");
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   await screen.findByRole("button", {
     name: "Return this conversation to Atlas",
