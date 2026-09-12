@@ -374,7 +374,7 @@ test("takeover sends a durable operation id and the current controller can still
   expect((screen.getByRole("textbox", { name: "Your reply" }) as HTMLTextAreaElement).value).toBe("");
 });
 
-test("keeps the loaded conversation and clears the composer when an operator send succeeds but refresh fails", async () => {
+test("keeps the loaded conversation and clears the composer when an operator send succeeds", async () => {
   const controlled = { ...item, controlState: "human_controlled" as const, controlledByCurrentActor: true, messages: [] };
   let detailCalls = 0, posts = 0;
   const fetch = vi.fn((input: string | URL | Request) => {
@@ -391,7 +391,6 @@ test("keeps the loaded conversation and clears the composer when an operator sen
   const composer = await screen.findByRole("textbox", { name: "Your reply" });
   fireEvent.change(composer, { target: { value: "Sent once" } });
   fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
-  await screen.findByText("We could not refresh new messages. Showing the last confirmed conversation.");
   expect((screen.getByRole("textbox", { name: "Your reply" }) as HTMLTextAreaElement).value).toBe("");
   expect(screen.getByRole("heading", { name: "Customer", level: 2 })).toBeTruthy();
   expect(posts).toBe(1);
@@ -434,7 +433,7 @@ test("preserves a sent conversation when the later feed refresh cannot load deta
     if (url.includes("/feed")) return Promise.resolve(json(feeds++ === 0 ? feed("tail") : feed("next", [{ eventId: "later", type: "operator_message_created", conversationId: item.conversationId, occurredAt: "2026-01-01T00:00:01Z", controlVersion: 1, authorityGeneration: 1, relatedMessageId: "sent" }] )));
     if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
     if (url.endsWith("/messages")) { posts += 1; return Promise.resolve(json({ messageId: "sent", message: { messageId: "sent", content: "Sent", createdAt: "2026-01-01T00:00:01Z" }, delivery: { id: "delivery", state: "pending" } })); }
-    if (url.endsWith("/conversation-safe")) return Promise.resolve(json(details++ < 2 ? controlled : {},  details < 3 ? 200 : 500));
+    if (url.endsWith("/conversation-safe")) return Promise.resolve(json(details++ < 1 ? controlled : {}, details < 2 ? 200 : 500));
     return Promise.resolve(json({}));
   });
   vi.stubGlobal("fetch", fetch);
@@ -449,7 +448,10 @@ test("preserves a sent conversation when the later feed refresh cannot load deta
   expect((screen.getByRole("textbox", { name: "Your reply" }) as HTMLTextAreaElement).value).toBe("");
   await act(async () => { await vi.advanceTimersByTimeAsync(3_000); await Promise.resolve(); await Promise.resolve(); });
   expect(screen.getByText("Before")).toBeTruthy();
-  expect(screen.getByText("We could not refresh new messages. Showing the last confirmed conversation.")).toBeTruthy();
+  expect(screen.queryByText("We could not refresh new messages. Showing the last confirmed conversation.")).toBeNull();
+  expect((screen.getByRole("textbox", { name: "Your reply" }) as HTMLTextAreaElement).value).toBe("");
+  expect(screen.getByRole("button", { name: "Return this conversation to Atlas" })).toHaveProperty("disabled", false);
+  expect(screen.getByRole("button", { name: "Leave pending for follow-up" })).toHaveProperty("disabled", false);
   expect(posts).toBe(1);
 });
 
@@ -510,7 +512,7 @@ test("keeps the DOM composer empty and refreshes one optimistic delivery from pe
     if (url.includes("/feed")) return Promise.resolve(json(feeds++ === 0 ? feed("tail") : feed("next", [{ eventId: "delivery", type: "delivery_state_changed", conversationId: item.conversationId, occurredAt: "2026-01-01T00:00:02Z", controlVersion: 1, authorityGeneration: 1, relatedMessageId: "sent" }] )));
     if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
     if (url.endsWith("/messages")) { posts += 1; return Promise.resolve(json({ messageId: "sent", message: { messageId: "sent", content: "hola", createdAt: "2026-01-01T00:00:01Z" }, delivery: { id: "delivery", state: "pending" } })); }
-    if (url.endsWith("/conversation-safe")) return Promise.resolve(json(details++ < 2 ? controlled : delivered));
+    if (url.endsWith("/conversation-safe")) return Promise.resolve(json(details++ < 1 ? controlled : delivered));
     return Promise.resolve(json({}));
   });
   vi.stubGlobal("fetch", fetch);
@@ -528,6 +530,42 @@ test("keeps the DOM composer empty and refreshes one optimistic delivery from pe
   expect(screen.getByText("Delivered")).toBeTruthy();
   expect(screen.getAllByText("hola")).toHaveLength(1);
   expect(posts).toBe(1);
+});
+
+test("uses the real API parser without resurrecting a successful draft and silently reconciles delivery", async () => {
+  vi.useFakeTimers();
+  const controlled = { ...item, controlState: "human_controlled" as const, controlledByCurrentActor: true, messages: [] };
+  const delivered = { ...controlled, messages: [{ messageId: "sent", senderRole: "operator" as const, deliveryCategory: "sent" as const, content: "hola", createdAt: "2026-01-01T00:00:01Z", delivery: { state: "delivered" as const, updatedAt: "2026-01-01T00:00:02Z", safeErrorCategory: null } }] };
+  let feeds = 0, details = 0, posts = 0, resolvePost!: (response: Response) => void;
+  const fetch = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/feed")) return Promise.resolve(json(feeds++ === 0 ? feed("tail") : feed("next", [{ eventId: "delivery", type: "delivery_state_changed", conversationId: item.conversationId, occurredAt: "2026-01-01T00:00:02Z", controlVersion: 1, authorityGeneration: 1, relatedMessageId: "sent" }] )));
+    if (url.endsWith("/conversations")) return Promise.resolve(json(inbox([controlled])));
+    if (url.endsWith("/messages")) { posts += 1; return new Promise<Response>((resolve) => { resolvePost = resolve; }); }
+    if (url.endsWith("/conversation-safe")) return Promise.resolve(json(details++ === 0 ? controlled : delivered));
+    return Promise.resolve(json({}));
+  });
+  vi.stubGlobal("fetch", fetch);
+  const rendered = render(view("workspace", 1, ["company:read", "conversation:manage", "conversation:message:send"]));
+  await flush();
+  fireEvent.click(screen.getByText("Customer"));
+  await flush();
+  const composer = screen.getByRole("textbox", { name: "Your reply" });
+  fireEvent.change(composer, { target: { value: "hola" } });
+  fireEvent.keyDown(composer, { key: "Enter" });
+  expect(posts).toBe(1);
+  expect((composer as HTMLTextAreaElement).value).toBe("");
+  expect(screen.getByRole("button", { name: "Return this conversation to Atlas" })).toHaveProperty("disabled", false);
+  resolvePost(json({ messageId: "sent", message: { messageId: "sent", content: "hola", createdAt: "2026-01-01T00:00:01Z" }, delivery: { id: "delivery", state: "pending" } }));
+  await flush();
+  expect((composer as HTMLTextAreaElement).value).toBe("");
+  expect(details).toBe(1);
+  expect(rendered.container.querySelector(".conversation-workspace")?.getAttribute("aria-busy")).not.toBe("true");
+  await act(async () => { await vi.advanceTimersByTimeAsync(3_000); await Promise.resolve(); await Promise.resolve(); });
+  expect(screen.getByText("Delivered")).toBeTruthy();
+  expect(screen.getAllByText("hola")).toHaveLength(1);
+  expect((composer as HTMLTextAreaElement).value).toBe("");
+  expect(screen.getByRole("button", { name: "Return this conversation to Atlas" })).toHaveProperty("disabled", false);
 });
 
 test("clears immediately on Enter without making authority controls busy, then retains the confirmed pending message", async () => {
@@ -558,7 +596,7 @@ test("clears immediately on Enter without making authority controls busy, then r
   expect(posts).toBe(1);
 });
 
-test("clears immediately on the send button and restores a failed draft only when unchanged", async () => {
+test("keeps an ambiguous failed draft out of the composer until explicitly recovered", async () => {
   const controlled = { ...item, controlState: "human_controlled" as const, controlledByCurrentActor: true, messages: [] };
   let rejectPost!: (reason: unknown) => void;
   const fetch = vi.fn((input: string | URL | Request) => {
@@ -576,7 +614,11 @@ test("clears immediately on the send button and restores a failed draft only whe
   fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
   expect((composer as HTMLTextAreaElement).value).toBe("");
   rejectPost(new TypeError("offline"));
-  await waitFor(() => expect((composer as HTMLTextAreaElement).value).toBe("hola"));
+  await screen.findByText("We could not confirm delivery. Review the conversation before sending again.");
+  expect((composer as HTMLTextAreaElement).value).toBe("");
+  expect(screen.getByRole("button", { name: "Recover text" })).toHaveProperty("disabled", false);
+  fireEvent.click(screen.getByRole("button", { name: "Recover text" }));
+  expect((composer as HTMLTextAreaElement).value).toBe("hola");
 });
 
 test("does not overwrite a newer draft when a pending send fails", async () => {
@@ -598,6 +640,7 @@ test("does not overwrite a newer draft when a pending send fails", async () => {
   fireEvent.change(composer, { target: { value: "nuevo" } });
   rejectPost(new TypeError("offline"));
   await waitFor(() => expect((composer as HTMLTextAreaElement).value).toBe("nuevo"));
+  expect(screen.getByRole("button", { name: "Recover text" })).toHaveProperty("disabled", true);
 });
 
 test("uses stable operation ids for retries, new ids for new actions, and hides controller actions for another actor", async () => {
