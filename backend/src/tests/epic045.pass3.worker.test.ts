@@ -55,6 +55,36 @@ test("EPIC045 PASS3 promotes due actions in deterministic order and never claims
   } finally { value.db.close(); }
 });
 
+test("EPIC051 PASS3 permits proactive creation and due work while human attention is required", () => {
+  const value = fixture();
+  try {
+    value.db.prepare("UPDATE conversation_controls SET state='human_required',authority_generation=1 WHERE conversation_id=?").run(value.conversation.id);
+    const scope = value.repository.resolveCreationScope(value.context, value.company.id, value.conversation.id);
+    assert.ok(scope);
+    const created = action(value, "a", inboundAt);
+    assert.equal(worker(value, inboundAt).claimDue("worker-human-required").map(lease => lease.action.id).includes(created.id), true);
+  } finally { value.db.close(); }
+});
+
+test("EPIC051 PASS3 blocks human control and never replays terminal suppression after release", () => {
+  const value = fixture();
+  try {
+    value.db.prepare("UPDATE conversation_controls SET state='human_controlled',controlling_actor_id='usr_pass3',taken_at=?,authority_generation=2 WHERE conversation_id=?").run(inboundAt,value.conversation.id);
+    assert.equal(value.repository.resolveCreationScope(value.context,value.company.id,value.conversation.id),null);
+    const rejected=value.repository.createAction(value.context,value.company.id,{id:"pac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",actorId:"usr_pass3",operationId:"human-controlled",conversationId:value.conversation.id,whatsAppConnectionId:value.connectionId,assistantProfileId:value.profileId,assistantParticipantId:value.assistant.id,runAt:inboundAt,expectedAuthorityGeneration:2,occurredAt:inboundAt});
+    assert.equal(rejected.kind,"authority_not_automated");
+    value.db.prepare("UPDATE conversation_controls SET state='automated',controlling_actor_id=NULL,taken_at=NULL,authority_generation=1 WHERE conversation_id=?").run(value.conversation.id);
+    const created=action(value,"b",inboundAt);
+    value.db.prepare("UPDATE conversation_controls SET state='human_controlled',controlling_actor_id='usr_pass3',taken_at=?,authority_generation=2 WHERE conversation_id=?").run(inboundAt,value.conversation.id);
+    worker(value,inboundAt).recoverAvailable();
+    assert.equal(value.repository.findAction(value.context,value.company.id,created.id)?.state,"suppressed");
+    value.db.prepare("UPDATE conversation_controls SET state='automated',controlling_actor_id=NULL,taken_at=NULL,authority_generation=3 WHERE conversation_id=?").run(value.conversation.id);
+    worker(value,"2026-08-28T12:01:00.000Z").recoverAvailable();
+    assert.equal(value.repository.findAction(value.context,value.company.id,created.id)?.state,"suppressed");
+    assert.equal(value.repository.listActions(value.context,value.company.id,10).length,1);
+  } finally { value.db.close(); }
+});
+
 test("EPIC045 PASS3 suppresses policy, service-window, assignment, authority, conversation, and binding fences", () => {
   const cases: Array<{ readonly mutate: (value: ReturnType<typeof fixture>) => void; readonly reason: string }> = [
     { mutate: (value) => { value.repository.applyPolicy(value.context, value.company.id, { actorId: "usr_pass3", operationId: "disable", expectedVersion: 2, enabled: false, occurredAt: inboundAt }); }, reason: "proactive_policy_disabled" },

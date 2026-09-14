@@ -164,6 +164,9 @@ export interface SchedulingService { id:string; resource_id:string; name:string;
 export interface SchedulingWorkingWindow { id:string; resource_id:string; weekday:number; start_time:string; end_time:string; }
 export interface SchedulingDateException { id:string; resource_id:string; local_date:string; kind:"open"|"closed"; start_time:string|null; end_time:string|null; }
 export interface SchedulingConfiguration { aggregateVersion:number; locations:SchedulingLocation[]; resources:SchedulingResource[]; services:SchedulingService[]; weeklyWorkingWindows:SchedulingWorkingWindow[]; dateExceptions:SchedulingDateException[]; readiness:{state:SchedulingReadiness;hasLocations:boolean;hasResources:boolean;hasServices:boolean;hasWeeklyAvailability:boolean}; }
+export interface ProactiveActionPolicy { enabled:boolean; version:number; }
+export type ProactiveActionState="scheduled"|"ready"|"leased"|"retryable"|"runtime_completed"|"awaiting_outbound"|"succeeded"|"cancelled"|"suppressed"|"permanent_failure"|"uncertain";
+export interface ProactiveAction { id:string; conversationId:string; intentKind:"follow_up"; runAt:string; state:ProactiveActionState; attemptCount:number; safeReasonCode:string|null; version:number; createdAt:string; updatedAt:string; completedAt:string|null; cancelledAt:string|null; }
 
 export type WebChatConnectionStatus = "active" | "inactive";
 
