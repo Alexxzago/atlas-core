@@ -11,7 +11,19 @@ export type EntitlementState = typeof entitlementStates[number];
 export type BillingInterval = typeof billingIntervals[number];
 export const billingProviderKinds = ["stripe", "mercadopago"] as const;
 export type BillingProviderKind = typeof billingProviderKinds[number];
+export const billingPlanPublicationStates = ["draft", "published", "retired"] as const;
+export const billingProviderOfferReadinessStates = ["not_configured", "invalid", "unavailable", "ready"] as const;
+export const billingProviderOfferLifecycleStates = ["draft", "sellable", "retired"] as const;
+export const billingMarketingInclusionCodes = ["knowledge", "scheduling", "proactive_actions", "whatsapp", "web_chat", "automation", "priority_support"] as const;
+export type BillingPlanPublicationState = typeof billingPlanPublicationStates[number];
+export type BillingProviderOfferReadinessState = typeof billingProviderOfferReadinessStates[number];
+export type BillingProviderOfferLifecycleState = typeof billingProviderOfferLifecycleStates[number];
+export type BillingMarketingInclusionCode = typeof billingMarketingInclusionCodes[number];
 export const billingProviderKind = (value: unknown): BillingProviderKind => closed(billingProviderKinds, value, "Billing provider kind");
+export const billingPlanPublicationState = (value: unknown): BillingPlanPublicationState => closed(billingPlanPublicationStates, value, "Billing plan publication state");
+export const billingProviderOfferReadinessState = (value: unknown): BillingProviderOfferReadinessState => closed(billingProviderOfferReadinessStates, value, "Billing provider offer readiness state");
+export const billingProviderOfferLifecycleState = (value: unknown): BillingProviderOfferLifecycleState => closed(billingProviderOfferLifecycleStates, value, "Billing provider offer lifecycle state");
+export const billingMarketingInclusionCode = (value: unknown): BillingMarketingInclusionCode => closed(billingMarketingInclusionCodes, value, "Billing marketing inclusion code");
 
 function closed<T extends readonly string[]>(values: T, value: unknown, name: string): T[number] {
   if (typeof value !== "string" || !values.includes(value)) throw new Error(`${name} is invalid.`);

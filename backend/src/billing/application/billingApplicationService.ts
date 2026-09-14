@@ -27,8 +27,8 @@ export class BillingApplicationService {
   public summary(workspaceId:number): BillingSummaryDto | null {
     const account = this.accounts.findByWorkspace(workspaceId);
     if (!account) return null;
-    const subscription = this.subscriptions.current(account.id), entry = subscription?.catalogEntryId ? this.catalog.find(subscription.catalogEntryId) : null;
-    return Object.freeze({ rolloutMode:account.rolloutMode, subscription:Object.freeze({ state:subscription?.effectiveState ?? "unmanaged", plan:entry ? Object.freeze({ key:entry.planKey, name:entry.displayName, interval:entry.interval, currency:entry.currency, amountMinor:entry.amountMinor }) : null }) });
+    const subscription = this.subscriptions.current(account.id), entry = subscription?.catalogEntryId ? this.catalog.find(subscription.catalogEntryId) : null, offer=subscription?.providerCommercialOfferId?this.catalog.offer(subscription.providerCommercialOfferId):null;
+    return Object.freeze({ rolloutMode:account.rolloutMode, subscription:Object.freeze({ state:subscription?.effectiveState ?? "unmanaged", plan:entry&&offer ? Object.freeze({ key:entry.planKey, name:entry.displayName, interval:offer.interval, currency:offer.currency, amountMinor:offer.amountMinor }) : null }) });
   }
 
   public entitlementsFor(workspaceId:number): BillingEntitlementsDto | null {
@@ -38,7 +38,7 @@ export class BillingApplicationService {
 
   public catalogForWorkspace(workspaceId:number):BillingCatalogDto|null {
     if (!this.accounts.findByWorkspace(workspaceId)) return null;
-    return Object.freeze({ entries:Object.freeze(this.catalog.active().map(entry=>Object.freeze({ id:entry.id, key:entry.planKey, version:entry.catalogVersion, name:entry.displayName, interval:entry.interval, currency:entry.currency, amountMinor:entry.amountMinor }))) });
+    return Object.freeze({ entries:Object.freeze(this.catalog.active().flatMap(entry=>this.catalog.sellableOffers(entry.id).map(offer=>Object.freeze({ id:entry.id, key:entry.planKey, version:entry.catalogVersion, name:entry.displayName, interval:offer.interval, currency:offer.currency, amountMinor:offer.amountMinor })))) });
   }
 
   public payerIdentityOptionsFor(workspaceId:number, callerIdentityId:string):BillingPayerIdentityOptionsDto|null {
