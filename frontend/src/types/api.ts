@@ -157,6 +157,13 @@ export interface AssistantCapabilityCatalog { capabilities:AssistantCapabilityCa
 export type AssistantToolAvailability = "available" | "unavailable" | "degraded";
 export interface AssistantToolCatalogItem { id:string; enabled:boolean; availability:AssistantToolAvailability; capabilityId:string; safeReason:string|null; safeNextAction:string|null; }
 export interface AssistantToolCatalog { tools:AssistantToolCatalogItem[]; }
+export type SchedulingReadiness = "not_configured" | "minimal" | "locally_configured";
+export interface SchedulingLocation { id:string; name:string; address:string|null; timezone:string; active:boolean; created_at:string; updated_at:string; }
+export interface SchedulingResource { id:string; location_id:string|null; name:string; timezone:string; capacity:number; active:boolean; created_at:string; updated_at:string; }
+export interface SchedulingService { id:string; resource_id:string; name:string; duration_minutes:number; buffer_before_minutes:number; buffer_after_minutes:number; slot_granularity_minutes:number; minimum_lead_minutes:number; maximum_horizon_days:number; active:boolean; created_at:string; updated_at:string; }
+export interface SchedulingWorkingWindow { id:string; resource_id:string; weekday:number; start_time:string; end_time:string; }
+export interface SchedulingDateException { id:string; resource_id:string; local_date:string; kind:"open"|"closed"; start_time:string|null; end_time:string|null; }
+export interface SchedulingConfiguration { aggregateVersion:number; locations:SchedulingLocation[]; resources:SchedulingResource[]; services:SchedulingService[]; weeklyWorkingWindows:SchedulingWorkingWindow[]; dateExceptions:SchedulingDateException[]; readiness:{state:SchedulingReadiness;hasLocations:boolean;hasResources:boolean;hasServices:boolean;hasWeeklyAvailability:boolean}; }
 
 export type WebChatConnectionStatus = "active" | "inactive";
 

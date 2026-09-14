@@ -19,8 +19,8 @@ export type AppRoute =
   | { readonly kind: "admin"; readonly route: "overview" | "workspaces" | "workspace-commercial" | "users" | "user-commercial" | "not-found"; readonly id?: string }
   | { readonly kind: "portal"; readonly route: PortalRoute };
 
-export type AssistantSection = "general" | "capabilities" | "tools" | "behavior" | "status" | "test";
-const assistantSections = new Set<AssistantSection>(["general", "capabilities", "tools", "behavior", "status", "test"]);
+export type AssistantSection = "general" | "capabilities" | "tools" | "automations" | "behavior" | "status" | "test";
+const assistantSections = new Set<AssistantSection>(["general", "capabilities", "tools", "automations", "behavior", "status", "test"]);
 
 function companyId(value: string | undefined): number | null {
   if (!value || !/^\d+$/.test(value)) return null;
