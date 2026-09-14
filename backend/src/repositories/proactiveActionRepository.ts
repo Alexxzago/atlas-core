@@ -67,7 +67,7 @@ export class ProactiveActionRepository implements ProactiveActionRepositoryPort 
       if (!enabled.enabled) { this.db.exec("COMMIT;"); return { kind: "policy_disabled" }; }
       const authority = this.db.prepare("SELECT cc.state,cc.authority_generation FROM conversation_controls cc JOIN conversations c ON c.id=cc.conversation_id JOIN companies co ON co.id=c.company_id JOIN whatsapp_conversation_bindings b ON b.conversation_id=c.id JOIN whatsapp_connections w ON w.id=b.whatsapp_connection_id JOIN assistant_profiles p ON p.id=w.assistant_profile_id WHERE co.workspace_id=? AND c.company_id=? AND c.id=? AND c.state='open' AND c.channel='whatsapp' AND w.id=? AND w.workspace_id=? AND w.company_id=? AND w.status='active' AND w.assistant_profile_id=? AND p.company_id=? AND p.status='ready' AND b.assistant_participant_id=?").get(context.workspaceId, companyId, conversationId, connectionId, context.workspaceId, companyId, profileId, companyId, participantId) as { state: string; authority_generation: number } | undefined;
       if (!authority) { this.db.exec("COMMIT;"); return { kind: "not_found" }; }
-      if (authority.state !== "automated" || authority.authority_generation !== expectedAuthorityGeneration) { this.db.exec("COMMIT;"); return { kind: "authority_not_automated" }; }
+      if (authority.state === "human_controlled" || authority.authority_generation !== expectedAuthorityGeneration) { this.db.exec("COMMIT;"); return { kind: "authority_not_automated" }; }
       const inboundAt = this.latestCustomerInboundAt(context, companyId, conversationId, connectionId);
       if (inboundAt === null || Date.parse(runAt) >= Date.parse(inboundAt) + 24 * 60 * 60 * 1_000) { this.db.exec("COMMIT;"); return { kind: "service_window_closed" }; }
       let inserted = 0;
@@ -128,7 +128,7 @@ export class ProactiveActionRepository implements ProactiveActionRepositoryPort 
   }
 
   public resolveCreationScope(context: WorkspaceContext, companyId: number, conversationId: string): { readonly whatsAppConnectionId: string; readonly assistantProfileId: string; readonly assistantParticipantId: string; readonly authorityGeneration: number } | null {
-    const row = this.db.prepare("SELECT w.id AS whatsapp_connection_id,w.assistant_profile_id,b.assistant_participant_id,cc.authority_generation FROM conversations c JOIN companies co ON co.id=c.company_id JOIN conversation_controls cc ON cc.conversation_id=c.id JOIN whatsapp_conversation_bindings b ON b.conversation_id=c.id JOIN whatsapp_connections w ON w.id=b.whatsapp_connection_id JOIN assistant_profiles p ON p.id=w.assistant_profile_id WHERE co.workspace_id=? AND c.company_id=? AND c.id=? AND c.channel='whatsapp' AND c.state='open' AND cc.state='automated' AND w.workspace_id=? AND w.company_id=? AND w.status='active' AND p.company_id=? AND p.status='ready'").get(context.workspaceId, companyId, conversationId, context.workspaceId, companyId, companyId) as { whatsapp_connection_id: string; assistant_profile_id: string; assistant_participant_id: string; authority_generation: number } | undefined;
+    const row = this.db.prepare("SELECT w.id AS whatsapp_connection_id,w.assistant_profile_id,b.assistant_participant_id,cc.authority_generation FROM conversations c JOIN companies co ON co.id=c.company_id JOIN conversation_controls cc ON cc.conversation_id=c.id JOIN whatsapp_conversation_bindings b ON b.conversation_id=c.id JOIN whatsapp_connections w ON w.id=b.whatsapp_connection_id JOIN assistant_profiles p ON p.id=w.assistant_profile_id WHERE co.workspace_id=? AND c.company_id=? AND c.id=? AND c.channel='whatsapp' AND c.state='open' AND cc.state IN ('automated','human_required') AND w.workspace_id=? AND w.company_id=? AND w.status='active' AND p.company_id=? AND p.status='ready'").get(context.workspaceId, companyId, conversationId, context.workspaceId, companyId, companyId) as { whatsapp_connection_id: string; assistant_profile_id: string; assistant_participant_id: string; authority_generation: number } | undefined;
     return row ? Object.freeze({ whatsAppConnectionId: row.whatsapp_connection_id, assistantProfileId: row.assistant_profile_id, assistantParticipantId: row.assistant_participant_id, authorityGeneration: row.authority_generation }) : null;
   }
 
@@ -322,7 +322,7 @@ export class ProactiveActionRepository implements ProactiveActionRepositoryPort 
     if (scope.connection_status !== "active") return "whatsapp_connection_unavailable";
     if (scope.connection_profile !== current.assistantProfileId) return "assistant_assignment_changed";
     if (scope.customer_participant_id === null || scope.assistant_participant_id !== current.assistantParticipantId) return "whatsapp_binding_invalid";
-    if (scope.control_state !== "automated" || scope.authority_generation !== current.expectedAuthorityGeneration) return "authority_lost";
+    if (scope.control_state === "human_controlled" || scope.authority_generation !== current.expectedAuthorityGeneration) return "authority_lost";
     const inboundAt = this.latestCustomerInboundAt({ workspaceId: current.workspaceId, workspaceKey: "proactive" }, current.companyId, current.conversationId, current.whatsAppConnectionId);
     return inboundAt !== null && Date.parse(now) < Date.parse(inboundAt) + 24 * 60 * 60 * 1_000 ? null : "whatsapp_service_window_closed";
   }
