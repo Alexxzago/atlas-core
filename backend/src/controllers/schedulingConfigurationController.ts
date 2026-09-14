@@ -1,0 +1,9 @@
+import type { RequestHandler, Response } from "express";
+import type { WorkspaceContext } from "../types/workspaceContext.js";
+import { SchedulingConfigurationConflictError, SchedulingConfigurationNotFoundError, SchedulingConfigurationService } from "../scheduling/services/schedulingConfigurationService.js";
+import { SchedulingError } from "../scheduling/domain/scheduling.js";
+
+export function createGetSchedulingConfigurationController(service:SchedulingConfigurationService,context:WorkspaceContext):RequestHandler{return async(req,res)=>{try{res.json({data:await service.read(context,companyId(req.params.companyId))});}catch(error:unknown){respond(res,error);}}}
+export function createMutateSchedulingConfigurationController(service:SchedulingConfigurationService,context:WorkspaceContext,actor:{readonly userId:string}):RequestHandler{return async(req,res)=>{try{res.json({data:await service.command(context,companyId(req.params.companyId),actor.userId,req.body)});}catch(error:unknown){respond(res,error);}}}
+function companyId(value:unknown):number{if(typeof value!=="string"||!/^\d+$/.test(value)||Number(value)<1)throw new SchedulingError("Scheduling company is invalid.");return Number(value)}
+function respond(res:Response,error:unknown):void{if(error instanceof SchedulingConfigurationNotFoundError){res.status(404).json({error:{code:"not_found",message:"Scheduling configuration was not found."}});return;}if(error instanceof SchedulingConfigurationConflictError){res.status(409).json({error:{code:"scheduling_configuration_conflict",message:error.message}});return;}if(error instanceof SchedulingError){res.status(400).json({error:{code:"validation_failed",message:error.message}});return;}res.status(500).json({error:{code:"scheduling_configuration_unavailable",message:"Scheduling configuration is temporarily unavailable."}});}

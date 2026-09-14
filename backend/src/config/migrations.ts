@@ -2222,6 +2222,32 @@ const migrations: Migration[] = [
     CREATE TRIGGER voice_read_event_delivery_visible AFTER UPDATE OF state ON outbound_deliveries WHEN OLD.state!=NEW.state AND NEW.response_policy='deferred_voice' AND NEW.state IN ('accepted','delivered','read') BEGIN INSERT INTO conversation_events(id,workspace_id,company_id,conversation_id,event_type,related_message_id,occurred_at) SELECT 'cev_' || lower(hex(randomblob(16))),co.workspace_id,co.id,m.conversation_id,'voice_state_changed',m.id,NEW.updated_at FROM provider_message_records p JOIN conversation_messages m ON m.id=p.conversation_message_id JOIN conversations c ON c.id=m.conversation_id JOIN companies co ON co.id=c.company_id WHERE p.id=NEW.provider_message_record_id; END;
     CREATE TRIGGER conversation_delivery_state_event AFTER UPDATE OF state ON outbound_deliveries WHEN OLD.state!=NEW.state AND NEW.response_policy='standard' BEGIN INSERT INTO conversation_events(id,workspace_id,company_id,conversation_id,event_type,related_message_id,occurred_at) SELECT 'cev_' || lower(hex(randomblob(16))),co.workspace_id,co.id,m.conversation_id,'delivery_state_changed',m.id,NEW.updated_at FROM provider_message_records p JOIN conversation_messages m ON m.id=p.conversation_message_id JOIN conversations c ON c.id=m.conversation_id JOIN companies co ON co.id=c.company_id WHERE p.id=NEW.provider_message_record_id; END;
   `);}},
+  { id:73,name:"0073_scheduling_configuration_controls",checksumSource:"company-scheduling-configuration-control-operation-replay-audit-v1",apply(database):void{database.exec(`
+    CREATE TABLE scheduling_configuration_controls(
+      workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      PRIMARY KEY(workspace_id,company_id),FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    INSERT INTO scheduling_configuration_controls(workspace_id,company_id,created_at,updated_at)
+      SELECT workspace_id,id,created_at,updated_at FROM companies;
+    CREATE TRIGGER companies_seed_scheduling_configuration_control AFTER INSERT ON companies BEGIN
+      INSERT INTO scheduling_configuration_controls(workspace_id,company_id,created_at,updated_at) VALUES(NEW.workspace_id,NEW.id,NEW.created_at,NEW.updated_at);
+    END;
+    CREATE TABLE scheduling_configuration_operations(
+      workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,operation_id TEXT NOT NULL CHECK(length(operation_id) BETWEEN 1 AND 200),operation TEXT NOT NULL CHECK(length(operation) BETWEEN 1 AND 100),request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),expected_version INTEGER NOT NULL CHECK(expected_version>0),resulting_version INTEGER NOT NULL CHECK(resulting_version>0),actor_user_id TEXT NOT NULL CHECK(length(actor_user_id) BETWEEN 1 AND 128),outcome_json TEXT NOT NULL CHECK(json_valid(outcome_json)),occurred_at TEXT NOT NULL,
+      PRIMARY KEY(workspace_id,company_id,operation_id),FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_scheduling_configuration_operations_scope ON scheduling_configuration_operations(workspace_id,company_id,occurred_at,operation_id);
+    CREATE TRIGGER scheduling_configuration_operations_no_update BEFORE UPDATE ON scheduling_configuration_operations BEGIN SELECT RAISE(ABORT,'Scheduling configuration operations are append-only'); END;
+    CREATE TRIGGER scheduling_configuration_operations_no_delete BEFORE DELETE ON scheduling_configuration_operations BEGIN SELECT RAISE(ABORT,'Scheduling configuration operations are append-only'); END;
+    CREATE TABLE scheduling_configuration_audit_events(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,operation_id TEXT NOT NULL,actor_user_id TEXT NOT NULL CHECK(length(actor_user_id) BETWEEN 1 AND 128),affected_entity_type TEXT NOT NULL CHECK(length(affected_entity_type) BETWEEN 1 AND 100),affected_entity_id TEXT NOT NULL CHECK(length(affected_entity_id) BETWEEN 1 AND 200),action TEXT NOT NULL CHECK(length(action) BETWEEN 1 AND 100),resulting_version INTEGER NOT NULL CHECK(resulting_version>0),occurred_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id,company_id,operation_id) REFERENCES scheduling_configuration_operations(workspace_id,company_id,operation_id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_scheduling_configuration_audit_scope ON scheduling_configuration_audit_events(workspace_id,company_id,occurred_at,id);
+    CREATE TRIGGER scheduling_configuration_audit_events_no_update BEFORE UPDATE ON scheduling_configuration_audit_events BEGIN SELECT RAISE(ABORT,'Scheduling configuration audit events are append-only'); END;
+    CREATE TRIGGER scheduling_configuration_audit_events_no_delete BEFORE DELETE ON scheduling_configuration_audit_events BEGIN SELECT RAISE(ABORT,'Scheduling configuration audit events are append-only'); END;
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

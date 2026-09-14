@@ -11,6 +11,8 @@ import type { CompanyCoreControllers } from "../controllers/companyCoreControlle
 import { CommercialControlsRepository } from "../repositories/commercialControlsRepository.js";
 import type { CompanyOperationalStatusService } from "../company/services/companyOperationalStatusService.js";
 import { createGetCompanyOperationalStatusController } from "../controllers/companyOperationalStatusController.js";
+import type { SchedulingConfigurationService } from "../scheduling/services/schedulingConfigurationService.js";
+import { createGetSchedulingConfigurationController, createMutateSchedulingConfigurationController } from "../controllers/schedulingConfigurationController.js";
 
 interface ContextualControllers {
   list: (context: WorkspaceContext) => RequestHandler;
@@ -87,6 +89,7 @@ interface AuthorizedCompanyDependencies {
   conversationControlControllers?: ContextualConversationControlControllers;
   pdfBodyParser?: RequestHandler;
   commercial?: CommercialControlsRepository;
+  schedulingConfigurationService?: SchedulingConfigurationService;
 }
 
 let productionConversationMessageController: ((context: WorkspaceContext, actor: ActorContext) => RequestHandler) | null = null;
@@ -100,6 +103,7 @@ let productionCommercialControls: CommercialControlsRepository | null = null;
 let productionVoicePolicyControllers: ContextualVoicePolicyControllers | null = null;
 let productionProactiveActionControllers: ContextualProactiveActionControllers | null = null;
 let productionCompanyOperationalStatusService: CompanyOperationalStatusService | null = null;
+let productionSchedulingConfigurationService: SchedulingConfigurationService | null = null;
 export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
 export function configureProductionConversationReadControllers(controllers: ContextualConversationReadControllers): void { productionConversationReadControllers = controllers; }
 export function configureProductionConversationControlControllers(controllers: ContextualConversationControlControllers): void { productionConversationControlControllers = controllers; }
@@ -111,6 +115,7 @@ export function configureProductionCommercialControls(controls: CommercialContro
 export function configureProductionVoicePolicyControllers(controllers: ContextualVoicePolicyControllers): void { productionVoicePolicyControllers = controllers; }
 export function configureProductionProactiveActionControllers(controllers: ContextualProactiveActionControllers): void { productionProactiveActionControllers = controllers; }
 export function configureProductionCompanyOperationalStatusService(service: CompanyOperationalStatusService): void { productionCompanyOperationalStatusService = service; }
+export function configureProductionSchedulingConfigurationService(service: SchedulingConfigurationService): void { productionSchedulingConfigurationService = service; }
 
 function rawCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -209,6 +214,11 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   }
   const operationalStatus = dependencies.companyOperationalStatusService ?? productionCompanyOperationalStatusService;
   if (operationalStatus) router.get("/:workspaceId/companies/:companyId/operational-status", authorize("company:read", false, (context) => createGetCompanyOperationalStatusController(operationalStatus, context)));
+  const schedulingConfiguration = dependencies.schedulingConfigurationService ?? productionSchedulingConfigurationService;
+  if (schedulingConfiguration) {
+    router.get("/:workspaceId/companies/:companyId/scheduling-configuration", authorize("company:read", false, (context) => createGetSchedulingConfigurationController(schedulingConfiguration, context)));
+    router.post("/:workspaceId/companies/:companyId/scheduling-configuration/commands", authorize("company:manage", true, (context, actor) => createMutateSchedulingConfigurationController(schedulingConfiguration, context, actor)));
+  }
   const defaults=dependencies.defaultAssistantControllers??productionDefaultAssistantControllers;
   if(defaults){router.get("/:workspaceId/companies/:companyId/assistant/default",authorize("company:read",false,defaults.get));router.put("/:workspaceId/companies/:companyId/assistant/default",authorize("company:manage",true,defaults.put));}
   const operationalJson = json({ type: "application/json", limit: 8 * 1024 });

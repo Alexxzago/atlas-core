@@ -62,7 +62,7 @@ import{DevelopmentInvitationDelivery,SecureInvitationProofProvider,UnavailableIn
 import{WorkspaceAdministrationService}from"./workspace/services/workspaceAdministrationService.js";
 import{AuthorizationService}from"./workspace/services/authorizationService.js";
 import{WorkspaceResolver}from"./workspace/services/workspaceResolver.js";
-import{configureProductionCompanyOperationalStatusService,configureProductionProactiveActionControllers,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
+import{configureProductionCompanyOperationalStatusService,configureProductionProactiveActionControllers,configureProductionSchedulingConfigurationService,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
 import{UserRepository}from"./repositories/userRepository.js";
 import{AssistantProfileRepository}from"./repositories/assistantProfileRepository.js";
 import{AssistantProfileService}from"./assistant/services/assistantProfileService.js";
@@ -201,6 +201,8 @@ import { ExternalBookingCancelService, ExternalBookingRescheduleService } from "
 import { SchedulingBookingRouter } from "./scheduling/services/schedulingBookingRouter.js";
 import { SchedulingService } from "./scheduling/services/schedulingService.js";
 import { SchedulingRepository } from "./repositories/schedulingRepository.js";
+import { SchedulingConfigurationRepository } from "./repositories/schedulingConfigurationRepository.js";
+import { SchedulingConfigurationService } from "./scheduling/services/schedulingConfigurationService.js";
 import { billingProviderRegistryFromEnvironment } from "./billing/application/billingProviderConfiguration.js";
 import { BillingOperationService } from "./billing/application/billingOperationService.js";
 import { BillingPayerIdentityResolver } from "./billing/application/billingPayerIdentityResolver.js";
@@ -301,6 +303,8 @@ export const metaEmbeddedSignupProvider = metaEmbeddedSignupProviderFromEnvironm
 export const providerAdapterRegistry = new ProviderAdapterRegistry();
 const externalCalendarRepository = new ExternalCalendarRepository(new SynchronousSqlDatabaseAdapter(database));
 const schedulingRepository = new SchedulingRepository(new SynchronousSqlDatabaseAdapter(database));
+const schedulingConfigurationService = new SchedulingConfigurationService(new SchedulingConfigurationRepository(new SynchronousSqlDatabaseAdapter(database)), identityClock);
+configureProductionSchedulingConfigurationService(schedulingConfigurationService);
 const externalCalendarBindingService = new ExternalCalendarBindingService(externalCalendarRepository, schedulingRepository, integrationConnections, identityClock);
 const externalSchedulingService = new SchedulingService(schedulingRepository, identityClock);
 const scopedExternalProviderCredentials = integrationSecretCipher ? new ScopedExternalProviderCredentialResolver(integrationConnections, integrationSecretCipher) : null;
