@@ -2,6 +2,7 @@ import type { EffectiveSubscriptionState, ProviderEvidenceState } from "./billin
 
 export interface BillingSubscriptionEvidence {
   readonly providerSubscriptionId: string;
+  readonly providerCommercialReference?: string | null;
   readonly providerEvidenceState: ProviderEvidenceState;
   readonly currentPeriodStart: string | null;
   readonly currentPeriodEnd: string | null;

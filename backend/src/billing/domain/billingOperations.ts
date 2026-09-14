@@ -6,7 +6,7 @@ export const billingOperationStatuses = ["pending", "request_started", "succeede
 export type BillingOperationStatus = typeof billingOperationStatuses[number];
 
 export type BillingOperationFingerprintInput =
-  | { readonly billingAccountId:string; readonly operationKind:"checkout_session_create"; readonly catalogEntryId:string; readonly providerKind?:string; readonly redirectTarget:string; readonly cancelTarget?:string }
+  | { readonly billingAccountId:string; readonly operationKind:"checkout_session_create"; readonly catalogEntryId:string; readonly providerCommercialOfferId?:string; readonly providerKind?:string; readonly redirectTarget:string; readonly cancelTarget?:string }
   | { readonly billingAccountId:string; readonly operationKind:"subscription_cancel_at_period_end"|"subscription_reactivate"; readonly subscriptionId:string; readonly providerKind?:string };
 export function billingOperationFingerprint(value: BillingOperationFingerprintInput): string {
   return createHash("sha256").update(canonical(value)).digest("hex");

@@ -6,7 +6,7 @@ import { BillingPayerIdentityService } from "./billingPayerIdentityService.js";
 export type BillingSummaryDto = Readonly<{ rolloutMode:"unmanaged"|"managed"; subscription:Readonly<{ state:string; plan:Readonly<{ key:string; name:string; interval:"month"|"year"; currency:string; amountMinor:number }>|null }>; }>;
 export type BillingEntitlementsDto = Readonly<{ state:string; maxCompanies:number|null; maxAssistantProfiles:number|null; maxActiveChannels:number|null; mutationEligible:boolean; effectiveAt:string; expiresAt:string|null; }>;
 export type BillingApplicationOutcome = "succeeded"|"failed"|"uncertain"|"in_progress"|"conflict"|"invalid"|"unavailable"|"unsupported";
-export type BillingCatalogDto = Readonly<{ entries:readonly Readonly<{ id:string; key:string; version:number; name:string; interval:"month"|"year"; currency:string; amountMinor:number; }>[] }>;
+export type BillingCatalogDto = Readonly<{ entries:readonly Readonly<{ id:string; providerCommercialOfferId:string; key:string; version:number; name:string; interval:"month"|"year"; currency:string; amountMinor:number; }>[] }>;
 export type BillingPayerIdentityOptionsDto = Readonly<{ options:readonly Readonly<{ identityId:string; email:string }>[] }>;
 
 export class BillingApplicationService {
@@ -38,7 +38,7 @@ export class BillingApplicationService {
 
   public catalogForWorkspace(workspaceId:number):BillingCatalogDto|null {
     if (!this.accounts.findByWorkspace(workspaceId)) return null;
-    return Object.freeze({ entries:Object.freeze(this.catalog.active().flatMap(entry=>this.catalog.sellableOffers(entry.id).map(offer=>Object.freeze({ id:entry.id, key:entry.planKey, version:entry.catalogVersion, name:entry.displayName, interval:offer.interval, currency:offer.currency, amountMinor:offer.amountMinor })))) });
+    return Object.freeze({ entries:Object.freeze(this.catalog.active().flatMap(entry=>this.catalog.sellableOffers(entry.id).map(offer=>Object.freeze({ id:entry.id, providerCommercialOfferId:offer.id, key:entry.planKey, version:entry.catalogVersion, name:entry.displayName, interval:offer.interval, currency:offer.currency, amountMinor:offer.amountMinor })))) });
   }
 
   public payerIdentityOptionsFor(workspaceId:number, callerIdentityId:string):BillingPayerIdentityOptionsDto|null {
@@ -60,8 +60,8 @@ export class BillingApplicationService {
     return Object.freeze({status:result.kind==="succeeded"?"succeeded":result.kind==="conflict"?"conflict":"invalid"});
   }
 
-  public async checkout(workspaceId:number, catalogEntryId:string, idempotencyKey:string):Promise<Readonly<{ status:BillingApplicationOutcome; redirectUrl?:string }>> {
-    const result = await this.operations.checkout({ workspaceId, catalogEntryId, operationId:operationId("checkout", idempotencyKey), successTarget:this.targets.checkoutSuccess, cancelTarget:this.targets.checkoutCancel });
+  public async checkout(workspaceId:number, catalogEntryId:string, providerCommercialOfferId:string, idempotencyKey:string):Promise<Readonly<{ status:BillingApplicationOutcome; redirectUrl?:string }>> {
+    const result = await this.operations.checkout({ workspaceId, catalogEntryId, providerCommercialOfferId, operationId:operationId("checkout", idempotencyKey), successTarget:this.targets.checkoutSuccess, cancelTarget:this.targets.checkoutCancel });
     return operationDto(result);
   }
 
