@@ -87,6 +87,17 @@ export interface PlatformWorkspaceCommercialControls { workspaceId:number; statu
 export interface PlatformUserCommercialUsage { ownedWorkspaces:number; }
 export interface PlatformUserCommercialControls { userId:string; maxOwnedWorkspaces:number|null; usage:PlatformUserCommercialUsage; version:number; createdAt:string; updatedAt:string; }
 export interface CommercialControlAuditEvent { id:string; actorUserId:string; subjectType:"user"|"workspace"; subjectId:string; eventType:string; oldValue:Record<string,unknown>; newValue:Record<string,unknown>; version:number; occurredAt:string; }
+export type BillingPlanPublicationState = "draft" | "published" | "retired";
+export type BillingOfferProviderKind = "stripe" | "mercadopago";
+export type BillingOfferInterval = "month" | "year";
+export type BillingOfferReadinessState = "not_configured" | "invalid" | "unavailable" | "ready";
+export type BillingOfferLifecycle = "draft" | "sellable" | "retired";
+export interface PlatformBillingPlan { id:string; planKey:string; catalogVersion:number; displayName:string; description:string; publicationState:BillingPlanPublicationState; trialDurationDays:number|null; graceDurationDays:number|null; maxCompanies:number|null; maxAssistantProfiles:number|null; maxActiveChannels:number|null; mutationEligible:boolean; version:number; subscriberCount:number; }
+export interface PlatformBillingOffer { id:string; catalogEntryId:string; providerKind:BillingOfferProviderKind; offerVersion:number; currency:string; amountMinor:number; interval:BillingOfferInterval; readinessState:BillingOfferReadinessState; lifecycle:BillingOfferLifecycle; version:number; }
+export interface PlatformBillingPlanAudit { id:string; operationId:string; eventType:string; resultingVersion:number; occurredAt:string; }
+export interface PlatformBillingPlanDetail extends PlatformBillingPlan { offers:PlatformBillingOffer[]; audit:PlatformBillingPlanAudit[]; }
+export interface PlatformBillingPlanWrite { operationId:string; planKey:string; catalogVersion:number; displayName:string; description:string; inclusions:string[]; maxCompanies:number|null; maxAssistantProfiles:number|null; maxActiveChannels:number|null; mutationEligible:boolean; trialDurationDays:number|null; graceDurationDays:number|null; }
+export interface PlatformBillingOfferWrite { operationId:string; expectedVersion:number; providerKind:BillingOfferProviderKind; amountMinor:number; interval:BillingOfferInterval; providerPlanReference:string; readinessState:BillingOfferReadinessState; }
 
 export interface SessionBootstrapResponse {
   status: "authenticated";

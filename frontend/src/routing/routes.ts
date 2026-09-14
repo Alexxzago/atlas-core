@@ -16,7 +16,7 @@ export type PortalRoute =
 export type AppRoute =
   | { readonly kind: "public"; readonly name: "guided"; readonly route: GuidedSetupRoute }
   | { readonly kind: "public"; readonly name: "chat"; readonly connectionPublicId: string }
-  | { readonly kind: "admin"; readonly route: "overview" | "workspaces" | "workspace-commercial" | "users" | "user-commercial" | "not-found"; readonly id?: string }
+  | { readonly kind: "admin"; readonly route: "overview" | "workspaces" | "workspace-commercial" | "users" | "user-commercial" | "plans" | "plan-detail" | "not-found"; readonly id?: string }
   | { readonly kind: "portal"; readonly route: PortalRoute };
 
 export type AssistantSection = "general" | "capabilities" | "tools" | "automations" | "behavior" | "status" | "test";
@@ -63,6 +63,9 @@ export function parseAppRoute(pathname: string): AppRoute {
   if (path === "/admin/users") return { kind: "admin", route: "users" };
   const userCommercial = /^\/admin\/users\/([a-zA-Z0-9_-]+)$/.exec(path);
   if (userCommercial?.[1]) return { kind: "admin", route: "user-commercial", id: userCommercial[1] };
+  if (path === "/admin/plans") return { kind: "admin", route: "plans" };
+  const planDetail = /^\/admin\/plans\/(bce_[a-f0-9]{32})$/.exec(path);
+  if (planDetail?.[1]) return { kind: "admin", route: "plan-detail", id: planDetail[1] };
   if (path.startsWith("/admin/")) return { kind: "admin", route: "not-found" };
   return { kind: "portal", route: parsePortalRoute(path) };
 }

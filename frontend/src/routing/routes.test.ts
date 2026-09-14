@@ -40,5 +40,8 @@ test("classifies public and authenticated application routes", () => {
   assert.deepEqual(parseAppRoute("/admin/workspaces"), { kind: "admin", route: "workspaces" });
   assert.deepEqual(parseAppRoute("/admin/workspaces/wsp_1"), { kind: "admin", route: "workspace-commercial", id: "wsp_1" });
   assert.deepEqual(parseAppRoute("/admin/users/usr_1"), { kind: "admin", route: "user-commercial", id: "usr_1" });
+  assert.deepEqual(parseAppRoute("/admin/plans"), { kind: "admin", route: "plans" });
+  assert.deepEqual(parseAppRoute("/admin/plans/bce_0123456789abcdef0123456789abcdef"), { kind: "admin", route: "plan-detail", id: "bce_0123456789abcdef0123456789abcdef" });
+  assert.deepEqual(parseAppRoute("/admin/plans/not-a-plan"), { kind: "admin", route: "not-found" });
   assert.deepEqual(parseAppRoute("/companies"), { kind: "portal", route: { name: "companies" } });
 });
