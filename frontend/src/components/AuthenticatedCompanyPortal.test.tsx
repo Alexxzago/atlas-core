@@ -219,7 +219,7 @@ test("workspace settings switches an existing workspace without destructive memb
   render(<I18nProvider><WorkspaceMembershipPortal csrf="csrf" workspaces={[workspace, { ...workspace, id: "other", name: "Otro espacio" }]} selectedWorkspace={workspace} pendingWorkspaceId={null} loading={false} error={false} onSelectWorkspace={select} onWorkspacesChanged={() => {}} onActiveWorkspaceLeft={() => {}}/></I18nProvider>);
   fireEvent.change(screen.getByLabelText("Cambiar espacio"), { target: { value: "other" } });
   expect(select).toHaveBeenCalledWith("other");
-  expect(screen.getByRole("button", { name: "Salir del espacio" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Salir del espacio" })).toBeTruthy();
 });
 
 test("workspace owner cannot edit or remove self and transfer requires an explicit recipient", async () => {
