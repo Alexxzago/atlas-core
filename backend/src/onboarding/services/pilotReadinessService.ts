@@ -7,6 +7,7 @@ import type { SchedulingConfigurationService } from "../../scheduling/services/s
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import type { WebChatConnectionRepositoryPort } from "../../webChat/application/ports.js";
 import type { WhatsAppConnectionCredentialRepositoryPort, WhatsAppConnectionOperationalStateRepositoryPort, WhatsAppConnectionRepositoryPort } from "../../whatsapp/application/ports.js";
+import { operationalLogger } from "../../observability/operationalLogger.js";
 import { assessPilotReadiness, type PilotReadinessAssessment, type PilotReadinessFacts } from "../domain/pilotReadiness.js";
 
 export class PilotReadinessNotFoundError extends Error {}
@@ -17,6 +18,8 @@ export interface PilotReadinessPlatformCapabilities { readonly whatsAppEmbeddedS
 export interface PilotReadinessBillingPort { pilotReadiness(workspaceId: number): BillingPilotReadiness; }
 
 export class PilotReadinessService {
+  private readonly classifications = new Map<string, PilotReadinessProjection["classification"]>();
+
   public constructor(
     private readonly companies: CompanyDomainRepositoryPort,
     private readonly assistantReadiness: AssistantReadinessService,
@@ -44,11 +47,25 @@ export class PilotReadinessService {
         whatsApp: this.whatsAppState(context, companyId, assistant.assistantProfileId),
         ...(await this.optionalFacts(context, companyId)),
       };
-      return Object.freeze({ ...assessPilotReadiness(facts), evaluatedAt: this.clock.now() });
+      const projection = Object.freeze({ ...assessPilotReadiness(facts), evaluatedAt: this.clock.now() });
+      this.recordEvaluation(context, companyId, projection);
+      return projection;
     } catch (error: unknown) {
       if (error instanceof PilotReadinessNotFoundError) throw error;
       throw new PilotReadinessUnavailableError();
     }
+  }
+
+  private recordEvaluation(context: WorkspaceContext, companyId: number, projection: PilotReadinessProjection): void {
+    const fields = { workspaceId: context.workspaceId, companyId, outcome: projection.classification } as const;
+    operationalLogger.info("pilot_readiness_evaluated", fields);
+    const key = `${context.workspaceId}:${companyId}`, previous = this.classifications.get(key);
+    if (previous === projection.classification) return;
+    this.classifications.set(key, projection.classification);
+    operationalLogger.info("pilot_readiness_classification_changed", fields);
+    if (projection.checks.some((check) => check.required && check.status !== "complete")) operationalLogger.info("pilot_readiness_required_blocked", fields);
+    if (projection.classification === "external_provider_blocked") operationalLogger.info("pilot_readiness_external_provider_blocked", fields);
+    if (projection.classification === "pilot_ready") operationalLogger.info("pilot_readiness_pilot_ready_reached", fields);
   }
 
   private webChatState(context: WorkspaceContext, companyId: number, defaultProfileId: string | null): PilotReadinessFacts["webChat"] {
