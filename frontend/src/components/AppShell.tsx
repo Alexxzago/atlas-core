@@ -18,6 +18,7 @@ interface AppShellProps {
   readonly companyCreating: boolean;
   readonly companyTransitioning: boolean;
   readonly companyAutoSelecting?: boolean;
+  readonly bootstrapping?: boolean;
   readonly email: string;
   readonly isPlatformAdmin?: boolean;
   readonly onNavigate: Navigate;
@@ -47,13 +48,13 @@ export function PageHeader({ title, description, trail }: { readonly title: stri
 
 export function AppShell(props: AppShellProps): React.JSX.Element {
   const { t } = useI18n();
-  const [mobileOpen, setMobileOpen] = useState(false), [chooserOpen, setChooserOpen] = useState(props.route.name === "companies" && !props.companyAutoSelecting), [accountOpen, setAccountOpen] = useState(false), [accountPosition, setAccountPosition] = useState<React.CSSProperties>({});
+  const [mobileOpen, setMobileOpen] = useState(false), [chooserOpen, setChooserOpen] = useState(props.route.name === "companies" && !props.companyAutoSelecting && !props.bootstrapping), [accountOpen, setAccountOpen] = useState(false), [accountPosition, setAccountPosition] = useState<React.CSSProperties>({});
   const mobileTrigger = useRef<HTMLButtonElement>(null), drawer = useRef<HTMLElement>(null), companyTrigger = useRef<HTMLButtonElement>(null), accountMenu = useRef<HTMLDivElement>(null), accountTrigger = useRef<HTMLButtonElement | null>(null);
   const closeMobile = useCallback(() => { setMobileOpen(false); window.setTimeout(() => mobileTrigger.current?.focus(), 0); }, []);
   const closeChooser = useCallback(() => { setChooserOpen(false); window.setTimeout(() => companyTrigger.current?.focus(), 0); }, []);
   const navigate = useCallback((path: string) => { props.onNavigate(path); setMobileOpen(false); setAccountOpen(false); }, [props.onNavigate]);
 
-  useEffect(() => { setMobileOpen(false); setAccountOpen(false); if (props.companyAutoSelecting || props.route.name !== "companies") setChooserOpen(false); else setChooserOpen(true); document.getElementById("main-content")?.focus(); }, [props.companyAutoSelecting, props.route]);
+  useEffect(() => { setMobileOpen(false); setAccountOpen(false); if (props.bootstrapping || props.companyAutoSelecting || props.route.name !== "companies") setChooserOpen(false); else setChooserOpen(true); document.getElementById("main-content")?.focus(); }, [props.bootstrapping, props.companyAutoSelecting, props.route]);
   useEffect(() => {
     if (!mobileOpen) return;
     const previous = document.body.style.overflow; document.body.style.overflow = "hidden";
@@ -104,7 +105,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     {accountOpen && createPortal(<><div className="workspace-menu-backdrop" aria-hidden="true"/><AccountMenu ref={accountMenu} {...props} navigate={navigate} style={accountPosition}/></>,document.body)}
     {mobileOpen && <><div className="mobile-navigation-backdrop" onMouseDown={closeMobile} aria-hidden="true"/><aside ref={drawer} id="mobile-navigation" className="mobile-navigation" aria-label={t("shell.mobileNavigation")}><div className="mobile-navigation__header"><strong>ATLAS</strong><button type="button" className="button button--quiet" onClick={closeMobile}>{t("shell.closeNavigation")}</button></div>{props.selectedCompany && <p className="mobile-navigation__company">{props.selectedCompany.name}</p>}{navigation}</aside></>}
     <main id="main-content" className="app-main" tabIndex={-1}><div className="route-transition" key={`${props.route.name}-${"companyId" in props.route?props.route.companyId:"global"}`}>{props.children}</div></main>
-    <AuthenticatedCompanySelector open={chooserOpen} companies={props.companies} selectedCompanyId={props.selectedCompany?.id ?? null} workspaceSelected={props.workspace !== null} loading={props.companiesLoading} error={props.companyError} creating={props.companyCreating} onCreate={props.onCreateCompany} onCompanySelected={(id) => { closeChooser(); props.onSelectCompany(id); }} onRetry={props.onRetryCompanies} onClose={closeChooser}/>
+    <AuthenticatedCompanySelector open={!props.bootstrapping && chooserOpen} companies={props.companies} selectedCompanyId={props.selectedCompany?.id ?? null} workspaceSelected={props.workspace !== null} loading={props.companiesLoading} error={props.companyError} creating={props.companyCreating} onCreate={props.onCreateCompany} onCompanySelected={(id) => { closeChooser(); props.onSelectCompany(id); }} onRetry={props.onRetryCompanies} onClose={closeChooser}/>
   </div>;
 }
 

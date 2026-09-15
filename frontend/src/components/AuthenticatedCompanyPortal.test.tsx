@@ -75,6 +75,31 @@ test("automatically enters the only accessible company after workspace restorati
   expect(screen.queryByText("Create my first company")).toBeNull();
 });
 
+test("renders only the stable preparation surface while workspace membership or companies are unresolved", async () => {
+  window.localStorage.setItem("atlas.locale", "es");
+  window.history.replaceState({}, "", "/dashboard");
+  const memberships = deferred<Response>(), companies = deferred<Response>();
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/workspaces") && !url.includes("/selected")) return memberships.promise;
+    if (url.endsWith("/workspaces/selected") || url.endsWith("/workspaces/workspace/select")) return Promise.resolve(json(workspace));
+    if (url.endsWith("/workspaces/workspace/companies")) return companies.promise;
+    if (url.endsWith("/workspaces/workspace/companies/1")) return Promise.resolve(json(companyA));
+    if (url.endsWith("/companies/1/assistant-profiles")) return Promise.resolve(json([]));
+    if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ assistantIdentifier: "default", workspaceId: 1, companyId: 1, status: "blocked", blockers: ["default_assistant_missing"], knowledgeVersionId: null, assistantProfileId: null, evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "1", configurationDigest: "digest" }));
+    return Promise.resolve(new Response("", { status: 404 }));
+  }));
+  render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticatedCompanyPortal csrf="csrf" email="operator@example.test" onPassword={() => {}} onLogout={() => {}}/></RouterProvider></I18nProvider></ThemeProvider>);
+  expect(await screen.findByRole("heading", { name: "Estamos preparando tu espacio" })).toBeTruthy();
+  expect(screen.queryByText("Atlas necesita un espacio de trabajo")).toBeNull();
+  expect(screen.queryByText("Elegí para qué empresa trabaja Atlas")).toBeNull();
+  memberships.resolve(json([workspace]));
+  await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/workspaces/workspace/companies"))).toBe(true));
+  expect(screen.getByRole("heading", { name: "Estamos preparando tu espacio" })).toBeTruthy();
+  companies.resolve(json([companyA]));
+  await screen.findByText("Atlas para Company A");
+});
+
 test("multiple accessible companies require an explicit selection", async () => {
   window.history.replaceState({}, "", "/dashboard");
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {

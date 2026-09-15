@@ -28,6 +28,14 @@ test("localizes the first-company experience in Spanish", () => {
   expect(screen.getByRole("button", { name: "Crear mi primera empresa" })).toBeTruthy();
 });
 
+test("renders a final empty state title and description once", () => {
+  window.localStorage.setItem("atlas.locale", "es");
+  render(<I18nProvider><DashboardPage model={buildCompanyWorkspaceViewModel({ workspace, companies: [], company: null })} onNavigate={() => {}} onChooseCompany={() => {}}/></I18nProvider>);
+  expect(screen.getAllByText("Enseñale a Atlas para quién trabaja")).toHaveLength(1);
+  expect(screen.getAllByText("Creá tu primera empresa para darle a Atlas el contexto que necesita para aprender, responder y trabajar con tus clientes.")).toHaveLength(1);
+  expect(document.body.textContent).not.toContain("PRUEBA DE PERSISTENCIA");
+});
+
 test("uses assistant configuration copy for the first readiness blocker", () => {
   window.localStorage.setItem("atlas.locale", "es");
   const model = buildCompanyWorkspaceViewModel({ workspace, companies: [company], company, snapshot: { readiness: { assistantIdentifier: "default", workspaceId: 1, companyId: 1, status: "blocked", blockers: ["default_assistant_missing"], knowledgeVersionId: null, assistantProfileId: null, evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "1", configurationDigest: "digest" }, webChatConnections: 0, whatsAppConnections: 0, operationalWebChatConnections: 0, operationalWhatsAppConnections: 0 } });
