@@ -120,6 +120,22 @@ test("multiple accessible companies require an explicit selection", async () => 
   expect(screen.queryByText("Create my first company")).toBeNull();
 });
 
+test("closing the companies chooser returns to the actionable dashboard state", async () => {
+  window.localStorage.setItem("atlas.locale", "es");
+  window.history.replaceState({}, "", "/companies");
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/workspaces") && !url.includes("/selected")) return Promise.resolve(json([workspace]));
+    if (url.endsWith("/workspaces/selected")) return Promise.resolve(json(workspace));
+    if (url.endsWith("/workspaces/workspace/companies")) return Promise.resolve(json([companyA, companyB]));
+    return Promise.resolve(new Response("", { status: 404 }));
+  }));
+  render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticatedCompanyPortal csrf="csrf" email="operator@example.test" onPassword={() => {}} onLogout={() => {}}/></RouterProvider></I18nProvider></ThemeProvider>);
+  fireEvent.click(await screen.findByRole("button", { name: "Cerrar" }));
+  await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
+  expect(screen.getByRole("heading", { name: "Elegí para qué empresa trabaja Atlas" })).toBeTruthy();
+});
+
 test("keeps a valid direct company route pending until that company is selected", () => {
   expect(companyRoutePresentation("workspace", 1, null, false, { key: "workspace:1", status: "ready" })).toBe("loading");
   expect(companyRoutePresentation("workspace", 1, 1, false, { key: "workspace:1", status: "ready" })).toBe("ready");
@@ -194,6 +210,16 @@ test("workspace settings presents member IDs as muted metadata, not primary iden
   expect(screen.getByRole("heading", { name: "Team" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Invitations" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Ownership and exit" })).toBeTruthy();
+});
+
+test("workspace settings switches an existing workspace without destructive membership actions", async () => {
+  window.localStorage.setItem("atlas.locale", "es");
+  const select = vi.fn();
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => String(input).endsWith("/memberships") ? Promise.resolve(json([])) : Promise.resolve(json([]))));
+  render(<I18nProvider><WorkspaceMembershipPortal csrf="csrf" workspaces={[workspace, { ...workspace, id: "other", name: "Otro espacio" }]} selectedWorkspace={workspace} pendingWorkspaceId={null} loading={false} error={false} onSelectWorkspace={select} onWorkspacesChanged={() => {}} onActiveWorkspaceLeft={() => {}}/></I18nProvider>);
+  fireEvent.change(screen.getByLabelText("Cambiar espacio"), { target: { value: "other" } });
+  expect(select).toHaveBeenCalledWith("other");
+  expect(screen.getByRole("button", { name: "Salir del espacio" })).toBeTruthy();
 });
 
 test("workspace owner cannot edit or remove self and transfer requires an explicit recipient", async () => {
