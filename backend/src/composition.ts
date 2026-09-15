@@ -62,7 +62,7 @@ import{DevelopmentInvitationDelivery,SecureInvitationProofProvider,UnavailableIn
 import{WorkspaceAdministrationService}from"./workspace/services/workspaceAdministrationService.js";
 import{AuthorizationService}from"./workspace/services/authorizationService.js";
 import{WorkspaceResolver}from"./workspace/services/workspaceResolver.js";
-import{configureProductionCompanyOperationalStatusService,configureProductionProactiveActionControllers,configureProductionSchedulingConfigurationService,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
+import{configureProductionCompanyOperationalStatusService,configureProductionPilotReadinessService,configureProductionProactiveActionControllers,configureProductionSchedulingConfigurationService,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
 import{UserRepository}from"./repositories/userRepository.js";
 import{AssistantProfileRepository}from"./repositories/assistantProfileRepository.js";
 import{AssistantProfileService}from"./assistant/services/assistantProfileService.js";
@@ -144,8 +144,10 @@ import { PlatformAdministratorRepository } from "./repositories/platformAdminist
 import { PlatformAdministrationRepository } from "./repositories/platformAdministrationRepository.js";
 import { PlatformAuthorizationService } from "./platformAdmin/services/platformAuthorizationService.js";
 import { PlatformAdministrationService } from "./platformAdmin/services/platformAdministrationService.js";
+import { PlatformPilotReadinessService } from "./platformAdmin/services/platformPilotReadinessService.js";
 import { BillingCatalogAdministrationRepository } from "./repositories/billingCatalogAdministrationRepository.js";
 import { createPlatformAdminControllers } from "./controllers/platformAdminController.js";
+import { createPlatformPilotReadinessController } from "./controllers/platformPilotReadinessController.js";
 import { createPlatformAdminRouter } from "./routes/platformAdmin.js";
 import { configureProductionAssistantCapabilityControllers, configureProductionCommercialControls } from "./routes/authorizedCompanies.js";
 import { CommercialControlsRepository } from "./repositories/commercialControlsRepository.js";
@@ -230,6 +232,7 @@ import { MetaWhatsAppReadinessService } from "./whatsapp/application/metaWhatsAp
 import { MetaEmbeddedSignupHttpService, embeddedSignupPublicConfig } from "./whatsapp/application/metaEmbeddedSignupHttpService.js";
 import { createMetaEmbeddedSignupControllers } from "./controllers/metaEmbeddedSignupController.js";
 import { CompanyOperationalStatusService } from "./company/services/companyOperationalStatusService.js";
+import { PilotReadinessService } from "./onboarding/services/pilotReadinessService.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimeConfiguration = runtimeProductionConfiguration;
@@ -359,6 +362,8 @@ export const voiceDeferredSemanticRecoveryService = new VoiceDeferredSemanticRec
 const proactiveActions = new ProactiveActionRepository(database);
 const proactiveActionOperatorService = new ProactiveActionOperatorService(proactiveActions, identityClock, rateLimits);
 configureProductionProactiveActionControllers(createProactiveActionControllers(proactiveActionOperatorService));
+const pilotReadinessService=new PilotReadinessService(new CompanyDomainRepository(database), assistantReadinessService, new CompanyKnowledgeRepository(database), new WebChatConnectionRepository(database), whatsAppConnections, billingEntitlements, { whatsAppEmbeddedSignupAvailable: embeddedAttempts !== null && embeddedSignupPublicConfig().available }, identityClock, { scheduling: schedulingConfigurationService, proactive: proactiveActions });
+configureProductionPilotReadinessService(pilotReadinessService);
 export const proactiveSemanticRecoveryService = new ProactiveSemanticRecoveryService(proactiveActions, conversationIntelligenceService);
 const productionOperationalAssistantRuntime = new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock, productionAssistantTools);
 export const proactiveDueWorkerService = new ProactiveDueWorkerService(proactiveActions, identityClock, new ProactiveRuntimeService(proactiveActions, companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, productionOperationalAssistantRuntime, identityClock, conversationIntelligenceService, knowledgeRetrievalService));
@@ -405,7 +410,8 @@ const whatsAppWebhookRouter = runtimeConfiguration && !runtimeConfiguration.what
 const billingWebhookRouter = createBillingWebhookRouter({stripe:createBillingWebhookController(billingWebhookService,"stripe"),mercadoPago:createBillingWebhookController(billingWebhookService,"mercadopago")});
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));
 const billingRouter=createBillingRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,originPolicy:requestOriginPolicy,controllers:createBillingControllers(billingApplicationService,rateLimits)});
-export const platformAdminRouter=createPlatformAdminRouter(authenticationService,platformAuthorizationService,createPlatformAdminControllers(new PlatformAdministrationService(new PlatformAdministrationRepository(database),new CommercialControlsRepository(database),new BillingCatalogAdministrationRepository(database),billingProviderRegistry)),requestOriginPolicy);
+const platformAdministrationRepository=new PlatformAdministrationRepository(database);
+export const platformAdminRouter=createPlatformAdminRouter(authenticationService,platformAuthorizationService,{...createPlatformAdminControllers(new PlatformAdministrationService(platformAdministrationRepository,new CommercialControlsRepository(database),new BillingCatalogAdministrationRepository(database),billingProviderRegistry)),workspacePilotReadiness:createPlatformPilotReadinessController(new PlatformPilotReadinessService(platformAdministrationRepository,pilotReadinessService))} as never,requestOriginPolicy);
 function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
   const runtime = new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), identityClock, execution===agent?productionAssistantTools:undefined);
 const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, "gemini", knowledgeRetrievalService, rateLimits);

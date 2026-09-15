@@ -31,6 +31,8 @@
     "test:epic052:pass3": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic052.pass3.test.ts",
     "test:epic052:pass4": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic052.pass4.test.ts",
     "test:epic052:pass5": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic052.pass5.test.ts",
+    "test:epic053:pass4": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic053.pass4.test.ts",
+    "test:epic053:pass5": "tsx --test --test-reporter=tap --test-concurrency=1 src/tests/epic053.pass1.test.ts src/tests/epic053.pass2.service.test.ts src/tests/epic053.pass2.api.test.ts src/tests/epic053.pass4.test.ts src/tests/epic053.pass5.test.ts",
     "maintenance:reencrypt-credentials": "tsx src/scripts/reencryptCredentials.ts",
     "maintenance:verify-backup": "tsx src/scripts/verifyBackup.ts",
     "maintenance:backup": "tsx src/scripts/backup.ts",

@@ -86,6 +86,9 @@ export interface Identity {
 export interface PlatformOverview { totalUsers:number; totalWorkspaces:number; totalCompanies:number; totalAssistantProfiles:number; webChatConnections:number; whatsAppConnections:{total:number;active:number;healthy:number;degraded:number}; }
 export interface PlatformWorkspaceSummary { id:string; name:string; createdAt:string; memberCount:number; companyCount:number; assistantProfileCount:number; webChatConnectionCount:number; whatsApp:{total:number;active:number;healthy:number;degraded:number}; latestActivityAt:string|null; }
 export interface PlatformWorkspacesPage { workspaces:PlatformWorkspaceSummary[]; nextCursor:string|null; }
+export interface PlatformPilotReadinessIssue { id:PilotReadinessCheckId; required:boolean; status:Exclude<PilotReadinessCheckStatus,"complete"|"not_applicable">; owner:NonNullable<PilotReadinessBlockerOwner>; reasonCode:PilotReadinessReasonCode; }
+export type PlatformPilotReadinessCompany = { companyId:number; companyName:string; state:"available"; overall:PilotReadinessOverall; classification:PilotReadinessClassification; evaluatedAt:string; issues:PlatformPilotReadinessIssue[] }|{ companyId:number; companyName:string; state:"unavailable"; };
+export interface PlatformPilotReadiness { aggregate:{totalCompanies:number;pilotReady:number;notReady:number;unavailable:number}; companies:PlatformPilotReadinessCompany[]; }
 export interface PlatformUserSummary { id:string; email:string; createdAt:string; emailVerified:boolean; activeWorkspaceMembershipCount:number; hasActiveWorkspaceMembership:boolean; }
 export interface PlatformUsersPage { users:PlatformUserSummary[]; nextCursor:string|null; }
 export type WorkspaceCommercialStatus = "active" | "suspended";
@@ -276,6 +279,15 @@ export interface CompanyOperationalStatus {
   voice: { status: "unavailable" };
 }
 export interface DefaultAssistantAssignment { companyId:number; assistantProfileId:string; version:number; assignedAt:string; updatedAt:string; assignedByActorId:string|null; source:string|null; }
+export type PilotReadinessOverall = "not_ready" | "pilot_ready";
+export type PilotReadinessClassification = "setup_incomplete" | "code_ready" | "configuration_ready" | "external_provider_blocked" | "pilot_ready";
+export type PilotReadinessCheckId = "workspace_context" | "company" | "default_assistant" | "published_knowledge" | "commercial_entitlement" | "operational_channel" | "web_chat" | "whatsapp" | "scheduling" | "proactive";
+export type PilotReadinessCheckStatus = "complete" | "incomplete" | "blocked" | "not_applicable" | "unavailable";
+export type PilotReadinessBlockerOwner = "customer" | "platform" | "external_provider";
+export type PilotReadinessReasonCode = "workspace_context_invalid" | "company_missing" | "company_suspended" | "company_archived" | "default_assistant_not_executable" | "published_knowledge_missing" | "commercial_control_suspended" | "commercial_entitlement_missing" | "commercial_entitlement_ineligible" | "operational_channel_missing" | "web_chat_not_connected" | "web_chat_inactive" | "whatsapp_not_connected" | "whatsapp_inactive" | "whatsapp_platform_configuration_unavailable" | "whatsapp_business_verification_pending" | "whatsapp_validation_failed" | "whatsapp_health_degraded" | "scheduling_not_configured" | "proactive_not_configured";
+export type PilotReadinessNextAction = "resolve_workspace_context" | "review_company" | "configure_assistant" | "publish_knowledge" | "review_billing" | "activate_web_chat" | "connect_whatsapp" | "review_whatsapp";
+export interface PilotReadinessCheck { id:PilotReadinessCheckId; required:boolean; status:PilotReadinessCheckStatus; owner:PilotReadinessBlockerOwner|null; reasonCode:PilotReadinessReasonCode|null; actionPath:string|null; }
+export interface PilotReadiness { overall:PilotReadinessOverall; classification:PilotReadinessClassification; checks:PilotReadinessCheck[]; nextAction:PilotReadinessNextAction|null; evaluatedAt:string; policyVersion:"pilot-readiness-v1"; }
 
 export type EmbeddedSignupUiStatus="awaiting_meta"|"verifying"|"connected"|"needs_attention"|"reconnect_required"|"failed"|"expired";
 export interface EmbeddedSignupPublicConfig{available:boolean;appId?:string;configId?:string;graphApiVersion?:string;}

@@ -30,6 +30,7 @@ function assistantPortalFetch(profiles: ReturnType<typeof profile>[], defaultId:
     const detail=/assistant-profiles\/([^/]+)$/.exec(url);if(detail){const found=profiles.find(item=>item.id===detail[1]);return Promise.resolve(found?json(found):new Response("",{status:404}));}
     if(url.endsWith("/assistant/default"))return Promise.resolve(defaultId?json({companyId:1,assistantProfileId:defaultId,version:1,assignedAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z",assignedByActorId:null,source:null}):new Response("",{status:fallbackStatus}));
     if(url.endsWith("/assistant/readiness"))return Promise.resolve(json({assistantIdentifier:"default",workspaceId:1,companyId:1,status:"ready",blockers:[],knowledgeVersionId:"knowledge",assistantProfileId:defaultId,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"1",configurationDigest:"digest"}));
+    if(url.endsWith("/pilot-readiness"))return Promise.resolve(json({overall:"pilot_ready",classification:"pilot_ready",checks:[],nextAction:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1"}));
     if(url.endsWith("/web-chat-connections")||url.endsWith("/whatsapp-connections"))return Promise.resolve(json([]));return Promise.resolve(new Response("",{status:404})); }) as unknown as typeof fetch;
 }
 function renderAssistantPortal(path: string, profiles: ReturnType<typeof profile>[], defaultId: string | null): void { window.history.replaceState({},"",path);vi.stubGlobal("fetch",assistantPortalFetch(profiles,defaultId));render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticatedCompanyPortal csrf="csrf" email="operator@example.test" onPassword={()=>{}} onLogout={()=>{}}/></RouterProvider></I18nProvider></ThemeProvider>); }
@@ -66,11 +67,12 @@ test("automatically enters the only accessible company after workspace restorati
     if (url.endsWith("/workspaces/workspace/companies/1")) return Promise.resolve(json(companyA));
     if (url.endsWith("/companies/1/assistant-profiles")) return Promise.resolve(json([profile("a", "Assistant A")]));
     if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ assistantIdentifier:"default",workspaceId:1,companyId:1,status:"ready",blockers:[],knowledgeVersionId:"knowledge",assistantProfileId:"a",evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"1",configurationDigest:"digest" }));
+    if (url.endsWith("/pilot-readiness")) return Promise.resolve(json({ overall:"pilot_ready",classification:"pilot_ready",checks:[],nextAction:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1" }));
     if (url.endsWith("/web-chat-connections") || url.endsWith("/whatsapp-connections")) return Promise.resolve(json([]));
     return Promise.resolve(new Response("", { status: 404 }));
   }));
   render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticatedCompanyPortal csrf="csrf" email="operator@example.test" onPassword={() => {}} onLogout={() => {}}/></RouterProvider></I18nProvider></ThemeProvider>);
-  await screen.findByText("Atlas for Company A");
+   await screen.findByText("Tu piloto está listo");
   expect(window.location.pathname).toBe("/companies/1");
   expect(screen.queryByText("Create my first company")).toBeNull();
 });
@@ -87,6 +89,7 @@ test("renders only the stable preparation surface while workspace membership or 
     if (url.endsWith("/workspaces/workspace/companies/1")) return Promise.resolve(json(companyA));
     if (url.endsWith("/companies/1/assistant-profiles")) return Promise.resolve(json([]));
     if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ assistantIdentifier: "default", workspaceId: 1, companyId: 1, status: "blocked", blockers: ["default_assistant_missing"], knowledgeVersionId: null, assistantProfileId: null, evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "1", configurationDigest: "digest" }));
+    if (url.endsWith("/pilot-readiness")) return Promise.resolve(json({ overall:"pilot_ready",classification:"pilot_ready",checks:[],nextAction:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1" }));
     return Promise.resolve(new Response("", { status: 404 }));
   }));
   render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticatedCompanyPortal csrf="csrf" email="operator@example.test" onPassword={() => {}} onLogout={() => {}}/></RouterProvider></I18nProvider></ThemeProvider>);
@@ -97,7 +100,7 @@ test("renders only the stable preparation surface while workspace membership or 
   await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/workspaces/workspace/companies"))).toBe(true));
   expect(screen.getByRole("heading", { name: "Estamos preparando tu espacio" })).toBeTruthy();
   companies.resolve(json([companyA]));
-  await screen.findByText("Atlas para Company A");
+  await screen.findByText("Tu piloto está listo");
 });
 
 test("multiple accessible companies require an explicit selection", async () => {
@@ -110,6 +113,7 @@ test("multiple accessible companies require an explicit selection", async () => 
     if (url.endsWith("/workspaces/workspace/companies/1")) return Promise.resolve(json(companyA));
     if (url.endsWith("/companies/1/assistant-profiles")) return Promise.resolve(json([]));
     if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ assistantIdentifier:"default",workspaceId:1,companyId:1,status:"blocked",blockers:["default_assistant_missing"],knowledgeVersionId:null,assistantProfileId:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"1",configurationDigest:"digest" }));
+    if (url.endsWith("/pilot-readiness")) return Promise.resolve(json({ overall:"not_ready",classification:"setup_incomplete",checks:[],nextAction:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1" }));
     if (url.endsWith("/web-chat-connections") || url.endsWith("/whatsapp-connections")) return Promise.resolve(json([]));
     return Promise.resolve(new Response("", { status: 404 }));
   }));
@@ -152,6 +156,7 @@ test("keeps the company chooser closed while selecting the sole company", async 
     if (url.endsWith("/workspaces/workspace/companies/1")) return companyRead.promise;
     if (url.endsWith("/companies/1/assistant-profiles")) return Promise.resolve(json([profile("a", "Assistant A")]));
     if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ assistantIdentifier:"default",workspaceId:1,companyId:1,status:"blocked",blockers:["default_assistant_missing"],knowledgeVersionId:null,assistantProfileId:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"1",configurationDigest:"digest" }));
+    if (url.endsWith("/pilot-readiness")) return Promise.resolve(json({ overall:"not_ready",classification:"setup_incomplete",checks:[],nextAction:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1" }));
     if (url.endsWith("/web-chat-connections") || url.endsWith("/whatsapp-connections")) return Promise.resolve(json([]));
     return Promise.resolve(new Response("", { status: 404 }));
   }));
@@ -159,7 +164,7 @@ test("keeps the company chooser closed while selecting the sole company", async 
   await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/workspaces/workspace/companies/1"))).toBe(true));
   expect(screen.queryByRole("heading", { name: "Which company does Atlas work for?" })).toBeNull();
   companyRead.resolve(json(companyA));
-  await screen.findByText("Atlas for Company A");
+  await screen.findByText("Faltan pasos de configuración");
   expect(window.location.pathname).toBe("/companies/1");
 });
 
@@ -185,14 +190,12 @@ test("Today translates authoritative blockers into one next action", async () =>
   window.localStorage.setItem("atlas.locale", "es");
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
     const url = String(input);
-    if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ assistantIdentifier: "default", workspaceId: 1, companyId: 1, status: "blocked", blockers: ["default_assistant_missing", "published_knowledge_missing"], knowledgeVersionId: null, assistantProfileId: null, evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "assistant-readiness-v1", configurationDigest: "a".repeat(64) }));
-    if (url.endsWith("/web-chat-connections") || url.endsWith("/whatsapp-connections")) return Promise.resolve(json([]));
+    if (url.endsWith("/pilot-readiness")) return Promise.resolve(json({ overall:"not_ready",classification:"setup_incomplete",checks:[{id:"default_assistant",required:true,status:"incomplete",owner:"customer",reasonCode:"default_assistant_not_executable",actionPath:"/companies/1/assistant"}],nextAction:"configure_assistant",evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1" }));
     return Promise.resolve(new Response("", { status: 404 }));
   }));
   render(<I18nProvider><CompanySetupChecklist workspace={workspace} companies={[companyA]} company={companyA} onNavigate={() => {}} onChooseCompany={() => {}}/></I18nProvider>);
-  await screen.findByText("Empecemos a configurar tu asistente.");
-  expect(screen.getAllByRole("button")).toHaveLength(1);
-  expect(screen.getByRole("button", { name: "Configurar asistente" })).toBeTruthy();
+  await screen.findByText("Faltan pasos de configuración");
+  expect(screen.getAllByRole("button", { name: "Configurar asistente" })).toHaveLength(2);
   expect(screen.queryByText("default_assistant_missing")).toBeNull();
 });
 

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { atlasApi } from "../api/atlasApi";
-import { DashboardPage } from "../dashboard/DashboardPage";
-import { buildCompanyWorkspaceViewModel, type CompanyWorkspaceSnapshot } from "../dashboard/dashboardPresentation";
+import { PilotReadinessPanel } from "./PilotReadinessPanel";
 import type { Company, WorkspaceSummary } from "../types/api";
 
 interface Props {
@@ -13,50 +12,23 @@ interface Props {
 }
 
 export function CompanySetupChecklist({ workspace, companies, company, onNavigate, onChooseCompany }: Props): React.JSX.Element {
-  const [snapshot, setSnapshot] = useState<CompanyWorkspaceSnapshot | null>(null);
+  const [readiness, setReadiness] = useState<import("../types/api").PilotReadiness | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [generation, setGeneration] = useState(0);
   const retry = useCallback(() => setGeneration((value) => value + 1), []);
 
   useEffect(() => {
     let current = true;
-    setSnapshot(null); setUnavailable(false);
-    void Promise.all([
-    atlasApi.getAssistantReadiness(workspace.id, company.id),
-    atlasApi.listWebChatConnections(workspace.id, company.id),
-    atlasApi.listWhatsAppConnections(workspace.id, company.id),
-  ]).then(async ([readiness, webChat, whatsApp]) => {
-    const whatsAppStatuses = await Promise.all(
-      whatsApp.map((connection) =>
-        atlasApi.getWhatsAppConnectionStatus(
-          workspace.id,
-          company.id,
-          connection.id
-        )
-      )
-    );
-
-    if (current) {
-      setSnapshot({
-        readiness,
-        webChatConnections: webChat.length,
-        whatsAppConnections: whatsApp.length,
-        operationalWebChatConnections: webChat.filter(
-          (connection) => connection.status === "active"
-        ).length,
-        operationalWhatsAppConnections: whatsAppStatuses.filter(
-          (status) =>
-            status.connection.status === "active" &&
-            status.validationState === "valid"
-        ).length,
-      });
-    }
-  }).catch(() => {
+    setReadiness(null); setUnavailable(false);
+    void atlasApi.getPilotReadiness(workspace.id, company.id).then((value) => {
+      if (current) setReadiness(value);
+    }).catch(() => {
     if (current) setUnavailable(true);
   });
     return () => { current = false; };
   }, [workspace.id, company.id, generation]);
 
-  const model = buildCompanyWorkspaceViewModel({ workspace, companies, company, snapshot, loading: !snapshot && !unavailable, unavailable });
-  return <DashboardPage model={model} onNavigate={onNavigate} onRetry={retry} onChooseCompany={onChooseCompany}/>;
+  if (!readiness && !unavailable) return <div className="today-workspace today-workspace--loading" aria-busy="true"><p role="status">Verificando el estado del piloto...</p></div>;
+  if (!readiness) return <div className="today-workspace today-workspace--unavailable"><header className="work-anchor"><h1>Estado del piloto</h1><p role="alert">Estado temporalmente no disponible</p><button className="button button--primary next-action" type="button" onClick={retry}>Reintentar</button></header></div>;
+  return <PilotReadinessPanel companyId={company.id} readiness={readiness} onNavigate={onNavigate}/>;
 }

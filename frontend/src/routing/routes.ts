@@ -17,7 +17,7 @@ export type PortalRoute =
 export type AppRoute =
   | { readonly kind: "public"; readonly name: "guided"; readonly route: GuidedSetupRoute }
   | { readonly kind: "public"; readonly name: "chat"; readonly connectionPublicId: string }
-  | { readonly kind: "admin"; readonly route: "overview" | "workspaces" | "workspace-commercial" | "users" | "user-commercial" | "plans" | "plan-detail" | "not-found"; readonly id?: string }
+  | { readonly kind: "admin"; readonly route: "overview" | "workspaces" | "workspace-readiness" | "workspace-commercial" | "users" | "user-commercial" | "plans" | "plan-detail" | "not-found"; readonly id?: string }
   | { readonly kind: "portal"; readonly route: PortalRoute };
 
 export type AssistantSection = "general" | "capabilities" | "tools" | "automations" | "behavior" | "status" | "test";
@@ -60,6 +60,8 @@ export function parseAppRoute(pathname: string): AppRoute {
   if (chat?.[1]) return { kind: "public", name: "chat", connectionPublicId: chat[1] };
   if (path === "/admin") return { kind: "admin", route: "overview" };
   if (path === "/admin/workspaces") return { kind: "admin", route: "workspaces" };
+  const workspaceReadiness = /^\/admin\/workspaces\/([a-zA-Z0-9_-]+)\/pilot-readiness$/.exec(path);
+  if (workspaceReadiness?.[1]) return { kind: "admin", route: "workspace-readiness", id: workspaceReadiness[1] };
   const workspaceCommercial = /^\/admin\/workspaces\/([a-zA-Z0-9_-]+)$/.exec(path);
   if (workspaceCommercial?.[1]) return { kind: "admin", route: "workspace-commercial", id: workspaceCommercial[1] };
   if (path === "/admin/users") return { kind: "admin", route: "users" };

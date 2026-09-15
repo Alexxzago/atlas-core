@@ -13,6 +13,8 @@ import type { CompanyOperationalStatusService } from "../company/services/compan
 import { createGetCompanyOperationalStatusController } from "../controllers/companyOperationalStatusController.js";
 import type { SchedulingConfigurationService } from "../scheduling/services/schedulingConfigurationService.js";
 import { createGetSchedulingConfigurationController, createMutateSchedulingConfigurationController } from "../controllers/schedulingConfigurationController.js";
+import type { PilotReadinessService } from "../onboarding/services/pilotReadinessService.js";
+import { createGetPilotReadinessController } from "../controllers/pilotReadinessController.js";
 
 interface ContextualControllers {
   list: (context: WorkspaceContext) => RequestHandler;
@@ -90,6 +92,7 @@ interface AuthorizedCompanyDependencies {
   pdfBodyParser?: RequestHandler;
   commercial?: CommercialControlsRepository;
   schedulingConfigurationService?: SchedulingConfigurationService;
+  pilotReadinessService?: PilotReadinessService;
 }
 
 let productionConversationMessageController: ((context: WorkspaceContext, actor: ActorContext) => RequestHandler) | null = null;
@@ -104,6 +107,7 @@ let productionVoicePolicyControllers: ContextualVoicePolicyControllers | null = 
 let productionProactiveActionControllers: ContextualProactiveActionControllers | null = null;
 let productionCompanyOperationalStatusService: CompanyOperationalStatusService | null = null;
 let productionSchedulingConfigurationService: SchedulingConfigurationService | null = null;
+let productionPilotReadinessService: PilotReadinessService | null = null;
 export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
 export function configureProductionConversationReadControllers(controllers: ContextualConversationReadControllers): void { productionConversationReadControllers = controllers; }
 export function configureProductionConversationControlControllers(controllers: ContextualConversationControlControllers): void { productionConversationControlControllers = controllers; }
@@ -116,6 +120,7 @@ export function configureProductionVoicePolicyControllers(controllers: Contextua
 export function configureProductionProactiveActionControllers(controllers: ContextualProactiveActionControllers): void { productionProactiveActionControllers = controllers; }
 export function configureProductionCompanyOperationalStatusService(service: CompanyOperationalStatusService): void { productionCompanyOperationalStatusService = service; }
 export function configureProductionSchedulingConfigurationService(service: SchedulingConfigurationService): void { productionSchedulingConfigurationService = service; }
+export function configureProductionPilotReadinessService(service: PilotReadinessService): void { productionPilotReadinessService = service; }
 
 function rawCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -212,6 +217,8 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     router.get("/:workspaceId/companies/:companyId/assistant/readiness", authorize("company:read", false, readiness.get));
     router.post("/:workspaceId/companies/:companyId/assistant/readiness/refresh", authorize("company:manage", true, readiness.refresh));
   }
+  const pilotReadiness = dependencies.pilotReadinessService ?? productionPilotReadinessService;
+  if (pilotReadiness) router.get("/:workspaceId/companies/:companyId/pilot-readiness", authorize("company:read", false, (context) => createGetPilotReadinessController(pilotReadiness, context)));
   const operationalStatus = dependencies.companyOperationalStatusService ?? productionCompanyOperationalStatusService;
   if (operationalStatus) router.get("/:workspaceId/companies/:companyId/operational-status", authorize("company:read", false, (context) => createGetCompanyOperationalStatusController(operationalStatus, context)));
   const schedulingConfiguration = dependencies.schedulingConfigurationService ?? productionSchedulingConfigurationService;
