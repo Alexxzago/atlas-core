@@ -134,7 +134,7 @@ test("EPIC-042 migrations 0056-0058 are additive, tenant-scoped, and advance the
       .get() as { id: number; name: string };
     assert.deepEqual(
       { ...head },
-      { id: 73, name: "0073_scheduling_configuration_controls" },
+      { id: 74, name: "0074_billing_versioned_plan_provider_commercial_offers" },
     );
     assert.ok(
       database

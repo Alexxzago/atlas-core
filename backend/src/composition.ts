@@ -144,6 +144,7 @@ import { PlatformAdministratorRepository } from "./repositories/platformAdminist
 import { PlatformAdministrationRepository } from "./repositories/platformAdministrationRepository.js";
 import { PlatformAuthorizationService } from "./platformAdmin/services/platformAuthorizationService.js";
 import { PlatformAdministrationService } from "./platformAdmin/services/platformAdministrationService.js";
+import { BillingCatalogAdministrationRepository } from "./repositories/billingCatalogAdministrationRepository.js";
 import { createPlatformAdminControllers } from "./controllers/platformAdminController.js";
 import { createPlatformAdminRouter } from "./routes/platformAdmin.js";
 import { configureProductionAssistantCapabilityControllers, configureProductionCommercialControls } from "./routes/authorizedCompanies.js";
@@ -404,7 +405,7 @@ const whatsAppWebhookRouter = runtimeConfiguration && !runtimeConfiguration.what
 const billingWebhookRouter = createBillingWebhookRouter({stripe:createBillingWebhookController(billingWebhookService,"stripe"),mercadoPago:createBillingWebhookController(billingWebhookService,"mercadopago")});
 export const workspacesRouter=createWorkspacesRouter(createWorkspaceAdministrationControllers(workspaceAdministrationService,authenticationService,requestOriginPolicy));
 const billingRouter=createBillingRouter({authentication:authenticationService,users:new UserRepository(database),authorization:authorizationService,resolver:authenticatedWorkspaceResolver,originPolicy:requestOriginPolicy,controllers:createBillingControllers(billingApplicationService,rateLimits)});
-export const platformAdminRouter=createPlatformAdminRouter(authenticationService,platformAuthorizationService,createPlatformAdminControllers(new PlatformAdministrationService(new PlatformAdministrationRepository(database),new CommercialControlsRepository(database))),requestOriginPolicy);
+export const platformAdminRouter=createPlatformAdminRouter(authenticationService,platformAuthorizationService,createPlatformAdminControllers(new PlatformAdministrationService(new PlatformAdministrationRepository(database),new CommercialControlsRepository(database),new BillingCatalogAdministrationRepository(database),billingProviderRegistry)),requestOriginPolicy);
 function createProductionAuthorizedCompaniesRouter(execution: AssistantExecutionPort) {
   const runtime = new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), identityClock, execution===agent?productionAssistantTools:undefined);
 const preview = new AssistantPreviewService(companyRepository, knowledgeRepository, new AssistantProfileRepository(database), runtime, "gemini", knowledgeRetrievalService, rateLimits);

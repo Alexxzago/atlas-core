@@ -49,6 +49,13 @@ export interface WorkspaceSummary {
 }
 export type Permission = "workspace:read"|"workspace:manage"|"company:read"|"company:manage"|"onboarding:run"|"chat:use"|"conversation:message:send"|"conversation:manage"|"assistant:preview"|"assistant:capability:manage"|"knowledge:read"|"knowledge:ingest"|"knowledge:publish"|"knowledge:archive"|"membership:list"|"membership:invite"|"membership:manage"|"administrator:manage"|"owner:manage"|"owner:transfer";
 
+export type BillingSubscriptionState = "unmanaged"|"trial"|"active"|"canceling_at_period_end"|"grace"|"paused"|"payment_required"|"canceled"|"reconciliation_required";
+export interface CustomerBillingCapabilities { canOpenBillingPortal:boolean; canCancel:boolean; canReactivate:boolean; canStartNewCheckout:boolean; canSwitchProvider:false; }
+export interface CustomerBillingSummary { rolloutMode:"unmanaged"|"managed"; subscription:{state:BillingSubscriptionState;plan:{key:string;name:string;interval:"month"|"year";currency:string;amountMinor:number}|null}; entitlement:{state:"enabled"|"grace_enabled"|"restricted"|"suspended"|"unavailable";maxCompanies:number|null;maxAssistantProfiles:number|null;maxActiveChannels:number|null;mutationEligible:boolean;effectiveAt:string;expiresAt:string|null}|null; capabilities:CustomerBillingCapabilities; }
+export interface CustomerBillingOffer { offerId:string; provider:"stripe"|"mercadopago"; key:string; version:number; name:string; description:string; inclusions:Array<{code:string;title:string;description:string}>; interval:"month"|"year"; currency:string; amountMinor:number; checkoutAvailable:boolean; }
+export interface CustomerBillingManagementActions { actions:Array<"portal"|"cancel"|"reactivate">; capabilities:CustomerBillingCapabilities; }
+export type CustomerBillingOperation = { status:"succeeded"|"failed"|"uncertain"|"in_progress"|"conflict"|"invalid"|"unavailable"|"unsupported"; redirectUrl?:string };
+
 export type ConversationControlState = "automated" | "human_required" | "human_controlled";
 export interface ConversationDelivery { state: "pending" | "leased" | "accepted" | "delivered" | "read" | "retryable" | "permanent_failure" | "uncertain"; updatedAt: string; safeErrorCategory: string | null; }
 export interface ConversationInboxItem { conversationId: string; channel: "internal" | "web_chat" | "whatsapp"; state: "open" | "closed"; controlState: ConversationControlState; controlledByCurrentActor: boolean; attentionReason: string | null; takenAt: string | null; releasedAt: string | null; lastOperatorActivityAt: string | null; resolvedAt: string | null; controlVersion: number; updatedAt: string; contactLabel: string; participant: string | null; preview: string | null; deliveryCategory: "received" | "sent" | null; lastActivityAt: string; delivery: ConversationDelivery | null; unreadCount: number; }
@@ -87,6 +94,17 @@ export interface PlatformWorkspaceCommercialControls { workspaceId:number; statu
 export interface PlatformUserCommercialUsage { ownedWorkspaces:number; }
 export interface PlatformUserCommercialControls { userId:string; maxOwnedWorkspaces:number|null; usage:PlatformUserCommercialUsage; version:number; createdAt:string; updatedAt:string; }
 export interface CommercialControlAuditEvent { id:string; actorUserId:string; subjectType:"user"|"workspace"; subjectId:string; eventType:string; oldValue:Record<string,unknown>; newValue:Record<string,unknown>; version:number; occurredAt:string; }
+export type BillingPlanPublicationState = "draft" | "published" | "retired";
+export type BillingOfferProviderKind = "stripe" | "mercadopago";
+export type BillingOfferInterval = "month" | "year";
+export type BillingOfferReadinessState = "not_configured" | "invalid" | "unavailable" | "ready";
+export type BillingOfferLifecycle = "draft" | "sellable" | "retired";
+export interface PlatformBillingPlan { id:string; planKey:string; catalogVersion:number; displayName:string; description:string; publicationState:BillingPlanPublicationState; trialDurationDays:number|null; graceDurationDays:number|null; maxCompanies:number|null; maxAssistantProfiles:number|null; maxActiveChannels:number|null; mutationEligible:boolean; version:number; subscriberCount:number; }
+export interface PlatformBillingOffer { id:string; catalogEntryId:string; providerKind:BillingOfferProviderKind; offerVersion:number; currency:string; amountMinor:number; interval:BillingOfferInterval; readinessState:BillingOfferReadinessState; lifecycle:BillingOfferLifecycle; version:number; }
+export interface PlatformBillingPlanAudit { id:string; operationId:string; eventType:string; resultingVersion:number; occurredAt:string; }
+export interface PlatformBillingPlanDetail extends PlatformBillingPlan { offers:PlatformBillingOffer[]; audit:PlatformBillingPlanAudit[]; }
+export interface PlatformBillingPlanWrite { operationId:string; planKey:string; catalogVersion:number; displayName:string; description:string; inclusions:string[]; maxCompanies:number|null; maxAssistantProfiles:number|null; maxActiveChannels:number|null; mutationEligible:boolean; trialDurationDays:number|null; graceDurationDays:number|null; }
+export interface PlatformBillingOfferWrite { operationId:string; expectedVersion:number; providerKind:BillingOfferProviderKind; amountMinor:number; interval:BillingOfferInterval; providerPlanReference:string; readinessState:BillingOfferReadinessState; }
 
 export interface SessionBootstrapResponse {
   status: "authenticated";

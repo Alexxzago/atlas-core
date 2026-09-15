@@ -74,7 +74,7 @@ test("EPIC044 upgrades 0059 data without changing delivery order or event cursor
     assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
     database.close();
     const reopened = new DatabaseSync(path); reopened.exec("PRAGMA foreign_keys=ON"); runMigrations(reopened);
-    assert.deepEqual({ ...(reopened.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as Record<string, unknown>) }, { id: 73, name: "0073_scheduling_configuration_controls" });
+    assert.deepEqual({ ...(reopened.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as Record<string, unknown>) }, { id: 74, name: "0074_billing_versioned_plan_provider_commercial_offers" });
     assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=60").get() as { count: number }).count, 1);
     assert.equal(reopened.prepare("SELECT id FROM schema_migrations WHERE id=61").get(), undefined);
     assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=62").get() as { count: number }).count, 1);

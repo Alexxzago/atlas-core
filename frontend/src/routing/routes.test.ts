@@ -7,6 +7,8 @@ test("parses the frozen portal route hierarchy", () => {
   assert.deepEqual(parsePortalRoute("/companies/42/channels/web-chat"), { name: "company-web-chat", companyId: 42 });
   assert.deepEqual(parsePortalRoute("/companies/42/knowledge"), { name: "company-knowledge", companyId: 42 });
   assert.deepEqual(parsePortalRoute("/dashboard"), { name: "dashboard" });
+  assert.deepEqual(parsePortalRoute("/billing"), { name: "billing" });
+  assert.deepEqual(parsePortalRoute("/billing/checkout/success"), { name: "billing" });
 });
 
 test("rejects invalid company identifiers without a resource lookup", () => {
@@ -40,5 +42,8 @@ test("classifies public and authenticated application routes", () => {
   assert.deepEqual(parseAppRoute("/admin/workspaces"), { kind: "admin", route: "workspaces" });
   assert.deepEqual(parseAppRoute("/admin/workspaces/wsp_1"), { kind: "admin", route: "workspace-commercial", id: "wsp_1" });
   assert.deepEqual(parseAppRoute("/admin/users/usr_1"), { kind: "admin", route: "user-commercial", id: "usr_1" });
+  assert.deepEqual(parseAppRoute("/admin/plans"), { kind: "admin", route: "plans" });
+  assert.deepEqual(parseAppRoute("/admin/plans/bce_0123456789abcdef0123456789abcdef"), { kind: "admin", route: "plan-detail", id: "bce_0123456789abcdef0123456789abcdef" });
+  assert.deepEqual(parseAppRoute("/admin/plans/not-a-plan"), { kind: "admin", route: "not-found" });
   assert.deepEqual(parseAppRoute("/companies"), { kind: "portal", route: { name: "companies" } });
 });

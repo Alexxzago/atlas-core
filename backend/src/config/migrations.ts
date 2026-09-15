@@ -2248,6 +2248,85 @@ const migrations: Migration[] = [
     CREATE TRIGGER scheduling_configuration_audit_events_no_update BEFORE UPDATE ON scheduling_configuration_audit_events BEGIN SELECT RAISE(ABORT,'Scheduling configuration audit events are append-only'); END;
     CREATE TRIGGER scheduling_configuration_audit_events_no_delete BEFORE DELETE ON scheduling_configuration_audit_events BEGIN SELECT RAISE(ABORT,'Scheduling configuration audit events are append-only'); END;
   `);}},
+  { id:74,name:"0074_billing_versioned_plan_provider_commercial_offers",checksumSource:"billing-provider-independent-plan-versions-v1|immutable-provider-commercial-offers-v1|catalog-operation-audit-v1|legacy-catalog-offer-backfill-v1",apply(database):void{database.exec(`
+    ALTER TABLE billing_accounts ADD COLUMN trial_consumed_at TEXT;
+    ALTER TABLE billing_catalog_entries ADD COLUMN description TEXT NOT NULL DEFAULT '' CHECK(length(description)<=2000);
+    ALTER TABLE billing_catalog_entries ADD COLUMN publication_state TEXT NOT NULL DEFAULT 'draft' CHECK(publication_state IN ('draft','published','retired'));
+    ALTER TABLE billing_catalog_entries ADD COLUMN trial_duration_days INTEGER CHECK(trial_duration_days IS NULL OR trial_duration_days>0);
+    ALTER TABLE billing_catalog_entries ADD COLUMN grace_duration_days INTEGER CHECK(grace_duration_days IS NULL OR grace_duration_days>0);
+    ALTER TABLE billing_catalog_entries ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK(version>0);
+    ALTER TABLE billing_catalog_entries ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+    UPDATE billing_catalog_entries SET updated_at=created_at WHERE updated_at='';
+    UPDATE billing_catalog_entries SET publication_state=CASE lifecycle_state WHEN 'active' THEN 'published' ELSE 'retired' END;
+    DROP TRIGGER billing_catalog_entries_immutable;
+    CREATE TRIGGER billing_catalog_entries_immutable BEFORE UPDATE OF plan_key,catalog_version,display_name,billing_interval,currency,amount_minor,entitlement_max_companies,entitlement_max_assistant_profiles,entitlement_max_active_channels,entitlement_mutation_eligible,entitlement_definition_version,provider_kind,provider_price_id,description,trial_duration_days,grace_duration_days,created_at ON billing_catalog_entries WHEN OLD.publication_state!='draft' BEGIN SELECT RAISE(ABORT,'Published billing catalog terms are immutable'); END;
+    CREATE TRIGGER billing_catalog_entries_no_unretire BEFORE UPDATE OF publication_state ON billing_catalog_entries WHEN OLD.publication_state='retired' AND NEW.publication_state!='retired' BEGIN SELECT RAISE(ABORT,'Retired billing catalog entries cannot be reactivated'); END;
+    CREATE TABLE billing_provider_commercial_offers(
+      id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 80),
+      catalog_entry_id TEXT NOT NULL REFERENCES billing_catalog_entries(id) ON DELETE RESTRICT,
+      provider_kind TEXT NOT NULL CHECK(provider_kind IN ('stripe','mercadopago')),
+      offer_version INTEGER NOT NULL CHECK(offer_version>0),
+      currency TEXT NOT NULL CHECK(currency GLOB '[A-Z][A-Z][A-Z]' AND ((provider_kind='stripe' AND currency='USD') OR (provider_kind='mercadopago' AND currency='ARS'))),
+      amount_minor INTEGER NOT NULL CHECK(typeof(amount_minor)='integer' AND amount_minor>0),
+      billing_interval TEXT NOT NULL CHECK(billing_interval IN ('month','year')),
+      provider_plan_reference TEXT NOT NULL CHECK(length(provider_plan_reference) BETWEEN 1 AND 200),
+      readiness_state TEXT NOT NULL CHECK(readiness_state IN ('not_configured','invalid','unavailable','ready')),
+      lifecycle_state TEXT NOT NULL CHECK(lifecycle_state IN ('draft','sellable','retired')),
+      version INTEGER NOT NULL DEFAULT 1 CHECK(version>0),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(catalog_entry_id,provider_kind,offer_version),
+      UNIQUE(provider_kind,provider_plan_reference)
+    );
+    CREATE UNIQUE INDEX uq_billing_provider_commercial_offers_sellable ON billing_provider_commercial_offers(catalog_entry_id,provider_kind,billing_interval) WHERE lifecycle_state='sellable';
+    CREATE INDEX idx_billing_provider_commercial_offers_catalog ON billing_provider_commercial_offers(catalog_entry_id,provider_kind,lifecycle_state,offer_version DESC);
+    CREATE TRIGGER billing_provider_commercial_offers_immutable BEFORE UPDATE OF catalog_entry_id,provider_kind,offer_version,currency,amount_minor,billing_interval,provider_plan_reference,created_at ON billing_provider_commercial_offers WHEN OLD.lifecycle_state!='draft' BEGIN SELECT RAISE(ABORT,'Billing provider commercial offer terms are immutable'); END;
+    CREATE TRIGGER billing_provider_commercial_offers_sellable_parent BEFORE INSERT ON billing_provider_commercial_offers WHEN NEW.lifecycle_state='sellable' AND NOT EXISTS(SELECT 1 FROM billing_catalog_entries WHERE id=NEW.catalog_entry_id AND publication_state='published') BEGIN SELECT RAISE(ABORT,'Sellable billing provider offer requires published catalog'); END;
+    CREATE TRIGGER billing_provider_commercial_offers_sellable_parent_update BEFORE UPDATE OF lifecycle_state ON billing_provider_commercial_offers WHEN NEW.lifecycle_state='sellable' AND NOT EXISTS(SELECT 1 FROM billing_catalog_entries WHERE id=NEW.catalog_entry_id AND publication_state='published') BEGIN SELECT RAISE(ABORT,'Sellable billing provider offer requires published catalog'); END;
+    CREATE TRIGGER billing_provider_commercial_offers_final_sellable BEFORE UPDATE OF lifecycle_state ON billing_provider_commercial_offers WHEN OLD.lifecycle_state='sellable' AND NEW.lifecycle_state='retired' AND EXISTS(SELECT 1 FROM billing_catalog_entries WHERE id=OLD.catalog_entry_id AND publication_state='published') AND NOT EXISTS(SELECT 1 FROM billing_provider_commercial_offers WHERE catalog_entry_id=OLD.catalog_entry_id AND lifecycle_state='sellable' AND id!=OLD.id) BEGIN SELECT RAISE(ABORT,'Published billing catalog requires a sellable provider offer'); END;
+    CREATE TRIGGER billing_catalog_entries_publication BEFORE UPDATE OF publication_state ON billing_catalog_entries WHEN OLD.publication_state='draft' AND NEW.publication_state='published' AND NOT EXISTS(SELECT 1 FROM billing_provider_commercial_offers WHERE catalog_entry_id=OLD.id AND readiness_state='ready' AND lifecycle_state='draft') BEGIN SELECT RAISE(ABORT,'Published billing catalog requires a ready draft provider offer'); END;
+    INSERT INTO billing_provider_commercial_offers(id,catalog_entry_id,provider_kind,offer_version,currency,amount_minor,billing_interval,provider_plan_reference,readiness_state,lifecycle_state,version,created_at,updated_at)
+      SELECT 'bpco_' || lower(hex(randomblob(16))),id,provider_kind,1,currency,amount_minor,billing_interval,provider_price_id,'ready',CASE WHEN publication_state='published' THEN 'sellable' ELSE 'retired' END,1,created_at,created_at
+      FROM billing_catalog_entries WHERE provider_kind IS NOT NULL AND provider_price_id IS NOT NULL AND amount_minor>0;
+    ALTER TABLE billing_subscriptions ADD COLUMN provider_commercial_offer_id TEXT REFERENCES billing_provider_commercial_offers(id) ON DELETE RESTRICT;
+    UPDATE billing_subscriptions SET provider_commercial_offer_id=(SELECT o.id FROM billing_provider_commercial_offers o WHERE o.catalog_entry_id=billing_subscriptions.catalog_entry_id AND o.provider_kind=billing_subscriptions.provider_kind ORDER BY o.offer_version LIMIT 1) WHERE catalog_entry_id IS NOT NULL AND provider_kind IS NOT NULL;
+    CREATE TRIGGER billing_subscriptions_provider_offer_scope_insert BEFORE INSERT ON billing_subscriptions WHEN NEW.provider_commercial_offer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing_provider_commercial_offers o WHERE o.id=NEW.provider_commercial_offer_id AND o.catalog_entry_id=NEW.catalog_entry_id AND o.provider_kind=NEW.provider_kind) BEGIN SELECT RAISE(ABORT,'Billing subscription provider offer is incompatible'); END;
+    CREATE TRIGGER billing_subscriptions_provider_offer_scope_update BEFORE UPDATE OF catalog_entry_id,provider_kind,provider_commercial_offer_id ON billing_subscriptions WHEN NEW.provider_commercial_offer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing_provider_commercial_offers o WHERE o.id=NEW.provider_commercial_offer_id AND o.catalog_entry_id=NEW.catalog_entry_id AND o.provider_kind=NEW.provider_kind) BEGIN SELECT RAISE(ABORT,'Billing subscription provider offer is incompatible'); END;
+    ALTER TABLE billing_operations ADD COLUMN provider_commercial_offer_id TEXT REFERENCES billing_provider_commercial_offers(id) ON DELETE RESTRICT;
+    UPDATE billing_operations SET provider_commercial_offer_id=(SELECT o.id FROM billing_provider_commercial_offers o WHERE o.catalog_entry_id=billing_operations.catalog_entry_id AND o.provider_kind=billing_operations.provider_kind ORDER BY o.offer_version LIMIT 1) WHERE operation_kind='checkout_session_create' AND catalog_entry_id IS NOT NULL;
+    ALTER TABLE billing_checkout_enrollments ADD COLUMN provider_commercial_offer_id TEXT REFERENCES billing_provider_commercial_offers(id) ON DELETE RESTRICT;
+    UPDATE billing_checkout_enrollments SET provider_commercial_offer_id=(SELECT o.id FROM billing_provider_commercial_offers o WHERE o.catalog_entry_id=billing_checkout_enrollments.catalog_entry_id AND o.provider_kind=billing_checkout_enrollments.provider_kind ORDER BY o.offer_version LIMIT 1);
+    CREATE TRIGGER billing_checkout_enrollments_provider_offer_backfill AFTER INSERT ON billing_checkout_enrollments WHEN NEW.provider_commercial_offer_id IS NULL BEGIN UPDATE billing_checkout_enrollments SET provider_commercial_offer_id=(SELECT o.id FROM billing_provider_commercial_offers o WHERE o.catalog_entry_id=NEW.catalog_entry_id AND o.provider_kind=NEW.provider_kind AND o.lifecycle_state='sellable' AND o.readiness_state='ready' ORDER BY o.offer_version DESC LIMIT 1) WHERE id=NEW.id; END;
+    CREATE TRIGGER billing_checkout_enrollments_provider_offer_scope_insert BEFORE INSERT ON billing_checkout_enrollments WHEN NEW.provider_commercial_offer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing_provider_commercial_offers o WHERE o.id=NEW.provider_commercial_offer_id AND o.catalog_entry_id=NEW.catalog_entry_id AND o.provider_kind=NEW.provider_kind) BEGIN SELECT RAISE(ABORT,'Billing checkout provider offer is incompatible'); END;
+    CREATE UNIQUE INDEX uq_billing_open_checkout_enrollment ON billing_checkout_enrollments(billing_account_id) WHERE status IN ('pending','ready');
+    CREATE UNIQUE INDEX uq_billing_open_checkout_operation ON billing_operations(billing_account_id) WHERE operation_kind='checkout_session_create' AND status IN ('pending','request_started','uncertain');
+    CREATE TABLE billing_catalog_inclusions(
+      catalog_entry_id TEXT NOT NULL REFERENCES billing_catalog_entries(id) ON DELETE RESTRICT,
+      inclusion_code TEXT NOT NULL CHECK(inclusion_code IN ('knowledge','scheduling','proactive_actions','whatsapp','web_chat','automation','priority_support')),
+      display_title TEXT NOT NULL CHECK(length(display_title) BETWEEN 1 AND 160),
+      display_description TEXT NOT NULL DEFAULT '' CHECK(length(display_description)<=1000),
+      sort_order INTEGER NOT NULL CHECK(sort_order>=0),
+      PRIMARY KEY(catalog_entry_id,inclusion_code),
+      UNIQUE(catalog_entry_id,sort_order)
+    );
+    CREATE TRIGGER billing_catalog_inclusions_immutable BEFORE UPDATE ON billing_catalog_inclusions WHEN (SELECT publication_state FROM billing_catalog_entries WHERE id=OLD.catalog_entry_id)!='draft' BEGIN SELECT RAISE(ABORT,'Published billing catalog inclusions are immutable'); END;
+    CREATE TRIGGER billing_catalog_inclusions_no_delete BEFORE DELETE ON billing_catalog_inclusions WHEN (SELECT publication_state FROM billing_catalog_entries WHERE id=OLD.catalog_entry_id)!='draft' BEGIN SELECT RAISE(ABORT,'Published billing catalog inclusions are immutable'); END;
+    CREATE TABLE billing_catalog_operations(
+      id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 80),catalog_entry_id TEXT NOT NULL REFERENCES billing_catalog_entries(id) ON DELETE RESTRICT,operation_id TEXT NOT NULL CHECK(length(operation_id) BETWEEN 1 AND 200),request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),expected_version INTEGER NOT NULL CHECK(expected_version>0),resulting_version INTEGER CHECK(resulting_version IS NULL OR resulting_version>0),actor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,outcome TEXT NOT NULL CHECK(outcome IN ('applied','conflict','invalid')),safe_result_json TEXT NOT NULL CHECK(json_valid(safe_result_json) AND length(safe_result_json)<=4096),occurred_at TEXT NOT NULL,UNIQUE(catalog_entry_id,operation_id)
+    );
+    CREATE INDEX idx_billing_catalog_operations_catalog ON billing_catalog_operations(catalog_entry_id,occurred_at,id);
+    CREATE TRIGGER billing_catalog_operations_no_update BEFORE UPDATE ON billing_catalog_operations BEGIN SELECT RAISE(ABORT,'Billing catalog operations are append-only'); END;
+    CREATE TRIGGER billing_catalog_operations_no_delete BEFORE DELETE ON billing_catalog_operations BEGIN SELECT RAISE(ABORT,'Billing catalog operations are append-only'); END;
+    CREATE TABLE billing_catalog_audit_events(
+      id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 80),catalog_entry_id TEXT NOT NULL REFERENCES billing_catalog_entries(id) ON DELETE RESTRICT,operation_id TEXT NOT NULL,actor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,event_type TEXT NOT NULL CHECK(length(event_type) BETWEEN 1 AND 100),old_value_json TEXT NOT NULL CHECK(json_valid(old_value_json) AND length(old_value_json)<=4096),new_value_json TEXT NOT NULL CHECK(json_valid(new_value_json) AND length(new_value_json)<=4096),resulting_version INTEGER NOT NULL CHECK(resulting_version>0),occurred_at TEXT NOT NULL,FOREIGN KEY(catalog_entry_id,operation_id) REFERENCES billing_catalog_operations(catalog_entry_id,operation_id) ON DELETE RESTRICT
+    );
+    CREATE INDEX idx_billing_catalog_audit_catalog ON billing_catalog_audit_events(catalog_entry_id,occurred_at,id);
+    CREATE TRIGGER billing_catalog_audit_events_no_update BEFORE UPDATE ON billing_catalog_audit_events BEGIN SELECT RAISE(ABORT,'Billing catalog audit events are append-only'); END;
+    CREATE TRIGGER billing_catalog_audit_events_no_delete BEFORE DELETE ON billing_catalog_audit_events BEGIN SELECT RAISE(ABORT,'Billing catalog audit events are append-only'); END;
+    ALTER TABLE billing_provider_events ADD COLUMN billing_account_id TEXT REFERENCES billing_accounts(id) ON DELETE SET NULL;
+    ALTER TABLE billing_provider_events ADD COLUMN safe_failure_code TEXT CHECK(safe_failure_code IS NULL OR length(safe_failure_code) BETWEEN 1 AND 100);
+    CREATE INDEX idx_billing_provider_events_account_received ON billing_provider_events(billing_account_id,received_at DESC,id DESC);
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {
