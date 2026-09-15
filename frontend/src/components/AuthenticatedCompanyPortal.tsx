@@ -29,13 +29,13 @@ import { BillingPage } from "./BillingPage";
 import { ProductBootstrapState } from "./ProductBootstrapState";
 import { resolveProductBootstrap } from "../routing/productBootstrap";
 
-interface Props { csrf: string; userId?: string | undefined; email: string; isPlatformAdmin?: boolean; onPassword: () => void; onLogout: () => void }
+interface Props { csrf: string; userId?: string | undefined; email: string; isPlatformAdmin?: boolean; onPassword: () => void; onLogout: () => Promise<void> | void; logoutPending?: boolean | undefined; logoutError?: string | undefined }
 
-export function AuthenticatedCompanyPortal({ csrf, userId, email, isPlatformAdmin, onPassword, onLogout }: Props): React.JSX.Element {
-  return <AuthenticatedPortalProvider csrf={csrf}><AuthenticatedCompanyPortalContent csrf={csrf} userId={userId} email={email} isPlatformAdmin={isPlatformAdmin ?? false} onPassword={onPassword} onLogout={onLogout} /></AuthenticatedPortalProvider>;
+export function AuthenticatedCompanyPortal({ csrf, userId, email, isPlatformAdmin, onPassword, onLogout, logoutPending, logoutError }: Props): React.JSX.Element {
+  return <AuthenticatedPortalProvider csrf={csrf}><AuthenticatedCompanyPortalContent csrf={csrf} userId={userId} email={email} isPlatformAdmin={isPlatformAdmin ?? false} onPassword={onPassword} onLogout={onLogout} logoutPending={logoutPending} logoutError={logoutError} /></AuthenticatedPortalProvider>;
 }
 
-function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmin, onPassword, onLogout }: Props): React.JSX.Element {
+function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmin, onPassword, onLogout, logoutPending, logoutError }: Props): React.JSX.Element {
   const { t } = useI18n();
    const { route, navigate, search, pathname } = useRouter();
   const [routeCompanyValidation, setRouteCompanyValidation] = useState<CompanyRouteValidation>({ key: null, status: "idle" });
@@ -116,9 +116,9 @@ function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmi
     return <></>;
   };
 
-  if (workspaceSuspended) return <main className="app-shell"><section className="auth-card"><h1>Workspace suspendido</h1><p>El acceso a este workspace está suspendido. Contactá a tu administrador para reactivarlo.</p><button onClick={onLogout}>Cerrar sesión</button></section></main>;
+   if (workspaceSuspended) return <main className="app-shell"><section className="auth-card"><h1>Workspace suspendido</h1><p>El acceso a este workspace está suspendido. Contactá a tu administrador para reactivarlo.</p><button disabled={logoutPending} onClick={()=>void onLogout()}>{logoutPending?"Cerrando sesión...":"Cerrar sesión"}</button>{logoutError&&<p role="alert">{logoutError}</p>}</section></main>;
    if (onboardingRedirect) return <StartupState />;
-   return <AppShell route={route} workspace={state.selectedWorkspace} workspaces={state.workspaces} companies={state.companies} selectedCompany={selectedCompany} companiesLoading={state.companiesLoading || companyAutoSelecting} companyError={state.companyError} companyCreating={state.companyCreating} companyTransitioning={routeCompanyState === "loading" || companyAutoSelecting} companyAutoSelecting={companyAutoSelecting} bootstrapping={bootstrap.state === "bootstrapping"} email={email} isPlatformAdmin={isPlatformAdmin ?? false} onNavigate={navigate} onSelectWorkspace={(id) => { void selectWorkspace(id).then((selected) => { if (selected) navigate("/companies", { replace: true }); }); }} onSelectCompany={(id) => navigate(`/companies/${id}`)} onCreateCompany={createCompany} onRetryCompanies={refreshCompanies} onPassword={onPassword} onLogout={onLogout}>
+   return <AppShell route={route} workspace={state.selectedWorkspace} workspaces={state.workspaces} companies={state.companies} selectedCompany={selectedCompany} companiesLoading={state.companiesLoading || companyAutoSelecting} companyError={state.companyError} companyCreating={state.companyCreating} companyTransitioning={routeCompanyState === "loading" || companyAutoSelecting} companyAutoSelecting={companyAutoSelecting} bootstrapping={bootstrap.state === "bootstrapping"} email={email} isPlatformAdmin={isPlatformAdmin ?? false} onNavigate={navigate} onSelectWorkspace={(id) => { void selectWorkspace(id).then((selected) => { if (selected) navigate("/companies", { replace: true }); }); }} onSelectCompany={(id) => navigate(`/companies/${id}`)} onCreateCompany={createCompany} onRetryCompanies={refreshCompanies} onPassword={onPassword} onLogout={onLogout} logoutPending={logoutPending} logoutError={logoutError}>
     {state.notice && <div className={`portal-notice inline-message inline-message--${state.notice.type}`} role={state.notice.type === "error" ? "alert" : "status"}><span>{t(state.notice.key as Parameters<typeof t>[0])}</span>{state.notice.type === "success" && <button className="button button--quiet button--compact" type="button" onClick={clearNotice}>{t("common.close")}</button>}</div>}
     {bootstrap.state === "bootstrapping" ? <ProductBootstrapState progress={bootstrap}/> : <RouteLoadingBoundary loading={state.workspacesLoading || state.pendingWorkspaceId !== null || companyAutoSelecting || routeCompanyState === "loading"}><RouteErrorBoundary active={route.name === "not-found" || routeCompanyState === "error"} onBack={() => navigate("/companies", { replace: true })}>{routeContent()}</RouteErrorBoundary></RouteLoadingBoundary>}
   </AppShell>;

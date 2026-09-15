@@ -16,7 +16,7 @@ test("guides a first-time user to configure an assistant without profile termino
   render(<I18nProvider><AssistantProfilesPanel csrf="csrf" workspaceId={null} workspaceRole={null} capabilities={["company:manage"]} companyId={null} companyName={null} companySelected profiles={[]} selectedProfile={null} transientArchivedProfile={null} loading={false} error={false} formMode="closed" submitting={false} transitionTarget={null} onSelectProfile={() => {}} onOpenCreate={openCreate} onOpenEdit={() => {}} onCloseForm={() => {}} onSubmitForm={() => {}} onTransition={() => {}} onRetry={() => {}}/></I18nProvider>);
   expect(screen.getByText("Assistant configuration")).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Configure how your assistant will work" })).toBeTruthy();
-  expect(screen.getByText("Role and goal")).toBeTruthy();
+   expect(screen.getByText("Role and goal")).toBeTruthy();
   expect(screen.getByText("How it should respond")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Configure assistant" }));
   expect(openCreate).toHaveBeenCalledTimes(1);

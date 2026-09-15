@@ -27,7 +27,9 @@ interface AppShellProps {
   readonly onCreateCompany: (input: CompanyInput) => Promise<boolean>;
   readonly onRetryCompanies: () => void;
   readonly onPassword: () => void;
-  readonly onLogout: () => void;
+  readonly onLogout: () => Promise<void> | void;
+  readonly logoutPending?: boolean | undefined;
+  readonly logoutError?: string | undefined;
   readonly children: ReactNode;
 }
 
@@ -116,7 +118,7 @@ function AccountMenu({ ref, style, ...props }: AppShellProps & { readonly naviga
     <section><p>{t("shell.menu.workspace")}</p><strong>{props.workspace?.name ?? t("shell.noWorkspace")}</strong>{props.workspaces.length > 1 && <button type="button" onClick={() => props.navigate("/settings")}>{t("shell.changeWorkspace")}</button>}{props.companies.length > 1 && <button type="button" onClick={() => props.navigate("/companies")}>{t("shell.changeCompany")}</button>}<button type="button" onClick={() => props.navigate("/billing")}>{t("billing.title")}</button><button type="button" onClick={() => props.navigate("/settings")}>{t("shell.workspaceSettings")}</button><button type="button" onClick={() => props.navigate("/dashboard")}>{t("shell.backToDashboard")}</button></section>
     <section><p>{t("shell.menu.appearance")}</p><ThemeSelector/></section>
     <LanguageControl/>
-    <section><p>{t("shell.menu.account")}</p><small>{props.email}</small>{props.isPlatformAdmin&&<button type="button" onClick={() => props.navigate("/admin")}>Volver a Administración</button>}<button type="button" onClick={props.onPassword}>{t("portal.password")}</button><button type="button" onClick={props.onLogout}>{t("shell.signOut")}</button></section>
+    <section><p>{t("shell.menu.account")}</p><small>{props.email}</small>{props.isPlatformAdmin&&<button type="button" onClick={() => props.navigate("/admin")}>Volver a Administración</button>}<button type="button" onClick={props.onPassword} disabled={props.logoutPending}>{t("portal.password")}</button><button type="button" disabled={props.logoutPending} aria-busy={props.logoutPending} onClick={() => void props.onLogout()}>{props.logoutPending ? "Cerrando sesión..." : t("shell.signOut")}</button>{props.logoutError&&<p className="inline-message inline-message--error" role="alert">{props.logoutError}</p>}</section>
   </div>;
 }
 

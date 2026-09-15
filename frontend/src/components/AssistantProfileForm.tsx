@@ -14,10 +14,10 @@ interface Props {
 
 type Step = "identity" | "response" | "purpose" | "messages";
 const steps: readonly { id: Step; title: string; description: string }[] = [
-  { id: "identity", title: "Identity", description: "Name, language and role" },
-  { id: "response", title: "How it responds", description: "Tone and guidance" },
-  { id: "purpose", title: "Role and goal", description: "Objective and audience" },
-  { id: "messages", title: "Messages and help", description: "Welcome and fallback" },
+  { id: "identity", title: "Identidad", description: "Nombre, idioma y rol" },
+  { id: "response", title: "Cómo responde", description: "Tono e indicaciones" },
+  { id: "purpose", title: "Rol y objetivo", description: "Objetivo y audiencia" },
+  { id: "messages", title: "Mensajes y ayuda", description: "Bienvenida y respuesta alternativa" },
 ];
 
 function initial(profile?: AssistantProfile): AssistantProfileFormValues {
@@ -64,7 +64,7 @@ export function AssistantProfileForm({ mode, profile, submitting, onSubmit, onCa
   const current = steps[currentIndex]!;
 
   return <form className="assistant-form assistant-form--stepper" onSubmit={submit} aria-busy={submitting} noValidate>
-    <ol className="assistant-stepper" aria-label="Assistant setup progress">{steps.map((item, index) => {
+    <ol className="assistant-stepper" aria-label="Progreso de configuración del asistente">{steps.map((item, index) => {
       const state = item.id === step ? "current" : completed.has(item.id) ? "completed" : "pending";
       return <li key={item.id} className={`assistant-stepper__step is-${state}`}><button type="button" disabled={submitting} aria-current={state === "current" ? "step" : undefined} onClick={() => setStep(item.id)}><span aria-hidden="true">{state === "completed" ? "✓" : index + 1}</span><span>{item.title}</span></button></li>;
     })}</ol>
@@ -78,6 +78,6 @@ export function AssistantProfileForm({ mode, profile, submitting, onSubmit, onCa
       </section>
     </fieldset>
     {error && <p className="inline-message inline-message--error" role="alert">{error}</p>}
-    <div className="assistant-form-actions"><div className="action-row">{currentIndex > 0 && <button className="button button--secondary" type="button" disabled={submitting} onClick={() => setStep(steps[currentIndex - 1]!.id)}>Back</button>}<button className="button button--secondary" disabled={submitting}>{submitting ? t("common.saving") : t("profiles.save")}</button><button className="button button--primary" type="button" disabled={submitting || currentIndex === steps.length - 1} onClick={() => void save(true)}>Save and continue</button></div><button className="button button--quiet" type="button" disabled={submitting} onClick={onCancel}>{t("common.cancel")}</button></div>
+    <div className="assistant-form-actions"><div className="action-row">{currentIndex > 0 && <button className="button button--secondary" type="button" disabled={submitting} onClick={() => setStep(steps[currentIndex - 1]!.id)}>Volver</button>}<button className="button button--secondary" disabled={submitting}>{submitting ? "Guardando..." : "Guardar"}</button><button className="button button--primary" type="button" disabled={submitting || currentIndex === steps.length - 1} onClick={() => void save(true)}>Guardar y continuar</button></div><button className="button button--quiet" type="button" disabled={submitting} onClick={onCancel}>Cancelar</button></div>
   </form>;
 }

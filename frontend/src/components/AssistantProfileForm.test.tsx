@@ -10,10 +10,10 @@ const renderForm = (props: Partial<React.ComponentProps<typeof AssistantProfileF
 
 test("renders all logical setup steps and derives completed state from persisted configuration", () => {
   const view = renderForm({ mode:"edit", profile:persisted });
-  expect(screen.getByRole("button", { name:"Identity" })).toBeTruthy();
-  expect(screen.getByRole("button", { name:"How it responds" })).toBeTruthy();
-  expect(screen.getByRole("button", { name:"Role and goal" })).toBeTruthy();
-  expect(screen.getByRole("button", { name:"Messages and help" }).getAttribute("aria-current")).toBe("step");
+  expect(screen.getByRole("button", { name:"Identidad" })).toBeTruthy();
+  expect(screen.getByRole("button", { name:"Cómo responde" })).toBeTruthy();
+  expect(screen.getByRole("button", { name:"Rol y objetivo" })).toBeTruthy();
+  expect(screen.getByRole("button", { name:"Mensajes y ayuda" }).getAttribute("aria-current")).toBe("step");
   expect(view.container.querySelectorAll(".assistant-stepper__step.is-completed")).toHaveLength(3);
   expect(window.localStorage.getItem("assistant-setup-progress")).toBeNull();
 });
@@ -23,27 +23,27 @@ test("save persists and stays, while save and continue persists then advances", 
   renderForm({ onSubmit:save });
   fireEvent.change(screen.getByLabelText("Assistant name"), { target:{ value:"Customer care" } });
   fireEvent.change(screen.getByLabelText("Language"), { target:{ value:"en" } });
-  fireEvent.click(screen.getByRole("button", { name:"Save configuration" }));
+  fireEvent.click(screen.getByRole("button", { name:"Guardar" }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-  expect(screen.getByRole("heading", { name:"Identity" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name:"Save and continue" }));
-  await screen.findByRole("heading", { name:"How it responds" });
+  expect(screen.getByRole("heading", { name:"Identidad" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name:"Guardar y continuar" }));
+  await screen.findByRole("heading", { name:"Cómo responde" });
   expect(save).toHaveBeenCalledTimes(2);
 });
 
 test("validation and failed saves do not advance, and optional fields do not block later steps", async () => {
   const failed = vi.fn().mockResolvedValue(null);
   renderForm({ onSubmit:failed });
-  fireEvent.click(screen.getByRole("button", { name:"Save and continue" }));
+  fireEvent.click(screen.getByRole("button", { name:"Guardar y continuar" }));
   expect(screen.getByRole("alert")).toBeTruthy();
-  expect(screen.getByRole("heading", { name:"Identity" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name:"Identidad" })).toBeTruthy();
   fireEvent.change(screen.getByLabelText("Assistant name"), { target:{ value:"Customer care" } });
   fireEvent.change(screen.getByLabelText("Language"), { target:{ value:"en" } });
-  fireEvent.click(screen.getByRole("button", { name:"Save and continue" }));
+  fireEvent.click(screen.getByRole("button", { name:"Guardar y continuar" }));
   await waitFor(() => expect(failed).toHaveBeenCalledTimes(1));
-  expect(screen.getByRole("heading", { name:"Identity" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name:"How it responds" }));
-  fireEvent.click(screen.getByRole("button", { name:"Save and continue" }));
+  expect(screen.getByRole("heading", { name:"Identidad" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name:"Cómo responde" }));
+  fireEvent.click(screen.getByRole("button", { name:"Guardar y continuar" }));
   await waitFor(() => expect(failed).toHaveBeenCalledTimes(2));
-  expect(screen.getByRole("heading", { name:"How it responds" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name:"Cómo responde" })).toBeTruthy();
 });
