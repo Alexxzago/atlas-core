@@ -58,6 +58,22 @@ test("groups account actions, uses clear workspace copy, and restores focus on E
   expect(document.activeElement).toBe(trigger);
 });
 
+test("closes the companies-only route to the safe dashboard instead of an empty shell", () => {
+  const navigate = vi.fn();
+  render(view({ route: { name: "companies" }, selectedCompany: null, companies: [{ ...company, id: 3 }, { ...company, id: 4 }], onNavigate: navigate }));
+  fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+  expect(navigate).toHaveBeenCalledWith("/dashboard");
+});
+
+test("makes non-destructive workspace and company switches explicit in the account menu", () => {
+  window.localStorage.setItem("atlas.locale", "es");
+  render(view({ workspaces: [workspace, { ...workspace, id: "south", name: "South workspace" }], companies: [company, { ...company, id: 3, name: "Company Three" }] }));
+  fireEvent.click(screen.getAllByRole("button", { name: "Espacio y cuenta" })[0]!);
+  expect(screen.getByRole("button", { name: "Cambiar espacio" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Cambiar empresa" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Salir del espacio" })).toBeNull();
+});
+
 test("exposes a persisted keyboard language menu in the account surface", async()=>{
   window.localStorage.setItem("atlas.locale", "en");render(view());fireEvent.click(screen.getAllByRole("button",{name:"Workspace and account"})[0]!);const language=screen.getByRole("button",{name:/English/});expect(language.getAttribute("aria-expanded")).toBe("false");fireEvent.click(language);const spanish=screen.getByRole("option",{name:"Español"});fireEvent.click(spanish);expect(window.localStorage.getItem("atlas.locale")).toBe("es");expect(screen.getByText("Apariencia")).toBeTruthy();await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole("button",{name:/Español/})));fireEvent.click(screen.getByRole("button",{name:/Español/}));fireEvent.keyDown(screen.getByRole("listbox",{name:/Idioma/}),{key:"Escape"});await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole("button",{name:/Español/})));expect(screen.queryByRole("listbox")).toBeNull();
 });
