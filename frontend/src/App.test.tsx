@@ -53,6 +53,52 @@ test("routes an authenticated returning user from root to the dashboard", async 
   await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
 });
 
+test("signs out on the first account-menu click and navigates directly to sign in", async () => {
+  window.history.replaceState({}, "", "/dashboard");
+  const fetch = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/session/bootstrap")) return Promise.resolve(json({ status: "authenticated", identity, csrfToken: "csrf", csrfGeneration: 1 }));
+    if (url.endsWith("/identity/logout")) return Promise.resolve(new Response(null, { status: 204 }));
+    if (url.endsWith("/workspaces") && !url.includes("selected")) return Promise.resolve(json([workspace]));
+    if (url.endsWith("/workspaces/selected") || url.endsWith("/workspaces/workspace/select")) return Promise.resolve(json(workspace));
+    if (url.endsWith("/workspaces/workspace/companies")) return Promise.resolve(json([readyCompany]));
+    if (url.endsWith("/pilot-readiness")) return Promise.resolve(json({ overall:"ready", classification:"pilot_ready", checks:[], nextAction:null, evaluatedAt:"2026-01-01", policyVersion:"v1" }));
+    return Promise.resolve(json({}, 404));
+  });
+  vi.stubGlobal("fetch", fetch); renderApp(); await waitFor(() => expect(screen.queryByText("Estamos preparando tu espacio")).toBeNull());
+  await screen.findAllByRole("button", { name:"Workspace and account" });
+  fireEvent.click(screen.getAllByRole("button", { name:"Workspace and account" })[0]!);
+  fireEvent.click(screen.getByRole("button", { name:"Sign out" }));
+  await screen.findByRole("heading", { name:"Welcome back" });
+  expect(window.location.pathname).toBe("/sign-in");
+  expect(fetch.mock.calls.filter(([input]) => String(input).endsWith("/identity/logout"))).toHaveLength(1);
+  expect(screen.queryByText("Preparing your workspace…")).toBeNull();
+});
+
+test("shows pending logout once and lets a failed logout retry", async () => {
+  window.history.replaceState({}, "", "/dashboard");
+  let resolveLogout!: (response: Response) => void, attempts = 0;
+  const fetch = vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/session/bootstrap")) return Promise.resolve(json({ status: "authenticated", identity, csrfToken: "csrf", csrfGeneration: 1 }));
+    if (url.endsWith("/identity/logout")) { attempts += 1; return attempts === 1 ? new Promise<Response>((resolve) => { resolveLogout = resolve; }) : Promise.resolve(new Response(null, { status: 204 })); }
+    if (url.endsWith("/workspaces") && !url.includes("selected")) return Promise.resolve(json([workspace]));
+    if (url.endsWith("/workspaces/selected") || url.endsWith("/workspaces/workspace/select")) return Promise.resolve(json(workspace));
+    if (url.endsWith("/workspaces/workspace/companies")) return Promise.resolve(json([readyCompany]));
+    if (url.endsWith("/pilot-readiness")) return Promise.resolve(json({ overall:"ready", classification:"pilot_ready", checks:[], nextAction:null, evaluatedAt:"2026-01-01", policyVersion:"v1" }));
+    return Promise.resolve(json({}, 404));
+  });
+  vi.stubGlobal("fetch", fetch); renderApp(); await waitFor(() => expect(screen.queryByText("Estamos preparando tu espacio")).toBeNull());
+  await screen.findAllByRole("button", { name:"Workspace and account" }); fireEvent.click(screen.getAllByRole("button", { name:"Workspace and account" })[0]!);
+  fireEvent.click(screen.getByRole("button", { name:"Sign out" }));
+  expect(screen.getByRole("button", { name:"Cerrando sesión..." })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name:"Cerrando sesión..." })); expect(attempts).toBe(1);
+  resolveLogout(json({}, 500)); await screen.findByRole("alert");
+  fireEvent.click(screen.getAllByRole("button", { name:"Workspace and account" })[0]!);
+  fireEvent.click(screen.getByRole("button", { name:"Sign out" }));
+  await screen.findByRole("heading", { name:"Welcome back" }); expect(attempts).toBe(2);
+});
+
 test("shows a branded startup state until session bootstrap resolves", async () => {
   let resolve!: (response: Response) => void;
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((next) => { resolve = next; })));
