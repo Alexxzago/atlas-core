@@ -244,11 +244,11 @@ export function authenticatedPortalReducer(state: AuthenticatedPortalState, acti
     case "submissionFailed": return matchesProfileMutation(state, action.request)
       ? { ...state, submitting: false, activeMutationRequest: null, notice: { type: "error", key: action.noticeKey } } : state;
     case "profileCreated": return matchesProfileMutation(state, action.request) ? { ...state, submitting: false,
-      activeMutationRequest: null, formMode: "closed",
+      activeMutationRequest: null, formMode: "edit",
       profiles: [action.profile, ...state.profiles.filter((profile) => profile.id !== action.profile.id)],
       selectedProfileId: action.profile.id, notice: { type: "success", key: "profiles.createSuccess" } } : state;
     case "profileUpdated": return matchesProfileMutation(state, action.request) ? { ...state, submitting: false,
-      activeMutationRequest: null, formMode: "closed",
+      activeMutationRequest: null,
       profiles: replaceProfile(state.profiles, action.profile), selectedProfileId: action.profile.id,
       notice: { type: "success", key: "profiles.updateSuccess" } } : state;
     case "profileCreateNotFound": return matchesProfileMutation(state, action.request)
