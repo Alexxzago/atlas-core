@@ -209,7 +209,7 @@ test("workspace settings presents member IDs as muted metadata, not primary iden
   expect(technical.tagName).toBe("SMALL");
   expect(screen.getByRole("heading", { name: "Team" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Invitations" })).toBeTruthy();
-  expect(screen.getByRole("heading", { name: "Ownership and exit" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Zona de riesgo" })).toBeTruthy();
 });
 
 test("workspace settings switches an existing workspace without destructive membership actions", async () => {

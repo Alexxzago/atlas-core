@@ -105,6 +105,10 @@ export interface PlatformBillingPlanAudit { id:string; operationId:string; event
 export interface PlatformBillingPlanDetail extends PlatformBillingPlan { offers:PlatformBillingOffer[]; audit:PlatformBillingPlanAudit[]; }
 export interface PlatformBillingPlanWrite { operationId:string; planKey:string; catalogVersion:number; displayName:string; description:string; inclusions:string[]; maxCompanies:number|null; maxAssistantProfiles:number|null; maxActiveChannels:number|null; mutationEligible:boolean; trialDurationDays:number|null; graceDurationDays:number|null; }
 export interface PlatformBillingOfferWrite { operationId:string; expectedVersion:number; providerKind:BillingOfferProviderKind; amountMinor:number; interval:BillingOfferInterval; providerPlanReference:string; readinessState:BillingOfferReadinessState; }
+export interface PlatformBillingPlanDraftUpdate extends PlatformBillingPlanWrite { expectedVersion:number; }
+export interface PlatformBillingOfferDraftUpdate extends PlatformBillingOfferWrite { expectedOfferVersion:number; }
+export interface PlatformBillingVersionOperation { operationId:string; expectedVersion:number; }
+export interface PlatformBillingOfferVersionOperation extends PlatformBillingVersionOperation { expectedOfferVersion:number; }
 
 export interface SessionBootstrapResponse {
   status: "authenticated";
