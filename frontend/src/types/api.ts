@@ -86,6 +86,9 @@ export interface Identity {
 export interface PlatformOverview { totalUsers:number; totalWorkspaces:number; totalCompanies:number; totalAssistantProfiles:number; webChatConnections:number; whatsAppConnections:{total:number;active:number;healthy:number;degraded:number}; }
 export interface PlatformWorkspaceSummary { id:string; name:string; createdAt:string; memberCount:number; companyCount:number; assistantProfileCount:number; webChatConnectionCount:number; whatsApp:{total:number;active:number;healthy:number;degraded:number}; latestActivityAt:string|null; }
 export interface PlatformWorkspacesPage { workspaces:PlatformWorkspaceSummary[]; nextCursor:string|null; }
+export interface PlatformPilotReadinessIssue { id:PilotReadinessCheckId; required:boolean; status:Exclude<PilotReadinessCheckStatus,"complete"|"not_applicable">; owner:NonNullable<PilotReadinessBlockerOwner>; reasonCode:PilotReadinessReasonCode; }
+export type PlatformPilotReadinessCompany = { companyId:number; companyName:string; state:"available"; overall:PilotReadinessOverall; classification:PilotReadinessClassification; evaluatedAt:string; issues:PlatformPilotReadinessIssue[] }|{ companyId:number; companyName:string; state:"unavailable"; };
+export interface PlatformPilotReadiness { aggregate:{totalCompanies:number;pilotReady:number;notReady:number;unavailable:number}; companies:PlatformPilotReadinessCompany[]; }
 export interface PlatformUserSummary { id:string; email:string; createdAt:string; emailVerified:boolean; activeWorkspaceMembershipCount:number; hasActiveWorkspaceMembership:boolean; }
 export interface PlatformUsersPage { users:PlatformUserSummary[]; nextCursor:string|null; }
 export type WorkspaceCommercialStatus = "active" | "suspended";
