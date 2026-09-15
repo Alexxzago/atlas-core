@@ -19,9 +19,9 @@ test("renders the authoritative readiness projection with one primary action and
   expect(screen.getByText("Faltan pasos de configuración")).toBeTruthy();
   expect(screen.getByRole("heading",{name:"Configuración necesaria"})).toBeTruthy();
   expect(screen.getByRole("heading",{name:"Mejorá tu piloto"})).toBeTruthy();
-  expect(screen.getAllByRole("button",{name:"Configurar asistente"})).toHaveLength(2);
+   expect(screen.getAllByRole("button",{name:"Configurar asistente"})).toHaveLength(1);
   expect(screen.getAllByRole("button",{name:"Publicar conocimiento"})).toHaveLength(1);
-  fireEvent.click(screen.getAllByRole("button",{name:"Configurar asistente"})[0]!);
+   fireEvent.click(screen.getByRole("button",{name:"Configurar asistente"}));
   expect(navigate).toHaveBeenCalledWith("/companies/1/assistant");
 });
 

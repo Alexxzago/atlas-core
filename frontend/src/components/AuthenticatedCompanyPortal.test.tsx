@@ -195,7 +195,7 @@ test("Today translates authoritative blockers into one next action", async () =>
   }));
   render(<I18nProvider><CompanySetupChecklist workspace={workspace} companies={[companyA]} company={companyA} onNavigate={() => {}} onChooseCompany={() => {}}/></I18nProvider>);
   await screen.findByText("Faltan pasos de configuración");
-  expect(screen.getAllByRole("button", { name: "Configurar asistente" })).toHaveLength(2);
+  expect(screen.getAllByRole("button", { name: "Configurar asistente" })).toHaveLength(1);
   expect(screen.queryByText("default_assistant_missing")).toBeNull();
 });
 
