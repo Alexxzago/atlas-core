@@ -34,10 +34,10 @@ export function DashboardPage({ model, onNavigate, onRetry, onChooseCompany }: P
     <header className="work-anchor">
       <p className="work-anchor__context">{model.company ? t("today.companyContext", { companyName: model.company.name }) : model.workspaceName ?? t("today.workspaceContext")}</p>
       <h1 tabIndex={-1}>{model.company ? t("today.title") : t(messageTitle[model.message])}</h1>
-      {model.company && model.state === "loading" ? <ProgressIndicator label={t("today.evidence.checking")}/> : <div className="readiness-statement" {...(model.state === "unavailable" ? { role: "alert" } : { role: "status" })}>
+      {model.company && (model.state === "loading" ? <ProgressIndicator label={t("today.evidence.checking")}/> : <div className="readiness-statement" {...(model.state === "unavailable" ? { role: "alert" } : { role: "status" })}>
         <strong>{t(messageTitle[model.message])}</strong>
         <p>{t(messageDescription[model.message])}</p>
-      </div>}
+      </div>)}
       {!model.company && <p className="work-anchor__lead">{t(messageDescription[model.message])}</p>}
       {actionAvailable && <button className="button button--primary next-action" type="button" onClick={activate}>{t(actionLabel[model.action.id])}</button>}
       {model.action.id === "wait_for_company" && <p className="work-anchor__quiet" role="status">{t(actionLabel.wait_for_company)}</p>}

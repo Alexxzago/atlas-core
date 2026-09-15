@@ -10,14 +10,16 @@ export interface OnboardingProgressSnapshot {
   readonly selectedWorkspaceId: string | null;
   readonly workspaceCount: number;
   readonly companiesLoading: boolean;
+  readonly companiesResolved?: boolean;
   readonly companyError: boolean;
   readonly companies: readonly Company[];
 }
 
 export function resolveAuthenticatedOnboardingProgress(snapshot: OnboardingProgressSnapshot): AuthenticatedOnboardingProgress {
-  if (snapshot.workspacesLoading || snapshot.pendingWorkspaceId !== null || (snapshot.selectedWorkspaceId !== null && snapshot.companiesLoading)) return "loading";
-  if (snapshot.workspaceError || (snapshot.selectedWorkspaceId !== null && snapshot.companyError)) return "error";
-  if (snapshot.workspaceCount > 0 && snapshot.initialWorkspaceResolved === false) return "loading";
+  if (snapshot.workspacesLoading) return "loading";
+  if (snapshot.workspaceError) return "error";
+  if (snapshot.initialWorkspaceResolved === false || snapshot.pendingWorkspaceId !== null || (snapshot.selectedWorkspaceId !== null && (snapshot.companiesLoading || snapshot.companiesResolved === false))) return "loading";
+  if (snapshot.selectedWorkspaceId !== null && snapshot.companyError) return "error";
   if (snapshot.workspaceCount === 0) return "needs-workspace";
   if (snapshot.selectedWorkspaceId === null) return "needs-workspace-selection";
   if (snapshot.companies.length === 0) return "needs-company";

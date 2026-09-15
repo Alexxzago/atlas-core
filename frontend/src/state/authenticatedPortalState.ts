@@ -53,6 +53,7 @@ export interface AuthenticatedPortalState {
   activeWorkspaceRequest: RequestContext | null;
   companies: Company[];
   companiesLoading: boolean;
+  companiesResolved: boolean;
   companyError: boolean;
   companyCreating: boolean;
   selectedCompanyId: number | null;
@@ -78,7 +79,7 @@ export interface AuthenticatedPortalState {
 export const initialAuthenticatedPortalState: AuthenticatedPortalState = {
   workspaces: [], workspacesLoading: true, workspaceError: false, initialWorkspaceResolved: false,
   selectedWorkspace: null, pendingWorkspaceId: null, workspaceGeneration: 0, activeWorkspaceRequest: null,
-  companies: [], companiesLoading: false, companyError: false, companyCreating: false, selectedCompanyId: null, companyGeneration: 0,
+  companies: [], companiesLoading: false, companiesResolved: false, companyError: false, companyCreating: false, selectedCompanyId: null, companyGeneration: 0,
   profiles: [], profilesLoading: false, profileError: false, selectedProfileId: null,
   transientArchivedProfile: null, profileGeneration: 0, formMode: "closed", submitting: false,
   transitionTarget: null, notice: null, profileReloadRequested: false,
@@ -139,7 +140,7 @@ function clearProfiles(state: AuthenticatedPortalState): AuthenticatedPortalStat
 }
 
 function clearCompanies(state: AuthenticatedPortalState): AuthenticatedPortalState {
-  return clearProfiles({ ...state, companies: [], companiesLoading: false, companyError: false, companyCreating: false,
+  return clearProfiles({ ...state, companies: [], companiesLoading: false, companiesResolved: false, companyError: false, companyCreating: false,
     selectedCompanyId: null, companyGeneration: state.companyGeneration + 1, activeCompaniesRequest: null,
     activeCompanyCreateRequest: null });
 }
@@ -191,11 +192,11 @@ export function authenticatedPortalReducer(state: AuthenticatedPortalState, acti
     case "workspaceCleared": return clearCompanies({ ...state, selectedWorkspace: null, pendingWorkspaceId: null,
       activeWorkspaceRequest: null, workspaceGeneration: state.workspaceGeneration + 1,
       notice: { type: "error", key: "portal.resourceUnavailable" } });
-    case "companiesLoadStarted": return { ...state, companiesLoading: true, companyError: false, activeCompaniesRequest: action.request };
+    case "companiesLoadStarted": return { ...state, companiesLoading: true, companiesResolved: false, companyError: false, activeCompaniesRequest: action.request };
     case "companiesLoaded": return matches(state, state.activeCompaniesRequest, action.request)
-      ? { ...state, companies: action.companies, companiesLoading: false, activeCompaniesRequest: null } : state;
+      ? { ...state, companies: action.companies, companiesLoading: false, companiesResolved: true, activeCompaniesRequest: null } : state;
     case "companiesLoadFailed": return matches(state, state.activeCompaniesRequest, action.request)
-      ? { ...state, companiesLoading: false, companyError: true, activeCompaniesRequest: null } : state;
+      ? { ...state, companiesLoading: false, companiesResolved: true, companyError: true, activeCompaniesRequest: null } : state;
     case "companiesNotFound": return matches(state, state.activeCompaniesRequest, action.request)
       ? clearCompanies({ ...state, selectedWorkspace: null, pendingWorkspaceId: null,
         notice: { type: "error", key: "portal.resourceUnavailable" } }) : state;
