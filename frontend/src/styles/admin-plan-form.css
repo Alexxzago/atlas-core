@@ -1,0 +1,11 @@
+.admin-plan-form { display: grid; gap: 14px; max-inline-size: 920px; }
+.admin-plan-form > label { display: grid; gap: 6px; color: #c5d1e5; font-size: 13px; font-weight: 700; }
+.admin-plan-form input:not([type="checkbox"]),.admin-plan-form textarea { inline-size: 100%; min-block-size: 40px; padding: 9px 11px; color: #eef4ff; background: #101827; border: 1px solid #455878; border-radius: 6px; font: inherit; font-weight: 400; }
+.admin-plan-form textarea { min-block-size: 82px; resize: vertical; }
+.admin-plan-form__limits { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.admin-plan-form__limits label { display: grid; gap: 6px; color: #c5d1e5; font-size: 12px; font-weight: 700; }
+.admin-plan-form__eligibility { display: grid !important; grid-template-columns: auto 1fr; align-items: center; column-gap: 9px; padding: 10px 12px; background: #101827; border: 1px solid #2b3a53; border-radius: 6px; }
+.admin-plan-form__eligibility input { inline-size: 16px; block-size: 16px; }
+.admin-plan-form__eligibility small { grid-column: 2; color: #aab9d1; font-weight: 400; }
+@media (min-width: 768px) { .admin-plan-form > label:nth-child(1),.admin-plan-form > label:nth-child(2) { grid-row: 1; }.admin-plan-form > label:nth-child(2) { grid-column: 2; }.admin-plan-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }.admin-plan-form > label:nth-child(3),.admin-plan-form > label:nth-child(4),.admin-plan-form__limits,.admin-plan-form__eligibility { grid-column: 1 / -1; } }
+@media (max-width: 767px) { .admin-plan-form__limits { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
