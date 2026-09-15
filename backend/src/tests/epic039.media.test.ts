@@ -1075,7 +1075,7 @@ test("EPIC039 inspector failures clean staged bytes and preserve failed provenan
   }
 });
 
-test("EPIC039 migration preserves the 0049 contract through the current 0073 head", () => {
+test("EPIC039 migration preserves the 0049 contract through the current 0074 head", () => {
   const directory = mkdtempSync(join(tmpdir(), "atlas-media-migration-")),
     path = join(directory, "atlas.sqlite");
   let db = new DatabaseSync(path);
@@ -1128,6 +1128,7 @@ test("EPIC039 migration preserves the 0049 contract through the current 0073 hea
         { id: 71, name: "0071_conversation_resume_operation" },
         { id: 72, name: "0072_conversation_delivery_feed_events" },
         { id: 73, name: "0073_scheduling_configuration_controls" },
+        { id: 74, name: "0074_billing_versioned_plan_provider_commercial_offers" },
       ],
     );
     assert.equal(
@@ -1158,7 +1159,7 @@ test("EPIC039 migration preserves the 0049 contract through the current 0073 hea
   }
 });
 
-test("EPIC039 declares the complete immutable migration inventory through the 0073 head", () => {
+test("EPIC039 declares the complete immutable migration inventory through the 0074 head", () => {
   const db = createDatabase(":memory:");
   try {
     const rows = db
@@ -1180,10 +1181,11 @@ test("EPIC039 declares the complete immutable migration inventory through the 00
         71,
         72,
         73,
+        74,
       ],
     );
-    assert.equal(rows.at(-1)?.name, "0073_scheduling_configuration_controls");
-    assert.equal(new Set(rows.map((row) => row.name)).size, 72);
+    assert.equal(rows.at(-1)?.name, "0074_billing_versioned_plan_provider_commercial_offers");
+    assert.equal(new Set(rows.map((row) => row.name)).size, 73);
     assert.equal(
       rows.every((row) => /^[a-f0-9]{64}$/u.test(row.checksum)),
       true,

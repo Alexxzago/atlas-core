@@ -1028,8 +1028,11 @@ test("EPIC047 PASS5C migrates fresh and exact-0068 databases to the sole 0069 sh
     const head = database
       .prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1")
       .get() as { id: number; name: string };
-    assert.equal(head.id, 69);
-    assert.equal(head.name, "0069_shared_rate_limit_windows");
+    assert.equal(head.id, 74);
+    assert.equal(
+      head.name,
+      "0074_billing_versioned_plan_provider_commercial_offers",
+    );
     assert.deepEqual(
       (
         database
@@ -1095,10 +1098,10 @@ test("EPIC047 PASS5C migrates fresh and exact-0068 databases to the sole 0069 sh
     assert.equal(
       (
         upgrade
-          .prepare("SELECT COUNT(*) count FROM schema_migrations WHERE id>69")
+          .prepare("SELECT COUNT(*) count FROM schema_migrations WHERE id=74")
           .get() as { count: number }
       ).count,
-      0,
+      1,
     );
   } finally {
     fresh.close();

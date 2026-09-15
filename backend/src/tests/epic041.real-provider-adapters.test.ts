@@ -409,8 +409,8 @@ test("EPIC041 migrates through the current head without altering historical migr
     const head = database
       .prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1")
       .get() as { id: number; name: string };
-    assert.equal(head.id, 73);
-    assert.equal(head.name, "0073_scheduling_configuration_controls");
+    assert.equal(head.id, 74);
+    assert.equal(head.name, "0074_billing_versioned_plan_provider_commercial_offers");
     assert.equal(
       (
         database
