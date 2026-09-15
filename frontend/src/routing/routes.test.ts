@@ -7,6 +7,8 @@ test("parses the frozen portal route hierarchy", () => {
   assert.deepEqual(parsePortalRoute("/companies/42/channels/web-chat"), { name: "company-web-chat", companyId: 42 });
   assert.deepEqual(parsePortalRoute("/companies/42/knowledge"), { name: "company-knowledge", companyId: 42 });
   assert.deepEqual(parsePortalRoute("/dashboard"), { name: "dashboard" });
+  assert.deepEqual(parsePortalRoute("/billing"), { name: "billing" });
+  assert.deepEqual(parsePortalRoute("/billing/checkout/success"), { name: "billing" });
 });
 
 test("rejects invalid company identifiers without a resource lookup", () => {

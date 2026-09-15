@@ -10,6 +10,7 @@ export type PortalRoute =
   | { readonly name: "company-web-chat"; readonly companyId: number }
   | { readonly name: "conversations" }
   | { readonly name: "analytics" }
+  | { readonly name: "billing" }
   | { readonly name: "settings" }
   | { readonly name: "not-found" };
 
@@ -46,6 +47,7 @@ export function parsePortalRoute(pathname: string): PortalRoute {
   }
   if (segments.length === 1 && segments[0] === "conversations") return { name: "conversations" };
   if (segments.length === 1 && segments[0] === "analytics") return { name: "analytics" };
+  if (segments.length === 1 && segments[0] === "billing" || segments.length === 3 && segments[0] === "billing" && segments[1] === "checkout" && (segments[2] === "success" || segments[2] === "cancel")) return { name: "billing" };
   if (segments.length === 1 && segments[0] === "settings") return { name: "settings" };
   return { name: "not-found" };
 }
@@ -75,6 +77,7 @@ export function portalPath(route: Exclude<PortalRoute, { name: "not-found" }>): 
   if (route.name === "companies") return "/companies";
   if (route.name === "conversations") return "/conversations";
   if (route.name === "analytics") return "/analytics";
+  if (route.name === "billing") return "/billing";
   if (route.name === "settings") return "/settings";
   const base = `/companies/${route.companyId}`;
   if (route.name === "company-overview") return base;

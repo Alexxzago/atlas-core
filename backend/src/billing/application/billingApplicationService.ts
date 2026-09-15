@@ -3,11 +3,16 @@ import { BillingAccountRepository, BillingCatalogRepository, BillingEntitlementS
 import { BillingOperationService, type BillingOperationOutcome, type BillingPortalOutcome } from "./billingOperationService.js";
 import { BillingPayerIdentityService } from "./billingPayerIdentityService.js";
 
+export type BillingCapabilitiesDto = Readonly<{ canOpenBillingPortal:boolean; canCancel:boolean; canReactivate:boolean; canStartNewCheckout:boolean; canSwitchProvider:false }>;
 export type BillingSummaryDto = Readonly<{ rolloutMode:"unmanaged"|"managed"; subscription:Readonly<{ state:string; plan:Readonly<{ key:string; name:string; interval:"month"|"year"; currency:string; amountMinor:number }>|null }>; }>;
+export type CustomerBillingSummaryDto = Readonly<{ rolloutMode:"unmanaged"|"managed"; subscription:Readonly<{ state:string; plan:Readonly<{ key:string; name:string; interval:"month"|"year"; currency:string; amountMinor:number }>|null }>; entitlement:BillingEntitlementsDto|null; capabilities:BillingCapabilitiesDto; }>;
 export type BillingEntitlementsDto = Readonly<{ state:string; maxCompanies:number|null; maxAssistantProfiles:number|null; maxActiveChannels:number|null; mutationEligible:boolean; effectiveAt:string; expiresAt:string|null; }>;
 export type BillingApplicationOutcome = "succeeded"|"failed"|"uncertain"|"in_progress"|"conflict"|"invalid"|"unavailable"|"unsupported";
 export type BillingCatalogDto = Readonly<{ entries:readonly Readonly<{ id:string; providerCommercialOfferId:string; key:string; version:number; name:string; interval:"month"|"year"; currency:string; amountMinor:number; }>[] }>;
 export type BillingPayerIdentityOptionsDto = Readonly<{ options:readonly Readonly<{ identityId:string; email:string }>[] }>;
+export type BillingOfferDto = Readonly<{ offerId:string; provider:"stripe"|"mercadopago"; key:string; version:number; name:string; description:string; inclusions:readonly Readonly<{ code:string; title:string; description:string }> []; interval:"month"|"year"; currency:string; amountMinor:number; checkoutAvailable:boolean }>;
+export type BillingOffersDto = Readonly<{ offers:readonly BillingOfferDto[] }>;
+export type BillingManagementActionsDto = Readonly<{ actions:readonly ("portal"|"cancel"|"reactivate")[]; capabilities:BillingCapabilitiesDto }>;
 
 export class BillingApplicationService {
   private readonly accounts: BillingAccountRepository;
@@ -31,6 +36,8 @@ export class BillingApplicationService {
     return Object.freeze({ rolloutMode:account.rolloutMode, subscription:Object.freeze({ state:subscription?.effectiveState ?? "unmanaged", plan:entry&&offer ? Object.freeze({ key:entry.planKey, name:entry.displayName, interval:offer.interval, currency:offer.currency, amountMinor:offer.amountMinor }) : null }) });
   }
 
+  public customerSummary(workspaceId:number):CustomerBillingSummaryDto|null { const summary=this.summary(workspaceId),account=this.accounts.findByWorkspace(workspaceId); return summary&&account?Object.freeze({...summary,entitlement:entitlement(this.entitlements.current(account.id)),capabilities:this.operations.managementCapabilities(workspaceId,sellableOffers(this.catalog))}):null; }
+
   public entitlementsFor(workspaceId:number): BillingEntitlementsDto | null {
     const account = this.accounts.findByWorkspace(workspaceId), snapshot = account ? this.entitlements.current(account.id) : null;
     return snapshot ? Object.freeze({ state:snapshot.state, maxCompanies:snapshot.maxCompanies, maxAssistantProfiles:snapshot.maxAssistantProfiles, maxActiveChannels:snapshot.maxActiveChannels, mutationEligible:snapshot.mutationEligible, effectiveAt:snapshot.effectiveAt, expiresAt:snapshot.expiresAt }) : null;
@@ -40,6 +47,13 @@ export class BillingApplicationService {
     if (!this.accounts.findByWorkspace(workspaceId)) return null;
     return Object.freeze({ entries:Object.freeze(this.catalog.active().flatMap(entry=>this.catalog.sellableOffers(entry.id).map(offer=>Object.freeze({ id:entry.id, providerCommercialOfferId:offer.id, key:entry.planKey, version:entry.catalogVersion, name:entry.displayName, interval:offer.interval, currency:offer.currency, amountMinor:offer.amountMinor })))) });
   }
+
+  public offersForWorkspace(workspaceId:number):BillingOffersDto|null {
+    if (!this.accounts.findByWorkspace(workspaceId)) return null;
+    return Object.freeze({offers:Object.freeze(this.catalog.published().flatMap(entry=>{const inclusions=Object.freeze(this.catalog.inclusions(entry.id).map(value=>Object.freeze({code:value.code,title:value.displayTitle,description:value.displayDescription})));return this.catalog.sellableOffers(entry.id).map(offer=>Object.freeze({offerId:offer.id,provider:offer.providerKind,key:entry.planKey,version:entry.catalogVersion,name:entry.displayName,description:entry.description,inclusions,interval:offer.interval,currency:offer.currency,amountMinor:offer.amountMinor,checkoutAvailable:this.operations.managementCapabilities(workspaceId,[offer]).canStartNewCheckout}));}))});
+  }
+
+  public managementActionsFor(workspaceId:number):BillingManagementActionsDto|null { return this.accounts.findByWorkspace(workspaceId)?Object.freeze({actions:this.operations.supportedManagementActions(workspaceId),capabilities:this.operations.managementCapabilities(workspaceId,sellableOffers(this.catalog))}):null; }
 
   public payerIdentityOptionsFor(workspaceId:number, callerIdentityId:string):BillingPayerIdentityOptionsDto|null {
     const account=this.accounts.findByWorkspace(workspaceId), options=this.payerIdentities.optionsForWorkspace({workspaceId,callerIdentityId});
@@ -65,6 +79,8 @@ export class BillingApplicationService {
     return operationDto(result);
   }
 
+  public async checkoutOffer(workspaceId:number, offerId:string, idempotencyKey:string):Promise<Readonly<{ status:BillingApplicationOutcome; redirectUrl?:string }>> { const offer=this.catalog.offer(offerId); if(!offer)return Object.freeze({status:"invalid"}); return this.checkout(workspaceId,offer.catalogEntryId,offer.id,idempotencyKey); }
+
   public async portal(workspaceId:number):Promise<Readonly<{ status:"succeeded"|"failed"|"uncertain"|"invalid"|"unavailable"|"unsupported"; redirectUrl?:string }>> {
     const result = await this.operations.portal({ workspaceId, returnTarget:this.targets.portalReturn });
     return result.kind === "succeeded" ? Object.freeze({ status:"succeeded", ...(result.result.kind === "success" && result.result.redirectUrl ? { redirectUrl:result.result.redirectUrl } : {}) }) : Object.freeze({ status:result.kind });
@@ -81,5 +97,7 @@ export class BillingApplicationService {
   }
 }
 
+function entitlement(snapshot:import("../../repositories/billingRepository.js").BillingEntitlementSnapshot|null):BillingEntitlementsDto|null{return snapshot?Object.freeze({state:snapshot.state,maxCompanies:snapshot.maxCompanies,maxAssistantProfiles:snapshot.maxAssistantProfiles,maxActiveChannels:snapshot.maxActiveChannels,mutationEligible:snapshot.mutationEligible,effectiveAt:snapshot.effectiveAt,expiresAt:snapshot.expiresAt}):null;}
+function sellableOffers(catalog:BillingCatalogRepository):readonly import("../../repositories/billingRepository.js").BillingProviderCommercialOffer[]{return Object.freeze(catalog.published().flatMap(entry=>catalog.sellableOffers(entry.id)));}
 function operationId(kind:string, key:string):string { return `http_${kind}_${createHash("sha256").update(key).digest("hex")}`; }
 function operationDto(result:BillingOperationOutcome):Readonly<{ status:BillingApplicationOutcome; redirectUrl?:string }> { if (result.kind !== "succeeded") return Object.freeze({ status:result.kind }); try { const value = result.operation?.safeResultJson ? JSON.parse(result.operation.safeResultJson) as { redirectUrl?:unknown } : {}; return Object.freeze({ status:"succeeded", ...(typeof value.redirectUrl === "string" ? { redirectUrl:value.redirectUrl } : {}) }); } catch { return Object.freeze({ status:"succeeded" }); } }

@@ -25,6 +25,7 @@ import { AssistantCapabilitiesPanel } from "./AssistantCapabilitiesPanel";
 import { AssistantToolsPanel } from "./AssistantToolsPanel";
 import { AssistantTestPanel } from "./AssistantTestPanel";
 import { SchedulingAutomationsPanel } from "./SchedulingAutomationsPanel";
+import { BillingPage } from "./BillingPage";
 
 interface Props { csrf: string; userId?: string | undefined; email: string; isPlatformAdmin?: boolean; onPassword: () => void; onLogout: () => void }
 
@@ -34,7 +35,7 @@ export function AuthenticatedCompanyPortal({ csrf, userId, email, isPlatformAdmi
 
 function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmin, onPassword, onLogout }: Props): React.JSX.Element {
   const { t } = useI18n();
-  const { route, navigate } = useRouter();
+   const { route, navigate, search, pathname } = useRouter();
   const [routeCompanyValidation, setRouteCompanyValidation] = useState<CompanyRouteValidation>({ key: null, status: "idle" });
   const [autoSelectingCompanyId, setAutoSelectingCompanyId] = useState<number | null>(null);
   const { state, selectedCompany, selectWorkspace, selectCompany, createCompany, refresh, refreshCompanies, refreshSelectedCompany,
@@ -101,6 +102,7 @@ function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmi
     if (route.name === "companies") return <DashboardPage model={buildCompanyWorkspaceViewModel({ workspace: state.selectedWorkspace, companies: state.companies, company: null, companiesLoading: state.companiesLoading, companiesUnavailable: state.companyError })} onNavigate={navigate} onRetry={refreshCompanies} onChooseCompany={() => {}}/>;
     if (route.name === "conversations") return <ConversationInbox csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} companyId={state.selectedCompanyId} capabilities={state.selectedWorkspace?.capabilities ?? []}/>;
     if (route.name === "analytics") return <><PageHeader title={t("shell.analyticsTitle")} description={t("shell.analyticsDescription")} /><EmptyState title={t("shell.analyticsTitle")} description={t("shell.analyticsDescription")} /></>;
+    if (route.name === "billing") return <BillingPage csrf={csrf} workspace={state.selectedWorkspace} search={search} pathname={pathname}/>;
     if (route.name === "settings") return <WorkspaceMembershipPortal csrf={csrf} currentUserId={userId} currentUserEmail={email} workspaces={state.workspaces} selectedWorkspace={state.selectedWorkspace} pendingWorkspaceId={state.pendingWorkspaceId} loading={state.workspacesLoading} error={state.workspaceError} onSelectWorkspace={(id) => { void selectWorkspace(id).then((selected) => { if (selected) navigate("/companies", { replace: true }); }); }} onWorkspacesChanged={() => void refresh()} onActiveWorkspaceLeft={clearWorkspace}/>;
     if (route.name === "company-assistant" || route.name === "company-assistant-section") return <div className="assistant-detail-view" key={assistantContextKey}>{automationsPanel ?? testPanel ?? assistantPanel}</div>;
     if (route.name === "company-knowledge") return knowledgePanel;
