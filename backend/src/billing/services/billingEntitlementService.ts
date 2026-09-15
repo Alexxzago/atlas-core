@@ -7,6 +7,7 @@ export type BillingCapability = "company" | "assistant_profile" | "active_channe
 export type BillingEntitlementReason = "allowed" | "administrative_suspended" | "billing_entitlement_unavailable" | "billing_restricted" | "billing_mutation_ineligible" | "effective_limit_reached";
 export interface BillingEntitlementDecision { readonly allowed:boolean; readonly capability:BillingCapability; readonly currentUsage:number; readonly billingLimit:number|null; readonly administrativeLimit:number|null; readonly effectiveLimit:number|null; readonly safeReason:BillingEntitlementReason; }
 export interface BillingEntitlementPort { mayCreateCompany(workspaceId:number):BillingEntitlementDecision; mayCreateAssistantProfile(workspaceId:number):BillingEntitlementDecision; mayActivateChannel(workspaceId:number):BillingEntitlementDecision; }
+export type BillingPilotReadiness = "usable" | "control_suspended" | "entitlement_missing" | "entitlement_ineligible";
 
 const minimum=(left:number|null,right:number|null):number|null=>left===null?right:right===null?left:Math.min(left,right);
 const billingLimit=(snapshot:BillingEntitlementSnapshot,capability:BillingCapability):number|null=>capability==="company"?snapshot.maxCompanies:capability==="assistant_profile"?snapshot.maxAssistantProfiles:snapshot.maxActiveChannels;
@@ -19,6 +20,7 @@ export class BillingEntitlementService {
   public mayCreateCompany(workspaceId:number):BillingEntitlementDecision{return this.decide(workspaceId,"company");}
   public mayCreateAssistantProfile(workspaceId:number):BillingEntitlementDecision{return this.decide(workspaceId,"assistant_profile");}
   public mayActivateChannel(workspaceId:number):BillingEntitlementDecision{return this.decide(workspaceId,"active_channel");}
+  public pilotReadiness(workspaceId:number):BillingPilotReadiness { const controls=this.commercial.workspace(workspaceId); if(controls?.status!=="active")return "control_suspended"; const authorities=this.billing.authorities(workspaceId,controls); if(!authorities)return "entitlement_missing"; const derived=entitlementForEffectiveSubscription(authorities.subscription.effectiveState); return ["enabled","grace_enabled"].includes(authorities.billing.state)&&authorities.billing.mutationEligible&&derived.mutationEligible?"usable":"entitlement_ineligible"; }
   private decide(workspaceId:number,capability:BillingCapability):BillingEntitlementDecision {
     const controls=this.commercial.workspace(workspaceId),authorities=this.billing.authorities(workspaceId,controls),usage=this.usage(workspaceId,capability);
     if(controls?.status!=="active")return this.result(false,capability,usage,null,controls?administrativeLimit(controls,capability):null,"administrative_suspended");

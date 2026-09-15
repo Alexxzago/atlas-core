@@ -62,7 +62,7 @@ import{DevelopmentInvitationDelivery,SecureInvitationProofProvider,UnavailableIn
 import{WorkspaceAdministrationService}from"./workspace/services/workspaceAdministrationService.js";
 import{AuthorizationService}from"./workspace/services/authorizationService.js";
 import{WorkspaceResolver}from"./workspace/services/workspaceResolver.js";
-import{configureProductionCompanyOperationalStatusService,configureProductionProactiveActionControllers,configureProductionSchedulingConfigurationService,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
+import{configureProductionCompanyOperationalStatusService,configureProductionPilotReadinessService,configureProductionProactiveActionControllers,configureProductionSchedulingConfigurationService,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
 import{UserRepository}from"./repositories/userRepository.js";
 import{AssistantProfileRepository}from"./repositories/assistantProfileRepository.js";
 import{AssistantProfileService}from"./assistant/services/assistantProfileService.js";
@@ -230,6 +230,7 @@ import { MetaWhatsAppReadinessService } from "./whatsapp/application/metaWhatsAp
 import { MetaEmbeddedSignupHttpService, embeddedSignupPublicConfig } from "./whatsapp/application/metaEmbeddedSignupHttpService.js";
 import { createMetaEmbeddedSignupControllers } from "./controllers/metaEmbeddedSignupController.js";
 import { CompanyOperationalStatusService } from "./company/services/companyOperationalStatusService.js";
+import { PilotReadinessService } from "./onboarding/services/pilotReadinessService.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimeConfiguration = runtimeProductionConfiguration;
@@ -359,6 +360,7 @@ export const voiceDeferredSemanticRecoveryService = new VoiceDeferredSemanticRec
 const proactiveActions = new ProactiveActionRepository(database);
 const proactiveActionOperatorService = new ProactiveActionOperatorService(proactiveActions, identityClock, rateLimits);
 configureProductionProactiveActionControllers(createProactiveActionControllers(proactiveActionOperatorService));
+configureProductionPilotReadinessService(new PilotReadinessService(new CompanyDomainRepository(database), assistantReadinessService, new CompanyKnowledgeRepository(database), new WebChatConnectionRepository(database), whatsAppConnections, billingEntitlements, { whatsAppEmbeddedSignupAvailable: embeddedAttempts !== null && embeddedSignupPublicConfig().available }, identityClock, { scheduling: schedulingConfigurationService, proactive: proactiveActions }));
 export const proactiveSemanticRecoveryService = new ProactiveSemanticRecoveryService(proactiveActions, conversationIntelligenceService);
 const productionOperationalAssistantRuntime = new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock, productionAssistantTools);
 export const proactiveDueWorkerService = new ProactiveDueWorkerService(proactiveActions, identityClock, new ProactiveRuntimeService(proactiveActions, companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, productionOperationalAssistantRuntime, identityClock, conversationIntelligenceService, knowledgeRetrievalService));

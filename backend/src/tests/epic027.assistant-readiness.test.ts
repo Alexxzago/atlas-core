@@ -26,17 +26,17 @@ test("assistant readiness reports each objective blocker independently", () => {
   assert.deepEqual(setup({ validation: false }).service.refresh(context, 1, connection.id).blockers, ["whatsapp_validation_missing"]);
 });
 
-test("assistant readiness is reproducible, persisted on repeated refresh, and scoped to its workspace", () => {
+test("assistant readiness POST refresh is reproducible, persists each assessment, and is scoped to its workspace", () => {
   const value = setup();
   const first = value.service.refresh(context, 1), second = value.service.refresh(context, 1);
   assert.equal(first.status, "ready"); assert.equal(second.status, "ready"); assert.equal(first.configurationDigest, second.configurationDigest); assert.equal(value.saved.length, 2);
   assert.throws(() => value.service.refresh({ workspaceId: 2, workspaceKey: "other" }, 1));
 });
 
-test("readiness reads the current default assignment and immutable publication instead of an older assessment", () => {
+test("assistant readiness GET reads current facts without inserting an assessment", () => {
   let knowledge: { id: string; snapshotDigest: string } | null = null, assignment: { assistantProfileId: typeof profile.id } | null = null; const saved: unknown[] = [];
-  const service = new AssistantReadinessService({ findById: () => ({ id: 1 }) } as never, { loadCurrentVersion: () => knowledge } as never, { listActive: () => ({ status: "found", profiles: [profile] }), findById: () => profile } as never, { findById: () => null, findCredentials: () => null, findOperationalState: () => null } as never, { create: (_c: typeof context, value: unknown) => { saved.push(value); return value; }, findLatest: () => ({ status: "blocked", blockers: ["default_assistant_missing", "published_knowledge_missing"] }) } as never, { get: () => assignment, bootstrap: () => null } as never, { now: () => "2026-01-02T00:00:00.000Z" });
-  assert.deepEqual(service.get(context, 1).blockers, ["default_assistant_missing", "published_knowledge_missing"]); assignment = { assistantProfileId: profile.id }; knowledge = { id: "kver_current", snapshotDigest: "current" }; assert.deepEqual(service.get(context, 1).blockers, []); assert.equal(saved.length, 2);
+  const service = new AssistantReadinessService({ findById: () => ({ id: 1 }) } as never, { loadCurrentVersion: () => knowledge } as never, { listActive: () => ({ status: "found", profiles: [profile] }), findById: () => profile } as never, { findById: () => null, findCredentials: () => null, findOperationalState: () => null } as never, { create: (_c: typeof context, value: unknown) => { saved.push(value); return value; }, findLatest: () => ({ status: "blocked", blockers: ["default_assistant_missing", "published_knowledge_missing"] }) } as never, { get: () => assignment, suggest: () => null, bootstrap: () => null } as never, { now: () => "2026-01-02T00:00:00.000Z" });
+  assert.deepEqual(service.get(context, 1).blockers, ["default_assistant_missing", "published_knowledge_missing"]); assignment = { assistantProfileId: profile.id }; knowledge = { id: "kver_current", snapshotDigest: "current" }; assert.deepEqual(service.get(context, 1).blockers, []); assert.equal(saved.length, 0);
 });
 
 test("WhatsApp activation rejects the persisted readiness result instead of legacy company status", async () => {
