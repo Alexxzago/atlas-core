@@ -169,9 +169,18 @@
   .assistant-form--stepper :is(input, select) {
     block-size: 40px;
     min-block-size: 40px !important;
-    padding: 0 12px;
-    font: inherit;
+  }
+
+  .assistant-form--stepper .form-field > select {
+    box-sizing: border-box;
+    block-size: 40px;
+    min-block-size: 40px !important;
+    padding: 0 36px 0 12px;
+    font-family: var(--atlas-font-sans);
+    font-size: var(--atlas-font-size-sm);
+    font-weight: 400;
     line-height: normal;
+    appearance: auto;
   }
 }
 
