@@ -169,8 +169,9 @@
   .assistant-form--stepper :is(input, select) {
     block-size: 40px;
     min-block-size: 40px !important;
-    padding: 8px 12px;
-    line-height: 20px;
+    padding: 0 12px;
+    font: inherit;
+    line-height: normal;
   }
 }
 
