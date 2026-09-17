@@ -1,6 +1,7 @@
-body { background: var(--color-bg-page); color: var(--color-text-primary); font-family: var(--font-system); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
-h1 { font-size: 24px; line-height: 32px; font-weight: 700; letter-spacing: -.02em; }
-h2 { font-size: 16px; line-height: 24px; font-weight: 600; }
+body { background: var(--color-bg-page); color: var(--color-text-primary); font-family: var(--font-system); font-size: var(--atlas-font-size-body); line-height: var(--atlas-line-height-body); -webkit-font-smoothing: antialiased; }
+h1 { font-size: var(--atlas-font-size-h1); line-height: var(--atlas-line-height-h1); font-weight: 700; letter-spacing: -.02em; }
+h2 { font-size: var(--atlas-font-size-h2); line-height: var(--atlas-line-height-h2); font-weight: 600; }
+h3 { font-size: var(--atlas-font-size-h3); line-height: var(--atlas-line-height-h3); font-weight: 600; }
 p { color: var(--color-text-secondary); }
 a { color: var(--color-action); text-underline-offset: 3px; overflow-wrap: anywhere; }
 a:hover { color: var(--color-action-hover); }
