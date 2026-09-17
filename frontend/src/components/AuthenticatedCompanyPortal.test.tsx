@@ -15,6 +15,7 @@ const companyA = { id: 1, name: "Company A", website: "", phone: "", email: "", 
 const companyB = { ...companyA, id: 2, name: "Company B" };
 const profile = (id: string, name: string) => ({ id, name, description: null, businessRole: "Sales", objective: "Help", audience: null, tone: "professional", assistantLanguage: "en", welcomeMessage: "Hello", fallbackMessage: "Sorry", status: "ready", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", archivedAt: null });
 const json = (value: unknown): Response => new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
+const activation = (nextAction:"complete_company"|"configure_assistant"|"review_human_operations"="review_human_operations") => {const ids=["company","knowledge","assistant","web_chat","verification","pilot_ready","human_ops"] as const,actions=["complete_company","publish_knowledge","configure_assistant","activate_web_chat","start_verification","resolve_pilot_readiness","review_human_operations"] as const,paths=["/companies/1","/companies/1/knowledge","/companies/1/assistant","/companies/1/channels/web-chat",null,null,"/conversations"] as const,current=actions.indexOf(nextAction);return json({stages:ids.map((id,index)=>({id,status:index<current||nextAction==="review_human_operations"?"complete":"incomplete",state:index<current||nextAction==="review_human_operations"?"complete":"incomplete",owner:index<current||nextAction==="review_human_operations"?null:"customer",reasonCode:index===current&&nextAction==="configure_assistant"?"default_assistant_not_executable":null,action:actions[index],actionPath:paths[index]})),nextAction,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"activation-projection-v1"});};
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } { let resolve!: (value: T) => void; return { promise: new Promise<T>((next) => { resolve = next; }), resolve }; }
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.localStorage.clear(); });
 
@@ -30,6 +31,7 @@ function assistantPortalFetch(profiles: ReturnType<typeof profile>[], defaultId:
     const detail=/assistant-profiles\/([^/]+)$/.exec(url);if(detail){const found=profiles.find(item=>item.id===detail[1]);return Promise.resolve(found?json(found):new Response("",{status:404}));}
     if(url.endsWith("/assistant/default"))return Promise.resolve(defaultId?json({companyId:1,assistantProfileId:defaultId,version:1,assignedAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z",assignedByActorId:null,source:null}):new Response("",{status:fallbackStatus}));
     if(url.endsWith("/assistant/readiness"))return Promise.resolve(json({assistantIdentifier:"default",workspaceId:1,companyId:1,status:"ready",blockers:[],knowledgeVersionId:"knowledge",assistantProfileId:defaultId,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"1",configurationDigest:"digest"}));
+    if(url.endsWith("/activation"))return Promise.resolve(activation());
     if(url.endsWith("/pilot-readiness"))return Promise.resolve(json({overall:"pilot_ready",classification:"pilot_ready",checks:[],nextAction:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1"}));
     if(url.endsWith("/web-chat-connections")||url.endsWith("/whatsapp-connections"))return Promise.resolve(json([]));return Promise.resolve(new Response("",{status:404})); }) as unknown as typeof fetch;
 }
@@ -67,6 +69,7 @@ test("automatically enters the only accessible company after workspace restorati
     if (url.endsWith("/workspaces/workspace/companies/1")) return Promise.resolve(json(companyA));
     if (url.endsWith("/companies/1/assistant-profiles")) return Promise.resolve(json([profile("a", "Assistant A")]));
     if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ assistantIdentifier:"default",workspaceId:1,companyId:1,status:"ready",blockers:[],knowledgeVersionId:"knowledge",assistantProfileId:"a",evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"1",configurationDigest:"digest" }));
+    if (url.endsWith("/activation")) return Promise.resolve(activation());
     if (url.endsWith("/pilot-readiness")) return Promise.resolve(json({ overall:"pilot_ready",classification:"pilot_ready",checks:[],nextAction:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1" }));
     if (url.endsWith("/web-chat-connections") || url.endsWith("/whatsapp-connections")) return Promise.resolve(json([]));
     return Promise.resolve(new Response("", { status: 404 }));
@@ -89,6 +92,7 @@ test("renders only the stable preparation surface while workspace membership or 
     if (url.endsWith("/workspaces/workspace/companies/1")) return Promise.resolve(json(companyA));
     if (url.endsWith("/companies/1/assistant-profiles")) return Promise.resolve(json([]));
     if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ assistantIdentifier: "default", workspaceId: 1, companyId: 1, status: "blocked", blockers: ["default_assistant_missing"], knowledgeVersionId: null, assistantProfileId: null, evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "1", configurationDigest: "digest" }));
+    if (url.endsWith("/activation")) return Promise.resolve(activation());
     if (url.endsWith("/pilot-readiness")) return Promise.resolve(json({ overall:"pilot_ready",classification:"pilot_ready",checks:[],nextAction:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1" }));
     return Promise.resolve(new Response("", { status: 404 }));
   }));
@@ -113,6 +117,7 @@ test("multiple accessible companies require an explicit selection", async () => 
     if (url.endsWith("/workspaces/workspace/companies/1")) return Promise.resolve(json(companyA));
     if (url.endsWith("/companies/1/assistant-profiles")) return Promise.resolve(json([]));
     if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ assistantIdentifier:"default",workspaceId:1,companyId:1,status:"blocked",blockers:["default_assistant_missing"],knowledgeVersionId:null,assistantProfileId:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"1",configurationDigest:"digest" }));
+    if (url.endsWith("/activation")) return Promise.resolve(activation("configure_assistant"));
     if (url.endsWith("/pilot-readiness")) return Promise.resolve(json({ overall:"not_ready",classification:"setup_incomplete",checks:[],nextAction:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1" }));
     if (url.endsWith("/web-chat-connections") || url.endsWith("/whatsapp-connections")) return Promise.resolve(json([]));
     return Promise.resolve(new Response("", { status: 404 }));
@@ -156,6 +161,7 @@ test("keeps the company chooser closed while selecting the sole company", async 
     if (url.endsWith("/workspaces/workspace/companies/1")) return companyRead.promise;
     if (url.endsWith("/companies/1/assistant-profiles")) return Promise.resolve(json([profile("a", "Assistant A")]));
     if (url.endsWith("/assistant/readiness")) return Promise.resolve(json({ assistantIdentifier:"default",workspaceId:1,companyId:1,status:"blocked",blockers:["default_assistant_missing"],knowledgeVersionId:null,assistantProfileId:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"1",configurationDigest:"digest" }));
+    if (url.endsWith("/activation")) return Promise.resolve(activation("configure_assistant"));
     if (url.endsWith("/pilot-readiness")) return Promise.resolve(json({ overall:"not_ready",classification:"setup_incomplete",checks:[],nextAction:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1" }));
     if (url.endsWith("/web-chat-connections") || url.endsWith("/whatsapp-connections")) return Promise.resolve(json([]));
     return Promise.resolve(new Response("", { status: 404 }));
@@ -191,9 +197,10 @@ test("Today translates authoritative blockers into one next action", async () =>
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
     const url = String(input);
     if (url.endsWith("/pilot-readiness")) return Promise.resolve(json({ overall:"not_ready",classification:"setup_incomplete",checks:[{id:"default_assistant",required:true,status:"incomplete",owner:"customer",reasonCode:"default_assistant_not_executable",actionPath:"/companies/1/assistant"}],nextAction:"configure_assistant",evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1" }));
+    if (url.endsWith("/activation")) return Promise.resolve(activation("configure_assistant"));
     return Promise.resolve(new Response("", { status: 404 }));
   }));
-  render(<I18nProvider><CompanySetupChecklist workspace={workspace} companies={[companyA]} company={companyA} onNavigate={() => {}} onChooseCompany={() => {}}/></I18nProvider>);
+  render(<I18nProvider><CompanySetupChecklist csrf="csrf" workspace={workspace} companies={[companyA]} company={companyA} onNavigate={() => {}} onChooseCompany={() => {}}/></I18nProvider>);
   await screen.findByText("Faltan pasos de configuración");
   expect(screen.getAllByRole("button", { name: "Configurar asistente" })).toHaveLength(1);
   expect(screen.queryByText("default_assistant_missing")).toBeNull();

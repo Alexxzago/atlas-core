@@ -72,7 +72,7 @@ test("EPIC047 valid production preflight permits the normal 0068 to 0069 migrati
     database.exec("PRAGMA foreign_keys=ON"); runMigrations(database, 68);
     const runtime = createProductionRuntimeDatabase(noMedia(), () => database);
     assert.equal(runtime.configuration.mediaCapability, "unavailable");
-    assert.equal((database.prepare("SELECT name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as { name: string }).name, "0074_billing_versioned_plan_provider_commercial_offers");
+    assert.equal((database.prepare("SELECT name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as { name: string }).name, "0075_activation_verification_attempts");
     assert.doesNotThrow(() => createProductionRuntimeDatabase(noMedia(), () => database));
   } finally { database.close(); }
 });

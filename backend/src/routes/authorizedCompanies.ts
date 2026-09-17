@@ -15,6 +15,8 @@ import type { SchedulingConfigurationService } from "../scheduling/services/sche
 import { createGetSchedulingConfigurationController, createMutateSchedulingConfigurationController } from "../controllers/schedulingConfigurationController.js";
 import type { PilotReadinessService } from "../onboarding/services/pilotReadinessService.js";
 import { createGetPilotReadinessController } from "../controllers/pilotReadinessController.js";
+import type { ActivationService } from "../activation/services/activationService.js";
+import { createGetActivationController, createStartActivationVerificationController } from "../controllers/activationController.js";
 
 interface ContextualControllers {
   list: (context: WorkspaceContext) => RequestHandler;
@@ -93,6 +95,7 @@ interface AuthorizedCompanyDependencies {
   commercial?: CommercialControlsRepository;
   schedulingConfigurationService?: SchedulingConfigurationService;
   pilotReadinessService?: PilotReadinessService;
+  activationService?: ActivationService;
 }
 
 let productionConversationMessageController: ((context: WorkspaceContext, actor: ActorContext) => RequestHandler) | null = null;
@@ -108,6 +111,7 @@ let productionProactiveActionControllers: ContextualProactiveActionControllers |
 let productionCompanyOperationalStatusService: CompanyOperationalStatusService | null = null;
 let productionSchedulingConfigurationService: SchedulingConfigurationService | null = null;
 let productionPilotReadinessService: PilotReadinessService | null = null;
+let productionActivationService: ActivationService | null = null;
 export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
 export function configureProductionConversationReadControllers(controllers: ContextualConversationReadControllers): void { productionConversationReadControllers = controllers; }
 export function configureProductionConversationControlControllers(controllers: ContextualConversationControlControllers): void { productionConversationControlControllers = controllers; }
@@ -121,6 +125,7 @@ export function configureProductionProactiveActionControllers(controllers: Conte
 export function configureProductionCompanyOperationalStatusService(service: CompanyOperationalStatusService): void { productionCompanyOperationalStatusService = service; }
 export function configureProductionSchedulingConfigurationService(service: SchedulingConfigurationService): void { productionSchedulingConfigurationService = service; }
 export function configureProductionPilotReadinessService(service: PilotReadinessService): void { productionPilotReadinessService = service; }
+export function configureProductionActivationService(service: ActivationService): void { productionActivationService = service; }
 
 function rawCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -219,6 +224,11 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   }
   const pilotReadiness = dependencies.pilotReadinessService ?? productionPilotReadinessService;
   if (pilotReadiness) router.get("/:workspaceId/companies/:companyId/pilot-readiness", authorize("company:read", false, (context) => createGetPilotReadinessController(pilotReadiness, context)));
+  const activation = dependencies.activationService ?? productionActivationService;
+  if (activation) {
+    router.get("/:workspaceId/companies/:companyId/activation", authorize("company:read", false, (context) => createGetActivationController(activation, context)));
+    router.post("/:workspaceId/companies/:companyId/activation/verification-attempts", authorize("company:manage", true, (context) => createStartActivationVerificationController(activation, context)));
+  }
   const operationalStatus = dependencies.companyOperationalStatusService ?? productionCompanyOperationalStatusService;
   if (operationalStatus) router.get("/:workspaceId/companies/:companyId/operational-status", authorize("company:read", false, (context) => createGetCompanyOperationalStatusController(operationalStatus, context)));
   const schedulingConfiguration = dependencies.schedulingConfigurationService ?? productionSchedulingConfigurationService;

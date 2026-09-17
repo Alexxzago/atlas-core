@@ -289,6 +289,15 @@ export type PilotReadinessNextAction = "resolve_workspace_context" | "review_com
 export interface PilotReadinessCheck { id:PilotReadinessCheckId; required:boolean; status:PilotReadinessCheckStatus; owner:PilotReadinessBlockerOwner|null; reasonCode:PilotReadinessReasonCode|null; actionPath:string|null; }
 export interface PilotReadiness { overall:PilotReadinessOverall; classification:PilotReadinessClassification; checks:PilotReadinessCheck[]; nextAction:PilotReadinessNextAction|null; evaluatedAt:string; policyVersion:"pilot-readiness-v1"; }
 
+export type ActivationStageId = "company" | "knowledge" | "assistant" | "web_chat" | "verification" | "pilot_ready" | "human_ops";
+export type ActivationAction = "complete_company" | "publish_knowledge" | "configure_assistant" | "activate_web_chat" | "start_verification" | "resolve_pilot_readiness" | "review_human_operations";
+export type ActivationStageState = "complete" | "incomplete" | "blocked" | "unavailable";
+export type ActivationStageOwner = "customer" | "platform" | "external_provider";
+export type ActivationReasonCode = "company_missing" | "company_suspended" | "company_archived" | "default_assistant_not_executable" | "published_knowledge_missing" | "web_chat_not_connected" | "web_chat_inactive" | "verification_required" | "verification_pending" | "verification_failed" | "pilot_not_ready";
+export interface ActivationStage { id:ActivationStageId; status:"complete"|"incomplete"; state:ActivationStageState; owner:ActivationStageOwner|null; reasonCode:ActivationReasonCode|null; action:ActivationAction; actionPath:string|null; }
+export interface ActivationProjection { stages:ActivationStage[]; nextAction:ActivationAction; evaluatedAt:string; policyVersion:"activation-projection-v1"; }
+export interface ActivationVerificationAttempt { token:string; expiresAt:string; }
+
 export type EmbeddedSignupUiStatus="awaiting_meta"|"verifying"|"connected"|"needs_attention"|"reconnect_required"|"failed"|"expired";
 export interface EmbeddedSignupPublicConfig{available:boolean;appId?:string;configId?:string;graphApiVersion?:string;}
 export interface EmbeddedSignupAttemptResponse{attemptId?:string;state?:string;expiresAt?:string;status:EmbeddedSignupUiStatus|"starting";embeddedSignup:EmbeddedSignupPublicConfig;}

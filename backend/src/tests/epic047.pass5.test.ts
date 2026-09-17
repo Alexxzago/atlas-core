@@ -1028,10 +1028,10 @@ test("EPIC047 PASS5C migrates fresh and exact-0068 databases to the sole 0069 sh
     const head = database
       .prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1")
       .get() as { id: number; name: string };
-    assert.equal(head.id, 74);
+    assert.equal(head.id, 75);
     assert.equal(
       head.name,
-      "0074_billing_versioned_plan_provider_commercial_offers",
+      "0075_activation_verification_attempts",
     );
     assert.deepEqual(
       (

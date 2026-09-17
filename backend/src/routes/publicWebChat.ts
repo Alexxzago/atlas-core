@@ -3,6 +3,7 @@ import type { PublicWebChatSessionService } from "../webChat/services/publicWebC
 import { PublicWebChatSessionUnavailableError } from "../webChat/services/publicWebChatSessionService.js";
 import { PublicWebChatConversationInProgressError, PublicWebChatConversationRuntimeError, PublicWebChatConversationUnavailableError, PublicWebChatConversationValidationError, type PublicWebChatConversationService } from "../webChat/services/publicWebChatConversationService.js";
 import { AbuseLimitExceededError } from "../abuse/rateLimitService.js";
+import type { ActivationService } from "../activation/services/activationService.js";
 
 const developmentCookie = "atlas_web_chat_session";
 const productionCookie = "__Host-atlas_web_chat_session";
@@ -17,7 +18,7 @@ function sameOrigin(request: Request): boolean {
   catch { return false; }
 }
 
-export function createPublicWebChatRouter(service: PublicWebChatSessionService, conversations: PublicWebChatConversationService, production: boolean): Router {
+export function createPublicWebChatRouter(service: PublicWebChatSessionService, conversations: PublicWebChatConversationService, production: boolean, activation?: ActivationService): Router {
   const router = Router(), cookieName = production ? productionCookie : developmentCookie;
   const set = (response: Response, raw: string, expiresAt: string): void => { const age = Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000)); response.setHeader("set-cookie", `${cookieName}=${encodeURIComponent(raw)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${production ? "; Secure" : ""}`); };
   const clear = (response: Response): void => { response.setHeader("set-cookie", `${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${production ? "; Secure" : ""}`); };
@@ -28,6 +29,14 @@ export function createPublicWebChatRouter(service: PublicWebChatSessionService, 
   });
   router.get("/:connectionPublicId/session", (request, response): void => { try { response.json(service.state(request.params.connectionPublicId, cookie(request, cookieName))); } catch { unavailable(response); } });
   router.delete("/:connectionPublicId/session", (request, response): void => { try { service.close(request.params.connectionPublicId, cookie(request, cookieName)); clear(response); response.status(204).end(); } catch { clear(response); unavailable(response); } });
+  if (activation) router.post("/:connectionPublicId/activation-verifications/:token", (request, response): void => {
+    if (!activation.canClaimPublicVerification(request.params.connectionPublicId, request.params.token)) { unavailable(response); return; }
+    try {
+      const value = service.start(request.params.connectionPublicId, null), session = service.resolveSession(value.rawToken);
+      if (!session || !activation.claimPublicVerification(request.params.connectionPublicId, request.params.token, session)) { unavailable(response); return; }
+      set(response,value.rawToken,value.expiresAt); response.status(204).end();
+    } catch { unavailable(response); }
+  });
   router.get("/:connectionPublicId/messages", (request, response): void => { try { response.json(conversations.history(request.params.connectionPublicId, cookie(request, cookieName))); } catch { unavailable(response); } });
   router.post("/:connectionPublicId/messages", (request, response, next): void => {
     if (!request.is("application/json")) { response.status(415).json({ error: "Message is invalid." }); return; }

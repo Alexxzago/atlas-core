@@ -9,6 +9,7 @@ import { PilotReadinessPanel, safePilotReadinessPath } from "./PilotReadinessPan
 const workspace={id:"workspace",name:"Workspace",role:"owner",capabilities:["company:read","company:manage"] as ("company:read"|"company:manage")[]};
 const company={id:1,name:"Company A",website:null,phone:"",email:"",status:"ready" as const,createdAt:"2026-01-01T00:00:00.000Z"};
 const readiness:PilotReadiness={overall:"not_ready",classification:"setup_incomplete",checks:[{id:"default_assistant",required:true,status:"incomplete",owner:"customer",reasonCode:"default_assistant_not_executable",actionPath:"/companies/1/assistant"},{id:"published_knowledge",required:true,status:"incomplete",owner:"customer",reasonCode:"published_knowledge_missing",actionPath:"/companies/1/knowledge"},{id:"scheduling",required:false,status:"incomplete",owner:"customer",reasonCode:"scheduling_not_configured",actionPath:"/companies/1/channels"}],nextAction:"configure_assistant",evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1"};
+const activation={stages:["company","knowledge","assistant","web_chat","verification","pilot_ready","human_ops"].map((id,index)=>({id,status:index<2?"complete":"incomplete",state:index<2?"complete":"incomplete",owner:index<2?null:"customer",reasonCode:index===2?"default_assistant_not_executable":null,action:["complete_company","publish_knowledge","configure_assistant","activate_web_chat","start_verification","resolve_pilot_readiness","review_human_operations"][index],actionPath:["/companies/1","/companies/1/knowledge","/companies/1/assistant","/companies/1/channels/web-chat",null,null,"/conversations"][index]})),nextAction:"configure_assistant",evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"activation-projection-v1"};
 const json=(value:unknown):Response=>new Response(JSON.stringify(value),{status:200,headers:{"content-type":"application/json"}});
 
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
@@ -34,11 +35,11 @@ test("does not render actions for an untrusted readiness path",()=>{
 });
 
 test("shows an unavailable state and retries the single readiness request",async()=>{
-  const fetch=vi.fn().mockResolvedValueOnce(new Response("",{status:503})).mockResolvedValueOnce(json(readiness));
+  const fetch=vi.fn().mockResolvedValueOnce(new Response("",{status:503})).mockResolvedValueOnce(new Response("",{status:503})).mockResolvedValueOnce(json(readiness)).mockResolvedValueOnce(json(activation));
   vi.stubGlobal("fetch",fetch);
-  render(<I18nProvider><CompanySetupChecklist workspace={workspace} companies={[company]} company={company} onNavigate={()=>{}} onChooseCompany={()=>{}}/></I18nProvider>);
+  render(<I18nProvider><CompanySetupChecklist csrf="csrf" workspace={workspace} companies={[company]} company={company} onNavigate={()=>{}} onChooseCompany={()=>{}}/></I18nProvider>);
   expect((await screen.findByRole("alert")).textContent).toContain("Estado temporalmente no disponible");
   fireEvent.click(screen.getByRole("button",{name:"Reintentar"}));
-  expect(await screen.findByText("Faltan pasos de configuración")).toBeTruthy();
-  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(await screen.findByText("Activá tu asistente")).toBeTruthy();
+  expect(fetch).toHaveBeenCalledTimes(4);
 });

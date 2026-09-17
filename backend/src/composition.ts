@@ -62,7 +62,7 @@ import{DevelopmentInvitationDelivery,SecureInvitationProofProvider,UnavailableIn
 import{WorkspaceAdministrationService}from"./workspace/services/workspaceAdministrationService.js";
 import{AuthorizationService}from"./workspace/services/authorizationService.js";
 import{WorkspaceResolver}from"./workspace/services/workspaceResolver.js";
-import{configureProductionCompanyOperationalStatusService,configureProductionPilotReadinessService,configureProductionProactiveActionControllers,configureProductionSchedulingConfigurationService,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
+import{configureProductionActivationService,configureProductionCompanyOperationalStatusService,configureProductionPilotReadinessService,configureProductionProactiveActionControllers,configureProductionSchedulingConfigurationService,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
 import{UserRepository}from"./repositories/userRepository.js";
 import{AssistantProfileRepository}from"./repositories/assistantProfileRepository.js";
 import{AssistantProfileService}from"./assistant/services/assistantProfileService.js";
@@ -233,6 +233,8 @@ import { MetaEmbeddedSignupHttpService, embeddedSignupPublicConfig } from "./wha
 import { createMetaEmbeddedSignupControllers } from "./controllers/metaEmbeddedSignupController.js";
 import { CompanyOperationalStatusService } from "./company/services/companyOperationalStatusService.js";
 import { PilotReadinessService } from "./onboarding/services/pilotReadinessService.js";
+import { ActivationVerificationAttemptRepository } from "./repositories/activationVerificationAttemptRepository.js";
+import { ActivationService } from "./activation/services/activationService.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimeConfiguration = runtimeProductionConfiguration;
@@ -364,12 +366,14 @@ const proactiveActionOperatorService = new ProactiveActionOperatorService(proact
 configureProductionProactiveActionControllers(createProactiveActionControllers(proactiveActionOperatorService));
 const pilotReadinessService=new PilotReadinessService(new CompanyDomainRepository(database), assistantReadinessService, new CompanyKnowledgeRepository(database), new WebChatConnectionRepository(database), whatsAppConnections, billingEntitlements, { whatsAppEmbeddedSignupAvailable: embeddedAttempts !== null && embeddedSignupPublicConfig().available }, identityClock, { scheduling: schedulingConfigurationService, proactive: proactiveActions });
 configureProductionPilotReadinessService(pilotReadinessService);
+const activationService=new ActivationService(new CompanyDomainRepository(database),new WebChatConnectionRepository(database),pilotReadinessService,new ActivationVerificationAttemptRepository(database),identityClock);
+configureProductionActivationService(activationService);
 export const proactiveSemanticRecoveryService = new ProactiveSemanticRecoveryService(proactiveActions, conversationIntelligenceService);
 const productionOperationalAssistantRuntime = new OperationalAssistantRuntime(agent, new AssistantExecutionRecordRepository(database), identityClock, productionAssistantTools);
 export const proactiveDueWorkerService = new ProactiveDueWorkerService(proactiveActions, identityClock, new ProactiveRuntimeService(proactiveActions, companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, productionOperationalAssistantRuntime, identityClock, conversationIntelligenceService, knowledgeRetrievalService));
 const voiceSemanticProjection = { resolveInbound: (context: WorkspaceContext, companyId: number, message: import("./conversation/domain/conversation.js").ConversationMessage) => resolveVoiceSemanticMessage(voiceSemanticRepository, context, companyId, message), includeHistory: (context: WorkspaceContext, companyId: number, message: import("./conversation/domain/conversation.js").ConversationMessage) => includeVoiceSemanticHistory(voiceSemanticRepository, context, companyId, message), applyAssistant: (context: WorkspaceContext, companyId: number, message: import("./conversation/domain/conversation.js").ConversationMessage) => includeVoiceSemanticHistory(voiceSemanticRepository, context, companyId, message) };
 export const operationalConversationTurnService = new OperationalConversationTurnService(companyRepository, new CompanyKnowledgeRepository(database), new AssistantProfileRepository(database), conversationService, productionOperationalAssistantRuntime, new InMemoryConversationTurnLock(), "gemini", 20, conversationIntelligenceService, conversationToolMemory, knowledgeRetrievalService, new SafeConversationAttachmentService(new SafeConversationAttachmentRepository(database)), new ConversationRepository(database), voiceSemanticProjection);
-const publicWebChatConversationService = new PublicWebChatConversationService(publicWebChatSessionService, operationalConversationTurnService, conversationService, rateLimits);
+const publicWebChatConversationService = new PublicWebChatConversationService(publicWebChatSessionService, operationalConversationTurnService, conversationService, rateLimits, activationService);
 const knowledgeIndexingService=new KnowledgeIndexingService(new KnowledgeRetrievalRepository(database));
 const companyKnowledgeService=new FrozenKnowledgeService(companyRepository,new CompanyKnowledgeRepository(database),new SecurePublicUrlProvider(),new WorkerPdfTextExtractor(),new ManualTextKnowledgeFactExtractor(new GeminiKnowledgeFactExtractor(geminiProvider)),identityClock,undefined,knowledgeIndexingService);
 const companyKnowledgeControllers=createCompanyKnowledgeControllers(companyKnowledgeService,rateLimits);
@@ -395,7 +399,7 @@ export const identityRouter = createIdentityRouter({
   ...passwordResetControllers,
   ...authenticationControllers,
 });
-export const publicWebChatRouter = createPublicWebChatRouter(publicWebChatSessionService, publicWebChatConversationService, production);
+export const publicWebChatRouter = createPublicWebChatRouter(publicWebChatSessionService, publicWebChatConversationService, production, activationService);
 export const whatsAppOutboundDeliveryService = new WhatsAppOutboundDeliveryService(new ConversationRepository(database), whatsAppConnections, new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), whatsAppCredentialResolver, (accessToken) => new WhatsAppCloudApiProvider(accessToken, process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0"), identityClock, whatsAppConnectionService, new WhatsAppConversationRepository(database), voiceSemanticRepository, voiceDeferredSemanticRecoveryService, proactiveSemanticRecoveryService);
 const whatsAppDeliveryStatusService = new WhatsAppDeliveryStatusService(new ProviderMessageRecordRepository(database), new OutboundDeliveryRepository(database), new MetaDeliveryStatusMapper(), new DeliveryLifecyclePolicy(), identityClock, whatsAppConnectionService);
 const operatorConversationMessagingService = new OperatorConversationMessagingService(conversationService, new ConversationRepository(database), new ConversationRepository(database), new WhatsAppConversationRepository(database), whatsAppOutboundDeliveryService, identityClock, conversationIntelligenceService, rateLimits);

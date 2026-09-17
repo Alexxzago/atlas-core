@@ -2327,6 +2327,18 @@ const migrations: Migration[] = [
     ALTER TABLE billing_provider_events ADD COLUMN safe_failure_code TEXT CHECK(safe_failure_code IS NULL OR length(safe_failure_code) BETWEEN 1 AND 100);
     CREATE INDEX idx_billing_provider_events_account_received ON billing_provider_events(billing_account_id,received_at DESC,id DESC);
   `);}},
+  { id:75,name:"0075_activation_verification_attempts",checksumSource:"activation-projection-web-chat-verification-session-bound-persisted-turn-outcome-v2",apply(database):void{database.exec(`
+    CREATE TABLE activation_verification_attempts(
+      id TEXT PRIMARY KEY CHECK(length(id)=36 AND substr(id,1,4)='ava_'),workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,web_chat_connection_id TEXT NOT NULL,
+      token_digest TEXT NOT NULL UNIQUE CHECK(length(token_digest)=64 AND token_digest NOT GLOB '*[^0-9a-f]*'),status TEXT NOT NULL CHECK(status IN ('pending','succeeded','failed','expired')),
+      created_at TEXT NOT NULL,expires_at TEXT NOT NULL,claimed_at TEXT,web_chat_session_id TEXT REFERENCES web_chat_sessions(id) ON DELETE RESTRICT,conversation_id TEXT REFERENCES conversations(id) ON DELETE RESTRICT,inbound_message_id TEXT REFERENCES conversation_messages(id) ON DELETE RESTRICT,execution_record_id TEXT REFERENCES assistant_execution_records(id) ON DELETE RESTRICT,outcome_ref TEXT CHECK(outcome_ref IS NULL OR outcome_ref IN ('answered','safe_fallback')),completed_at TEXT,failure_code TEXT CHECK(failure_code IS NULL OR failure_code='runtime_failure'),
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(web_chat_connection_id) REFERENCES web_chat_connections(id) ON DELETE CASCADE,
+      CHECK(expires_at>created_at),CHECK((claimed_at IS NULL AND web_chat_session_id IS NULL AND conversation_id IS NULL) OR (claimed_at IS NOT NULL AND web_chat_session_id IS NOT NULL AND conversation_id IS NOT NULL)),CHECK((status='pending' AND completed_at IS NULL AND inbound_message_id IS NULL AND execution_record_id IS NULL AND outcome_ref IS NULL AND failure_code IS NULL) OR (status='succeeded' AND claimed_at IS NOT NULL AND completed_at IS NOT NULL AND inbound_message_id IS NOT NULL AND execution_record_id IS NOT NULL AND outcome_ref IS NOT NULL AND failure_code IS NULL) OR (status='failed' AND claimed_at IS NOT NULL AND completed_at IS NOT NULL AND inbound_message_id IS NULL AND execution_record_id IS NULL AND outcome_ref IS NULL AND failure_code='runtime_failure') OR (status='expired' AND claimed_at IS NULL AND completed_at IS NOT NULL AND inbound_message_id IS NULL AND execution_record_id IS NULL AND outcome_ref IS NULL AND failure_code IS NULL))
+    );
+    CREATE INDEX idx_activation_verification_attempts_company_connection ON activation_verification_attempts(workspace_id,company_id,web_chat_connection_id,created_at DESC,id DESC);
+    CREATE TRIGGER activation_verification_attempt_scope_insert BEFORE INSERT ON activation_verification_attempts WHEN NOT EXISTS(SELECT 1 FROM web_chat_connections WHERE id=NEW.web_chat_connection_id AND workspace_id=NEW.workspace_id AND company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Activation verification attempt scope is invalid'); END;
+    CREATE TRIGGER activation_verification_attempts_no_delete BEFORE DELETE ON activation_verification_attempts BEGIN SELECT RAISE(ABORT,'Activation verification attempts are immutable'); END;
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

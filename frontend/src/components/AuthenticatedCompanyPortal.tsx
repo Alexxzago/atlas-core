@@ -100,7 +100,7 @@ function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmi
 
   const routeContent = (): React.JSX.Element => {
     if (route.name === "dashboard" || route.name === "company-overview") {
-      if (state.selectedWorkspace && selectedCompany) return <CompanySetupChecklist workspace={state.selectedWorkspace} companies={state.companies} company={selectedCompany} onNavigate={navigate} onChooseCompany={() => navigate("/companies")}/>;
+      if (state.selectedWorkspace && selectedCompany) return <CompanySetupChecklist csrf={csrf} workspace={state.selectedWorkspace} companies={state.companies} company={selectedCompany} onNavigate={navigate} onChooseCompany={() => navigate("/companies")}/>;
        return <DashboardPage model={buildCompanyWorkspaceViewModel({ workspace: state.selectedWorkspace, companies: state.companies, company: null, companiesLoading: state.companiesLoading, companiesUnavailable: state.companyError })} onNavigate={navigate} onRetry={state.workspaceError ? () => void refresh() : refreshCompanies} onChooseCompany={() => navigate("/companies")}/>;
     }
      if (route.name === "companies") return state.selectedCompanyId === null ? <></> : <DashboardPage model={buildCompanyWorkspaceViewModel({ workspace: state.selectedWorkspace, companies: state.companies, company: null, companiesLoading: state.companiesLoading, companiesUnavailable: state.companyError })} onNavigate={navigate} onRetry={refreshCompanies} onChooseCompany={() => {}}/>;

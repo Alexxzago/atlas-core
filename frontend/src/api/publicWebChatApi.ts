@@ -22,4 +22,5 @@ export const publicWebChatApi = {
   history: (connectionPublicId: string): Promise<{ messages: readonly PublicWebChatHistoryMessage[] }> => request(path(connectionPublicId, "messages"), { method: "GET" }),
   sendMessage: (connectionPublicId: string, message: string): Promise<{ message: string }> => request(path(connectionPublicId, "messages"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message }) }),
   closeSession: (connectionPublicId: string): Promise<void> => request(path(connectionPublicId, "session"), { method: "DELETE" }),
+  startActivationVerification: (connectionPublicId: string, token: string): Promise<void> => request(`${apiBaseUrl}/public/web-chat/${encodeURIComponent(connectionPublicId)}/activation-verifications/${encodeURIComponent(token)}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }),
 };
