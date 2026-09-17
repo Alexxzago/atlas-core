@@ -175,6 +175,8 @@
 .ds-page-header__title { margin: 0; font-size: var(--atlas-font-size-h1); line-height: var(--atlas-line-height-h1); }
 .ds-page-header__description { margin: 0; color: var(--atlas-color-text-secondary); }
 .ds-page-header__action { flex: 0 0 auto; }
+.ds-page-header-with-trail { display: grid; gap: var(--atlas-space-2); max-inline-size: 760px; }
+.ds-page-header__trail { margin: 0; color: var(--atlas-color-action); font-size: var(--atlas-font-size-helper); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .ds-back-navigation { display: inline-flex; align-items: center; min-block-size: var(--atlas-size-control); gap: var(--atlas-space-2); padding: 0; color: var(--atlas-color-text-secondary); background: transparent; font-size: var(--atlas-font-size-label); font-weight: 600; text-decoration: none; }
 .ds-back-navigation:hover { color: var(--atlas-color-text); }
 .ds-surface, .ds-card { padding: var(--ds-surface-padding, var(--atlas-card-padding)); background: var(--atlas-color-surface); border: var(--atlas-border-default); border-radius: var(--atlas-radius-lg); }
