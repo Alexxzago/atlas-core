@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, atlasApi } from "../api/atlasApi";
 import { useI18n } from "../i18n/I18nContext";
 import type { AssistantProfile, Permission } from "../types/api";
+import { Alert, Button, Textarea } from "../design-system/primitives";
 
 type Mode = "preview" | "active";
 type Outcome = "answered" | "safe_fallback";
@@ -68,11 +69,11 @@ export function AssistantTestPanel({ csrf, workspaceId, companyId, profile, capa
         <button className={`assistant-test-mode${mode === "active" ? " is-selected" : ""}`} type="button" role="tab" aria-controls="assistant-test-content" aria-selected={mode === "active"} disabled={!canActive} onClick={() => setMode("active")}>{t("assistantTest.active")}</button>
       </div>
       <div id="assistant-test-content" className="assistant-test-content" role="tabpanel"><p>{t(mode === "preview" ? "assistantTest.previewLead" : "assistantTest.activeLead")}</p>{profile.status !== "ready" && <p role="status">{t("assistantTest.readyRequired")}</p>}
-        <form className="assistant-preview-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>{t("assistantTest.messageLabel")}</span><textarea value={message} maxLength={2_000} disabled={pending || profile.status !== "ready"} placeholder={t("assistantTest.placeholder")} onChange={(event) => setMessage(event.target.value)} /><small>{t("assistantTest.limit", { count: String(length) })}</small></label><button className="button button--primary" type="submit" disabled={pending || profile.status !== "ready" || length < 1 || length > 2_000}>{pending ? t("assistantTest.sending") : t("assistantTest.send")}</button></form>
+        <form className="assistant-preview-form" onSubmit={(event) => void submit(event)}><label className="form-field"><span>{t("assistantTest.messageLabel")}</span><Textarea value={message} maxLength={2_000} disabled={pending || profile.status !== "ready"} placeholder={t("assistantTest.placeholder")} onChange={(event) => setMessage(event.target.value)} /><small>{t("assistantTest.limit", { count: String(length) })}</small></label><Button type="submit" disabled={pending || profile.status !== "ready" || length < 1 || length > 2_000}>{pending ? t("assistantTest.sending") : t("assistantTest.send")}</Button></form>
       </div>
       {pending && <p role="status">{t("assistantTest.responding")}</p>}
       {answer && <div className={`assistant-preview-result${answer.outcome === "safe_fallback" ? " assistant-preview-result--fallback" : ""}`} aria-live="polite"><strong>{t(answer.outcome === "safe_fallback" ? "assistantTest.fallback" : "assistantTest.answer")}</strong>{answer.outcome === "safe_fallback" && <p>{t("assistantTest.fallbackCue")}</p>}<p>{answer.text}</p></div>}
-      {error && <p className="inline-message inline-message--error" role="alert">{t(error.key)}{href && <> <a href={href} onClick={(event) => { event.preventDefault(); onNavigate?.(href); }}>{t(error.destination === "general" ? "assistantTest.goGeneral" : "assistantTest.goStatus")}</a></>}</p>}
+      {error && <Alert tone="danger">{t(error.key)}{href && <> <a href={href} onClick={(event) => { event.preventDefault(); onNavigate?.(href); }}>{t(error.destination === "general" ? "assistantTest.goGeneral" : "assistantTest.goStatus")}</a></>}</Alert>}
     </>}
   </section>;
 }

@@ -1,54 +1,811 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { ApiError, atlasApi } from "../api/atlasApi";
 import { useI18n } from "../i18n/I18nContext";
-import { initialKnowledgeState, knowledgeReducer, type KnowledgeRequest } from "../state/knowledgeState";
-import type { KnowledgeRevision, KnowledgeSource, KnowledgeSourceKind, Permission } from "../types/api";
+import {
+  initialKnowledgeState,
+  knowledgeReducer,
+  type KnowledgeRequest,
+} from "../state/knowledgeState";
+import type {
+  KnowledgeRevision,
+  KnowledgeSource,
+  KnowledgeSourceKind,
+  Permission,
+} from "../types/api";
 import { presentKnowledgeSource } from "./knowledgePresentation";
 import { ContextBackLink } from "./ContextBackLink";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  ConfirmDialog,
+  EmptyState,
+  Input,
+  ProgressIndicator,
+  StatusBadge,
+  Surface,
+  Textarea,
+} from "../design-system/primitives";
 
-interface Props { readonly csrf:string; readonly workspaceId:string|null; readonly companyId:number|null; readonly capabilities:Permission[]; readonly onPublicationCompleted?:()=>Promise<void>; }
+interface Props {
+  readonly csrf: string;
+  readonly workspaceId: string | null;
+  readonly companyId: number | null;
+  readonly capabilities: Permission[];
+  readonly onPublicationCompleted?: () => Promise<void>;
+}
 type Method = "website" | "document" | "faq" | "internal";
-const PDF_LIMIT=10*1024*1024, MANUAL_CHARACTERS=80_000, MANUAL_BYTES=100*1024;
+const PDF_LIMIT = 10 * 1024 * 1024,
+  MANUAL_CHARACTERS = 80_000,
+  MANUAL_BYTES = 100 * 1024;
 
-export function CompanyKnowledgePanel({csrf,workspaceId,companyId,capabilities,onPublicationCompleted}:Props):React.JSX.Element {
-  const {t,formatDate}=useI18n(),[state,dispatch]=useReducer(knowledgeReducer,initialKnowledgeState),sequence=useRef(0),loadAbort=useRef<AbortController|null>(null),mutationAbort=useRef<AbortController|null>(null);
-  const methodTriggers=useRef<Partial<Record<Method,HTMLButtonElement>>>({}),returnMethod=useRef<Method|null>(null),addTrigger=useRef<HTMLButtonElement|null>(null);
-  const [method,setMethod]=useState<Method|null>(null),[adding,setAdding]=useState(false),[name,setName]=useState(""),[content,setContent]=useState(""),[file,setFile]=useState<File|null>(null),[fileInputKey,setFileInputKey]=useState(0),[revising,setRevising]=useState<KnowledgeSource|null>(null),[detail,setDetail]=useState<KnowledgeRevision|null>(null),[reviewRequired,setReviewRequired]=useState(false),[validation,setValidation]=useState<string|null>(null),[notice,setNotice]=useState<string|null>(null),[publishConfirmation,setPublishConfirmation]=useState<string[]|null>(null);
-  const canIngest=capabilities.includes("knowledge:ingest"),canPublish=capabilities.includes("knowledge:publish"),canArchive=capabilities.includes("knowledge:archive");
-  const request=():KnowledgeRequest=>({requestId:++sequence.current,workspaceId:workspaceId!,companyId:companyId!,generation:state.generation});
-  const resetEditor=()=>{setName("");setContent("");setFile(null);setFileInputKey(value=>value+1);setRevising(null);setDetail(null);setValidation(null);};
-  const back=()=>{const origin=returnMethod.current;resetEditor();setMethod(null);window.setTimeout(()=>{if(origin)methodTriggers.current[origin]?.focus();},0);};
-  const backToLibrary=()=>{setAdding(false);window.setTimeout(()=>addTrigger.current?.focus(),0);};
-  const load=async():Promise<void>=>{if(!workspaceId||!companyId)return;loadAbort.current?.abort();const controller=new AbortController();loadAbort.current=controller;const r=request();dispatch({type:"loading",request:r});try{const sources=await atlasApi.listKnowledgeSources(workspaceId,companyId,controller.signal);let publication=null;try{publication=await atlasApi.getKnowledgePublication(workspaceId,companyId,controller.signal);}catch(error){if(!(error instanceof ApiError&&error.code==="knowledge_unavailable"))throw error;}dispatch({type:"loaded",request:r,sources,publication});}catch(error){if(!aborted(error))dispatch({type:"failed",request:r});}};
-  useEffect(()=>{loadAbort.current?.abort();mutationAbort.current?.abort();dispatch({type:"contextChanged"});resetEditor();setMethod(null);setAdding(false);setReviewRequired(false);setNotice(null);setPublishConfirmation(null);if(workspaceId&&companyId)void load();return()=>{loadAbort.current?.abort();mutationAbort.current?.abort();};},[workspaceId,companyId]);
-  const startMutation=()=>{mutationAbort.current?.abort();const controller=new AbortController();mutationAbort.current=controller;return controller;};
-  const valid=():boolean=>{if(method==="internal"&&(Array.from(content).length>MANUAL_CHARACTERS||new TextEncoder().encode(content).byteLength>MANUAL_BYTES)){setValidation(t("teach.validation.manualLimit"));return false;}if(method==="document"&&file&&file.size>PDF_LIMIT){setValidation(t("teach.validation.fileTooLarge"));return false;}setValidation(null);return true;};
-  const submit=async(event:React.FormEvent):Promise<void>=>{event.preventDefault();if(!workspaceId||!companyId||!method||method==="faq"||!valid())return;const controller=startMutation(),r=request();dispatch({type:"submitting",request:r});try{if(revising){if(method==="internal")await atlasApi.reviseManualKnowledge(csrf,workspaceId,companyId,revising.id,revising.version,content,controller.signal);else if(method==="website")await atlasApi.reviseUrlKnowledge(csrf,workspaceId,companyId,revising.id,revising.version,content,controller.signal);else if(file)await atlasApi.revisePdfKnowledge(csrf,workspaceId,companyId,revising.id,revising.version,file,controller.signal);}else if(method==="internal")await atlasApi.createManualKnowledge(csrf,workspaceId,companyId,name,content,controller.signal);else if(method==="website")await atlasApi.createUrlKnowledge(csrf,workspaceId,companyId,name,content,controller.signal);else if(file)await atlasApi.createPdfKnowledge(csrf,workspaceId,companyId,name,file,controller.signal);if(controller.signal.aborted)return;setNotice(t("teach.success"));back();await load();}catch(error){if(!aborted(error))dispatch({type:"failed",request:r});}};
-  const publish=async(ids:string[]):Promise<void>=>{if(!workspaceId||!companyId||ids.length===0)return;const controller=startMutation(),r=request();dispatch({type:"submitting",request:r});try{await atlasApi.publishKnowledge(csrf,workspaceId,companyId,ids,state.publication?.id??null,controller.signal);if(controller.signal.aborted)return;setReviewRequired(false);setNotice(t("teach.availableSuccess"));await onPublicationCompleted?.();await load();}catch(error){if(aborted(error))return;if(error instanceof ApiError&&error.code==="knowledge_publication_changed"){dispatch({type:"contextChanged"});setReviewRequired(true);await load();return;}dispatch({type:"failed",request:r});}};
-  const archive=async(source:KnowledgeSource):Promise<void>=>{if(!workspaceId||!companyId)return;const controller=startMutation();try{await atlasApi.archiveKnowledgeSource(csrf,workspaceId,companyId,source.id,source.version,controller.signal);if(!controller.signal.aborted)await load();}catch(error){if(!aborted(error))dispatch({type:"failed",request:request()});}};
-  const showDetail=async(source:KnowledgeSource):Promise<void>=>{if(!workspaceId||!companyId||!source.latestRevision)return;loadAbort.current?.abort();const controller=new AbortController();loadAbort.current=controller;try{setDetail(await atlasApi.getKnowledgeRevision(workspaceId,companyId,source.id,source.latestRevision.id,controller.signal));}catch(error){if(!aborted(error))setValidation(t("teach.error"));}};
-  const revise=(source:KnowledgeSource)=>{setAdding(true);setRevising(source);setMethod(kindMethod(source.kind));setName(source.name);setContent(source.locator??"");setFile(null);setValidation(null);};
-  if(!workspaceId||!companyId)return <section className="teach-atlas"><h1>{t("teach.title")}</h1><p>{t("knowledge.companyRequired")}</p></section>;
-  const showChooser=!method&&!detail&&((adding&&notice===null)||(!state.loading&&state.sources.length===0));
-  return <section className="teach-atlas" aria-labelledby="teach-title" aria-busy={state.loading||state.submitting}>
-    {!method&&!detail&&!adding&&<ContextBackLink href={`/companies/${companyId}`} label="Volver"/>}{(method||detail)&&<ContextBackLink href={`/companies/${companyId}/knowledge`} label={t("teach.back")} onNavigate={(event)=>{event.preventDefault();back();}}/>}
-    {showChooser&&adding&&state.sources.length>0&&<ContextBackLink href={`/companies/${companyId}/knowledge`} label={t("knowledgeExperience.back")} onNavigate={(event)=>{event.preventDefault();backToLibrary();}}/>}
-    <header className="work-anchor"><p className="eyebrow">{t("teach.eyebrow")}</p><h1 id="teach-title">{detail?t("teach.reviewTitle"):method?t(`teach.method.${method}.title`):showChooser?t("teach.title"):t("knowledgeExperience.title")}</h1><p className="work-anchor__lead">{detail?t("teach.reviewReady"):method?t(`teach.method.${method}.workspace`):showChooser?t("teach.lead"):t("knowledgeExperience.lead")}</p></header>
-    {(state.error||validation)&&<div className="inline-message inline-message--error" role="alert"><span>{validation??t("teach.error")}</span>{state.error&&!validation&&<button type="button" className="button button--quiet" onClick={()=>void load()}>{t("common.retry")}</button>}</div>}
-    {reviewRequired&&<div role="alert" className="inline-message inline-message--warning">{t("teach.reviewRequired")}</div>}{notice&&<div role="status" className="inline-message inline-message--success">{notice}</div>}
-    {showChooser&&state.sources.length===0&&<div className="knowledge-first-empty"><h2>{t("knowledgeExperience.emptyTitle")}</h2><p>{t("knowledgeExperience.emptyLead")}</p></div>}
-    {!showChooser&&!method&&!detail&&<><KnowledgeLibrary sources={state.sources} publication={state.publication} selectedRevisionIds={state.selectedRevisionIds} loading={state.loading} submitting={state.submitting} canIngest={canIngest} canPublish={canPublish} canArchive={canArchive} onSelect={(revisionId,selected)=>dispatch({type:"select",revisionId,selected})} onReview={showDetail} onRevise={revise} onPublish={ids=>setPublishConfirmation(ids)} onArchive={archive} formatDate={formatDate} t={t}/>{canIngest&&state.sources.length>0&&<button ref={addTrigger} className="button button--primary teach-new-action" type="button" onClick={()=>{setNotice(null);setAdding(true);}}>{t("teach.title")}</button>}</>}
-    {publishConfirmation&&<div className="confirm-panel" role="dialog" aria-modal="true" aria-labelledby="publish-confirmation-title"><h2 id="publish-confirmation-title">Confirmar publicación</h2><p>Atlas usará exactamente las {publishConfirmation.length} revisiones revisadas seleccionadas.</p><div className="action-row"><button className="button button--primary" type="button" disabled={state.submitting} onClick={()=>{void publish(publishConfirmation);setPublishConfirmation(null);}}>Publicar en Atlas</button><button className="button button--secondary" type="button" disabled={state.submitting} onClick={()=>setPublishConfirmation(null)}>Cancelar</button></div></div>}
-    {showChooser&&canIngest&&<div className="teaching-methods" aria-label={t("teach.methodsLabel")}>{(["website","document","faq","internal"] as const).map(value=><article key={value} className={`teaching-method${value==="faq"?" is-disabled":""}`}><div><p className="teaching-method__availability">{t(value==="faq"?"teach.comingSoon":"teach.available")}</p><h2>{t(`teach.method.${value}.title`)}</h2><p>{t(`teach.method.${value}.outcome`)}</p><small>{t(`teach.method.${value}.effort`)}</small></div>{value==="faq"?<span className="teaching-method__unavailable">{t("teach.comingSoon")}</span>:<button ref={element=>{if(element)methodTriggers.current[value]=element;}} type="button" className="button button--secondary" onClick={()=>{returnMethod.current=value;setMethod(value);}}>{t("teach.choose")}</button>}</article>)}</div>}
-    {method&&method!=="faq"&&canIngest&&<TeachingForm method={method} name={name} content={content} file={file} fileInputKey={fileInputKey} submitting={state.submitting} blocked={!name.trim()||(method==="document"?!file:!content.trim())} revising={!!revising} validation={validation} setName={setName} setContent={setContent} setFile={setFile} clearFile={()=>{setFile(null);setFileInputKey(value=>value+1);}} onSubmit={submit} t={t}/>}
-    {detail&&<aside className="knowledge-review" aria-live="polite"><p>{detail.status==="ready"?t("teach.reviewReady"):t("teach.reviewFailed")}</p>{detail.normalizedText&&<pre>{detail.normalizedText}</pre>}</aside>}
-  </section>;
+export function CompanyKnowledgePanel({
+  csrf,
+  workspaceId,
+  companyId,
+  capabilities,
+  onPublicationCompleted,
+}: Props): React.JSX.Element {
+  const { t, formatDate } = useI18n(),
+    [state, dispatch] = useReducer(knowledgeReducer, initialKnowledgeState),
+    sequence = useRef(0),
+    loadAbort = useRef<AbortController | null>(null),
+    mutationAbort = useRef<AbortController | null>(null);
+  const methodTriggers = useRef<Partial<Record<Method, HTMLButtonElement>>>({}),
+    returnMethod = useRef<Method | null>(null),
+    addTrigger = useRef<HTMLButtonElement | null>(null);
+  const [method, setMethod] = useState<Method | null>(null),
+    [adding, setAdding] = useState(false),
+    [name, setName] = useState(""),
+    [content, setContent] = useState(""),
+    [file, setFile] = useState<File | null>(null),
+    [fileInputKey, setFileInputKey] = useState(0),
+    [revising, setRevising] = useState<KnowledgeSource | null>(null),
+    [detail, setDetail] = useState<KnowledgeRevision | null>(null),
+    [reviewRequired, setReviewRequired] = useState(false),
+    [validation, setValidation] = useState<string | null>(null),
+    [notice, setNotice] = useState<string | null>(null),
+    [publishConfirmation, setPublishConfirmation] = useState<string[] | null>(
+      null,
+    );
+  const canIngest = capabilities.includes("knowledge:ingest"),
+    canPublish = capabilities.includes("knowledge:publish"),
+    canArchive = capabilities.includes("knowledge:archive");
+  const request = (): KnowledgeRequest => ({
+    requestId: ++sequence.current,
+    workspaceId: workspaceId!,
+    companyId: companyId!,
+    generation: state.generation,
+  });
+  const resetEditor = () => {
+    setName("");
+    setContent("");
+    setFile(null);
+    setFileInputKey((value) => value + 1);
+    setRevising(null);
+    setDetail(null);
+    setValidation(null);
+  };
+  const back = () => {
+    const origin = returnMethod.current;
+    resetEditor();
+    setMethod(null);
+    window.setTimeout(() => {
+      if (origin) methodTriggers.current[origin]?.focus();
+    }, 0);
+  };
+  const backToLibrary = () => {
+    setAdding(false);
+    window.setTimeout(() => addTrigger.current?.focus(), 0);
+  };
+  const load = async (): Promise<void> => {
+    if (!workspaceId || !companyId) return;
+    loadAbort.current?.abort();
+    const controller = new AbortController();
+    loadAbort.current = controller;
+    const r = request();
+    dispatch({ type: "loading", request: r });
+    try {
+      const sources = await atlasApi.listKnowledgeSources(
+        workspaceId,
+        companyId,
+        controller.signal,
+      );
+      let publication = null;
+      try {
+        publication = await atlasApi.getKnowledgePublication(
+          workspaceId,
+          companyId,
+          controller.signal,
+        );
+      } catch (error) {
+        if (
+          !(error instanceof ApiError && error.code === "knowledge_unavailable")
+        )
+          throw error;
+      }
+      dispatch({ type: "loaded", request: r, sources, publication });
+    } catch (error) {
+      if (!aborted(error)) dispatch({ type: "failed", request: r });
+    }
+  };
+  useEffect(() => {
+    loadAbort.current?.abort();
+    mutationAbort.current?.abort();
+    dispatch({ type: "contextChanged" });
+    resetEditor();
+    setMethod(null);
+    setAdding(false);
+    setReviewRequired(false);
+    setNotice(null);
+    setPublishConfirmation(null);
+    if (workspaceId && companyId) void load();
+    return () => {
+      loadAbort.current?.abort();
+      mutationAbort.current?.abort();
+    };
+  }, [workspaceId, companyId]);
+  const startMutation = () => {
+    mutationAbort.current?.abort();
+    const controller = new AbortController();
+    mutationAbort.current = controller;
+    return controller;
+  };
+  const valid = (): boolean => {
+    if (
+      method === "internal" &&
+      (Array.from(content).length > MANUAL_CHARACTERS ||
+        new TextEncoder().encode(content).byteLength > MANUAL_BYTES)
+    ) {
+      setValidation(t("teach.validation.manualLimit"));
+      return false;
+    }
+    if (method === "document" && file && file.size > PDF_LIMIT) {
+      setValidation(t("teach.validation.fileTooLarge"));
+      return false;
+    }
+    setValidation(null);
+    return true;
+  };
+  const submit = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault();
+    if (!workspaceId || !companyId || !method || method === "faq" || !valid())
+      return;
+    const controller = startMutation(),
+      r = request();
+    dispatch({ type: "submitting", request: r });
+    try {
+      if (revising) {
+        if (method === "internal")
+          await atlasApi.reviseManualKnowledge(
+            csrf,
+            workspaceId,
+            companyId,
+            revising.id,
+            revising.version,
+            content,
+            controller.signal,
+          );
+        else if (method === "website")
+          await atlasApi.reviseUrlKnowledge(
+            csrf,
+            workspaceId,
+            companyId,
+            revising.id,
+            revising.version,
+            content,
+            controller.signal,
+          );
+        else if (file)
+          await atlasApi.revisePdfKnowledge(
+            csrf,
+            workspaceId,
+            companyId,
+            revising.id,
+            revising.version,
+            file,
+            controller.signal,
+          );
+      } else if (method === "internal")
+        await atlasApi.createManualKnowledge(
+          csrf,
+          workspaceId,
+          companyId,
+          name,
+          content,
+          controller.signal,
+        );
+      else if (method === "website")
+        await atlasApi.createUrlKnowledge(
+          csrf,
+          workspaceId,
+          companyId,
+          name,
+          content,
+          controller.signal,
+        );
+      else if (file)
+        await atlasApi.createPdfKnowledge(
+          csrf,
+          workspaceId,
+          companyId,
+          name,
+          file,
+          controller.signal,
+        );
+      if (controller.signal.aborted) return;
+      setNotice(t("teach.success"));
+      back();
+      await load();
+    } catch (error) {
+      if (!aborted(error)) dispatch({ type: "failed", request: r });
+    }
+  };
+  const publish = async (ids: string[]): Promise<void> => {
+    if (!workspaceId || !companyId || ids.length === 0) return;
+    const controller = startMutation(),
+      r = request();
+    dispatch({ type: "submitting", request: r });
+    try {
+      await atlasApi.publishKnowledge(
+        csrf,
+        workspaceId,
+        companyId,
+        ids,
+        state.publication?.id ?? null,
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      setReviewRequired(false);
+      setNotice(t("teach.availableSuccess"));
+      await onPublicationCompleted?.();
+      await load();
+    } catch (error) {
+      if (aborted(error)) return;
+      if (
+        error instanceof ApiError &&
+        error.code === "knowledge_publication_changed"
+      ) {
+        dispatch({ type: "contextChanged" });
+        setReviewRequired(true);
+        await load();
+        return;
+      }
+      dispatch({ type: "failed", request: r });
+    }
+  };
+  const archive = async (source: KnowledgeSource): Promise<void> => {
+    if (!workspaceId || !companyId) return;
+    const controller = startMutation();
+    try {
+      await atlasApi.archiveKnowledgeSource(
+        csrf,
+        workspaceId,
+        companyId,
+        source.id,
+        source.version,
+        controller.signal,
+      );
+      if (!controller.signal.aborted) await load();
+    } catch (error) {
+      if (!aborted(error)) dispatch({ type: "failed", request: request() });
+    }
+  };
+  const showDetail = async (source: KnowledgeSource): Promise<void> => {
+    if (!workspaceId || !companyId || !source.latestRevision) return;
+    loadAbort.current?.abort();
+    const controller = new AbortController();
+    loadAbort.current = controller;
+    try {
+      setDetail(
+        await atlasApi.getKnowledgeRevision(
+          workspaceId,
+          companyId,
+          source.id,
+          source.latestRevision.id,
+          controller.signal,
+        ),
+      );
+    } catch (error) {
+      if (!aborted(error)) setValidation(t("teach.error"));
+    }
+  };
+  const revise = (source: KnowledgeSource) => {
+    setAdding(true);
+    setRevising(source);
+    setMethod(kindMethod(source.kind));
+    setName(source.name);
+    setContent(source.locator ?? "");
+    setFile(null);
+    setValidation(null);
+  };
+  if (!workspaceId || !companyId)
+    return (
+      <section className="teach-atlas">
+        <h1>{t("teach.title")}</h1>
+        <p>{t("knowledge.companyRequired")}</p>
+      </section>
+    );
+  const showChooser =
+    !method &&
+    !detail &&
+    ((adding && notice === null) ||
+      (!state.loading && state.sources.length === 0));
+  return (
+    <section
+      className="teach-atlas"
+      aria-labelledby="teach-title"
+      aria-busy={state.loading || state.submitting}
+    >
+      {!method && !detail && !adding && (
+        <ContextBackLink href={`/companies/${companyId}`} label="Volver" />
+      )}
+      {(method || detail) && (
+        <ContextBackLink
+          href={`/companies/${companyId}/knowledge`}
+          label={t("teach.back")}
+          onNavigate={(event) => {
+            event.preventDefault();
+            back();
+          }}
+        />
+      )}
+      {showChooser && adding && state.sources.length > 0 && (
+        <ContextBackLink
+          href={`/companies/${companyId}/knowledge`}
+          label={t("knowledgeExperience.back")}
+          onNavigate={(event) => {
+            event.preventDefault();
+            backToLibrary();
+          }}
+        />
+      )}
+      <header className="work-anchor">
+        <p className="eyebrow">{t("teach.eyebrow")}</p>
+        <h1 id="teach-title">
+          {detail
+            ? t("teach.reviewTitle")
+            : method
+              ? t(`teach.method.${method}.title`)
+              : showChooser
+                ? t("teach.title")
+                : t("knowledgeExperience.title")}
+        </h1>
+        <p className="work-anchor__lead">
+          {detail
+            ? t("teach.reviewReady")
+            : method
+              ? t(`teach.method.${method}.workspace`)
+              : showChooser
+                ? t("teach.lead")
+                : t("knowledgeExperience.lead")}
+        </p>
+      </header>
+      {(state.error || validation) && (
+        <Alert tone="danger">
+          <span>{validation ?? t("teach.error")}</span>
+          {state.error && !validation && (
+            <Button variant="quiet" onClick={() => void load()}>
+              {t("common.retry")}
+            </Button>
+          )}
+        </Alert>
+      )}
+      {reviewRequired && (
+        <Alert tone="warning">{t("teach.reviewRequired")}</Alert>
+      )}
+      {notice && <Alert tone="success">{notice}</Alert>}
+      {showChooser && state.sources.length === 0 && (
+        <EmptyState
+          title={t("knowledgeExperience.emptyTitle")}
+          description={t("knowledgeExperience.emptyLead")}
+        />
+      )}
+      {!showChooser && !method && !detail && (
+        <>
+          <KnowledgeLibrary
+            sources={state.sources}
+            publication={state.publication}
+            selectedRevisionIds={state.selectedRevisionIds}
+            loading={state.loading}
+            submitting={state.submitting}
+            canIngest={canIngest}
+            canPublish={canPublish}
+            canArchive={canArchive}
+            onSelect={(revisionId, selected) =>
+              dispatch({ type: "select", revisionId, selected })
+            }
+            onReview={showDetail}
+            onRevise={revise}
+            onPublish={(ids) => setPublishConfirmation(ids)}
+            onArchive={archive}
+            formatDate={formatDate}
+            t={t}
+          />
+          {canIngest && state.sources.length > 0 && (
+            <Button
+              ref={addTrigger}
+              className="teach-new-action"
+              onClick={() => {
+                setNotice(null);
+                setAdding(true);
+              }}
+            >
+              {t("teach.title")}
+            </Button>
+          )}
+        </>
+      )}
+      <ConfirmDialog
+        cancelLabel="Cancelar"
+        confirmDisabled={state.submitting}
+        confirmLabel="Publicar en Atlas"
+        confirmVariant="primary"
+        description={
+          publishConfirmation
+            ? `Atlas usará exactamente las ${publishConfirmation.length} revisiones revisadas seleccionadas.`
+            : ""
+        }
+        open={publishConfirmation !== null}
+        role="dialog"
+        title="Confirmar publicación"
+        onCancel={() => setPublishConfirmation(null)}
+        onConfirm={() => {
+          if (publishConfirmation) {
+            void publish(publishConfirmation);
+            setPublishConfirmation(null);
+          }
+        }}
+      />
+      {showChooser && canIngest && (
+        <div className="teaching-methods" aria-label={t("teach.methodsLabel")}>
+          {(["website", "document", "faq", "internal"] as const).map(
+            (value) => (
+              <article
+                key={value}
+                className={`teaching-method${value === "faq" ? " is-disabled" : ""}`}
+              >
+                <div>
+                  <p className="teaching-method__availability">
+                    {t(
+                      value === "faq" ? "teach.comingSoon" : "teach.available",
+                    )}
+                  </p>
+                  <h2>{t(`teach.method.${value}.title`)}</h2>
+                  <p>{t(`teach.method.${value}.outcome`)}</p>
+                  <small>{t(`teach.method.${value}.effort`)}</small>
+                </div>
+                {value === "faq" ? (
+                  <span className="teaching-method__unavailable">
+                    {t("teach.comingSoon")}
+                  </span>
+                ) : (
+                  <Button
+                    ref={(element) => {
+                      if (element) methodTriggers.current[value] = element;
+                    }}
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      returnMethod.current = value;
+                      setMethod(value);
+                    }}
+                  >
+                    {t("teach.choose")}
+                  </Button>
+                )}
+              </article>
+            ),
+          )}
+        </div>
+      )}
+      {method && method !== "faq" && canIngest && (
+        <TeachingForm
+          method={method}
+          name={name}
+          content={content}
+          file={file}
+          fileInputKey={fileInputKey}
+          submitting={state.submitting}
+          blocked={
+            !name.trim() || (method === "document" ? !file : !content.trim())
+          }
+          revising={!!revising}
+          validation={validation}
+          setName={setName}
+          setContent={setContent}
+          setFile={setFile}
+          clearFile={() => {
+            setFile(null);
+            setFileInputKey((value) => value + 1);
+          }}
+          onSubmit={submit}
+          t={t}
+        />
+      )}
+      {detail && (
+        <Surface className="knowledge-review" tone="raised" aria-live="polite">
+          <StatusBadge tone={detail.status === "ready" ? "success" : "danger"}>
+            {detail.status === "ready"
+              ? t("teach.reviewReady")
+              : t("teach.reviewFailed")}
+          </StatusBadge>
+          {detail.normalizedText && <pre>{detail.normalizedText}</pre>}
+        </Surface>
+      )}
+    </section>
+  );
 }
 
-interface FormProps { readonly method:Exclude<Method,"faq">;readonly name:string;readonly content:string;readonly file:File|null;readonly fileInputKey:number;readonly submitting:boolean;readonly blocked:boolean;readonly revising:boolean;readonly validation:string|null;readonly setName:(v:string)=>void;readonly setContent:(v:string)=>void;readonly setFile:(v:File|null)=>void;readonly clearFile:()=>void;readonly onSubmit:(e:React.FormEvent)=>Promise<void>;readonly t:ReturnType<typeof useI18n>["t"];}
-function TeachingForm(p:FormProps):React.JSX.Element{return <form className={`teaching-workspace teaching-workspace--${p.method}`} onSubmit={e=>void p.onSubmit(e)}><div className="teaching-explanation"><h2>{p.t("teach.whatNeeded")}</h2><p>{p.t(`teach.method.${p.method}.explanation`)}</p><p>{p.t("teach.afterSubmit")}</p></div><label className="form-field"><span>{p.t("teach.sourceName")}</span><input value={p.name} maxLength={120} required disabled={p.revising} onChange={e=>p.setName(e.target.value)}/></label>{p.method==="website"&&<label className="form-field"><span>{p.t("teach.websiteUrl")}</span><input type="url" value={p.content} required aria-describedby="website-public-help" onChange={e=>p.setContent(e.target.value)}/><small id="website-public-help">{p.t("teach.websitePublic")}</small></label>}{p.method==="internal"&&<label className="form-field teaching-writing"><span>{p.t("teach.internalText")}</span><textarea value={p.content} required aria-describedby="internal-help" onChange={e=>p.setContent(e.target.value)}/><small id="internal-help">{p.t("teach.internalPrompt")} · {Array.from(p.content).length.toLocaleString()} / 80,000</small></label>}{p.method==="document"&&<div className="document-picker"><input className="visually-hidden" id="knowledge-pdf" key={p.fileInputKey} type="file" accept="application/pdf" required onChange={e=>p.setFile(e.target.files?.[0]??null)}/><label htmlFor="knowledge-pdf" className="button button--secondary">{p.t(p.file?"teach.replaceFile":"teach.chooseFile")}</label>{p.file?<div className="selected-file"><strong>{p.file.name}</strong><span>{Math.ceil(p.file.size/1024)} KB</span><button type="button" className="button button--quiet" onClick={p.clearFile}>{p.t("teach.removeFile")}</button></div>:<p>{p.t("teach.pdfLimits")}</p>}</div>}<button className="button button--primary" disabled={p.submitting||p.blocked}>{p.submitting?p.t("teach.submitting"):p.t(`teach.method.${p.method}.submit`)}</button></form>}
+interface FormProps {
+  readonly method: Exclude<Method, "faq">;
+  readonly name: string;
+  readonly content: string;
+  readonly file: File | null;
+  readonly fileInputKey: number;
+  readonly submitting: boolean;
+  readonly blocked: boolean;
+  readonly revising: boolean;
+  readonly validation: string | null;
+  readonly setName: (v: string) => void;
+  readonly setContent: (v: string) => void;
+  readonly setFile: (v: File | null) => void;
+  readonly clearFile: () => void;
+  readonly onSubmit: (e: React.FormEvent) => Promise<void>;
+  readonly t: ReturnType<typeof useI18n>["t"];
+}
+function TeachingForm(p: FormProps): React.JSX.Element {
+  return (
+    <form
+      className={`teaching-workspace teaching-workspace--${p.method}`}
+      onSubmit={(e) => void p.onSubmit(e)}
+    >
+      <div className="teaching-explanation">
+        <h2>{p.t("teach.whatNeeded")}</h2>
+        <p>{p.t(`teach.method.${p.method}.explanation`)}</p>
+        <p>{p.t("teach.afterSubmit")}</p>
+      </div>
+      <label className="ds-field">
+        <span>{p.t("teach.sourceName")}</span>
+        <Input
+          value={p.name}
+          maxLength={120}
+          required
+          disabled={p.revising}
+          onChange={(e) => p.setName(e.target.value)}
+        />
+      </label>
+      {p.method === "website" && (
+        <label className="ds-field">
+          <span>{p.t("teach.websiteUrl")}</span>
+          <Input
+            type="url"
+            value={p.content}
+            required
+            aria-describedby="website-public-help"
+            onChange={(e) => p.setContent(e.target.value)}
+          />
+          <small id="website-public-help">{p.t("teach.websitePublic")}</small>
+        </label>
+      )}
+      {p.method === "internal" && (
+        <label className="ds-field teaching-writing">
+          <span>{p.t("teach.internalText")}</span>
+          <Textarea
+            value={p.content}
+            required
+            aria-describedby="internal-help"
+            onChange={(e) => p.setContent(e.target.value)}
+          />
+          <small id="internal-help">
+            {p.t("teach.internalPrompt")} ·{" "}
+            {Array.from(p.content).length.toLocaleString()} / 80,000
+          </small>
+        </label>
+      )}
+      {p.method === "document" && (
+        <div className="document-picker">
+          <input
+            className="visually-hidden"
+            id="knowledge-pdf"
+            key={p.fileInputKey}
+            type="file"
+            accept="application/pdf"
+            required
+            onChange={(e) => p.setFile(e.target.files?.[0] ?? null)}
+          />
+          <label htmlFor="knowledge-pdf" className="button button--secondary">
+            {p.t(p.file ? "teach.replaceFile" : "teach.chooseFile")}
+          </label>
+          {p.file ? (
+            <div className="selected-file">
+              <strong>{p.file.name}</strong>
+              <span>{Math.ceil(p.file.size / 1024)} KB</span>
+              <Button variant="quiet" onClick={p.clearFile}>
+                {p.t("teach.removeFile")}
+              </Button>
+            </div>
+          ) : (
+            <p>{p.t("teach.pdfLimits")}</p>
+          )}
+        </div>
+      )}
+      <Button disabled={p.submitting || p.blocked}>
+        {p.submitting
+          ? p.t("teach.submitting")
+          : p.t(`teach.method.${p.method}.submit`)}
+      </Button>
+    </form>
+  );
+}
 
-interface LibraryProps {readonly sources:KnowledgeSource[];readonly publication:import("../types/api").KnowledgePublication|null;readonly selectedRevisionIds:string[];readonly loading:boolean;readonly submitting:boolean;readonly canIngest:boolean;readonly canPublish:boolean;readonly canArchive:boolean;readonly onSelect:(revisionId:string,selected:boolean)=>void;readonly onReview:(s:KnowledgeSource)=>Promise<void>;readonly onRevise:(s:KnowledgeSource)=>void;readonly onPublish:(ids:string[])=>void;readonly onArchive:(s:KnowledgeSource)=>Promise<void>;readonly formatDate:(v:string|Date)=>string;readonly t:ReturnType<typeof useI18n>["t"];}
-function KnowledgeLibrary(p:LibraryProps):React.JSX.Element{const ready=p.sources.filter(source=>presentKnowledgeSource(source,p.publication).action==="publish"&&source.latestRevision);const selected=ready.filter(source=>source.latestRevision&&p.selectedRevisionIds.includes(source.latestRevision.id));return <section className="knowledge-library-new" aria-labelledby="library-title"><header><h2 id="library-title">{p.t("teach.libraryTitle")}</h2><p>{p.t("teach.libraryLead")}</p>{p.publication&&<p role="status">Publicación actual: versión {p.publication.versionNumber}, {p.publication.sourceRevisionIds.length} revisiones disponibles para Atlas.</p>}{ready.length>0&&<div className="action-row"><button className="button button--secondary" type="button" onClick={()=>ready.forEach(source=>p.onSelect(source.latestRevision!.id,!p.selectedRevisionIds.includes(source.latestRevision!.id)))}>{selected.length===ready.length?"Quitar selección":"Seleccionar revisiones listas"}</button>{p.canPublish?<button className="button button--primary" disabled={p.submitting||selected.length===0} type="button" onClick={()=>void p.onPublish(selected.map(source=>source.latestRevision!.id))}>Publicar selección ({selected.length})</button>:<p className="state-copy">No tenés permiso para publicar revisiones.</p>}</div>}</header>{p.loading?<p role="status">{p.t("teach.loading")}</p>:p.sources.length===0?<div className="knowledge-empty"><h3>{p.t("teach.emptyTitle")}</h3><p>{p.t("teach.emptyLead")}</p></div>:<ul>{p.sources.map(source=>{const view=presentKnowledgeSource(source,p.publication),revision=source.latestRevision;return <li key={source.id} className="knowledge-source"><div><p className={`source-state source-state--${view.state}`}>{p.t(`teach.state.${view.state}`)}</p><h3>{source.name}</h3><p>{p.t(`knowledge.kind.${source.kind}`)} · {p.t(view.canUse?"teach.canUse":"teach.cannotUse")}</p><small>{p.t("teach.updated")} {p.formatDate(source.updatedAt)}</small></div><div className="knowledge-source__actions">{view.action==="publish"&&revision&&<label><input type="checkbox" checked={p.selectedRevisionIds.includes(revision.id)} disabled={!p.canPublish||p.submitting} onChange={event=>p.onSelect(revision.id,event.target.checked)}/> Incluir en publicación</label>}{view.action==="review"&&<button className="button button--secondary" onClick={()=>void p.onReview(source)}>{p.t("teach.action.review")}</button>}{view.action==="update"&&p.canIngest&&<button className="button button--secondary" onClick={()=>p.onRevise(source)}>{p.t("teach.action.update")}</button>}{p.canArchive&&source.status==="active"&&<button className="button button--quiet" onClick={()=>void p.onArchive(source)}>{p.t("teach.action.stop")}</button>}</div></li>})}</ul>}</section>}
-function aborted(error:unknown):boolean{return error instanceof DOMException&&error.name==="AbortError";}
-function kindMethod(kind:KnowledgeSourceKind):Exclude<Method,"faq">{return kind==="manual_text"?"internal":kind==="public_url"?"website":"document";}
+interface LibraryProps {
+  readonly sources: KnowledgeSource[];
+  readonly publication: import("../types/api").KnowledgePublication | null;
+  readonly selectedRevisionIds: string[];
+  readonly loading: boolean;
+  readonly submitting: boolean;
+  readonly canIngest: boolean;
+  readonly canPublish: boolean;
+  readonly canArchive: boolean;
+  readonly onSelect: (revisionId: string, selected: boolean) => void;
+  readonly onReview: (s: KnowledgeSource) => Promise<void>;
+  readonly onRevise: (s: KnowledgeSource) => void;
+  readonly onPublish: (ids: string[]) => void;
+  readonly onArchive: (s: KnowledgeSource) => Promise<void>;
+  readonly formatDate: (v: string | Date) => string;
+  readonly t: ReturnType<typeof useI18n>["t"];
+}
+function KnowledgeLibrary(p: LibraryProps): React.JSX.Element {
+  const ready = p.sources.filter(
+    (source) =>
+      presentKnowledgeSource(source, p.publication).action === "publish" &&
+      source.latestRevision,
+  );
+  const selected = ready.filter(
+    (source) =>
+      source.latestRevision &&
+      p.selectedRevisionIds.includes(source.latestRevision.id),
+  );
+  return (
+    <section className="knowledge-library-new" aria-labelledby="library-title">
+      <header>
+        <h2 id="library-title">{p.t("teach.libraryTitle")}</h2>
+        <p>{p.t("teach.libraryLead")}</p>
+        {p.publication && (
+          <StatusBadge tone="success">
+            Publicación actual: versión {p.publication.versionNumber},{" "}
+            {p.publication.sourceRevisionIds.length} revisiones disponibles para
+            Atlas.
+          </StatusBadge>
+        )}
+        {ready.length > 0 && (
+          <div className="action-row">
+            <Button
+              variant="secondary"
+              onClick={() =>
+                ready.forEach((source) =>
+                  p.onSelect(
+                    source.latestRevision!.id,
+                    !p.selectedRevisionIds.includes(source.latestRevision!.id),
+                  ),
+                )
+              }
+            >
+              {selected.length === ready.length
+                ? "Quitar selección"
+                : "Seleccionar revisiones listas"}
+            </Button>
+            {p.canPublish ? (
+              <Button
+                disabled={p.submitting || selected.length === 0}
+                type="button"
+                onClick={() =>
+                  void p.onPublish(
+                    selected.map((source) => source.latestRevision!.id),
+                  )
+                }
+              >
+                Publicar selección ({selected.length})
+              </Button>
+            ) : (
+              <p className="state-copy">
+                No tenés permiso para publicar revisiones.
+              </p>
+            )}
+          </div>
+        )}
+      </header>
+      {p.loading ? (
+        <ProgressIndicator label={p.t("teach.loading")} />
+      ) : p.sources.length === 0 ? (
+        <EmptyState
+          title={p.t("teach.emptyTitle")}
+          description={p.t("teach.emptyLead")}
+        />
+      ) : (
+        <ul>
+          {p.sources.map((source) => {
+            const view = presentKnowledgeSource(source, p.publication),
+              revision = source.latestRevision;
+            return (
+              <li key={source.id}>
+                <Surface className="knowledge-source" tone="raised">
+                  <div>
+                    <StatusBadge
+                      tone={
+                        view.state === "available"
+                          ? "success"
+                          : view.state === "attention"
+                            ? "danger"
+                            : "warning"
+                      }
+                    >
+                      {p.t(`teach.state.${view.state}`)}
+                    </StatusBadge>
+                    <h3>{source.name}</h3>
+                    <p>
+                      {p.t(`knowledge.kind.${source.kind}`)} ·{" "}
+                      {p.t(view.canUse ? "teach.canUse" : "teach.cannotUse")}
+                    </p>
+                    <small>
+                      {p.t("teach.updated")} {p.formatDate(source.updatedAt)}
+                    </small>
+                  </div>
+                  <div className="knowledge-source__actions">
+                    {view.action === "publish" && revision && (
+                      <label>
+                        <Checkbox
+                          checked={p.selectedRevisionIds.includes(revision.id)}
+                          disabled={!p.canPublish || p.submitting}
+                          onChange={(event) =>
+                            p.onSelect(revision.id, event.target.checked)
+                          }
+                        />{" "}
+                        Incluir en publicación
+                      </label>
+                    )}
+                    {view.action === "review" && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => void p.onReview(source)}
+                      >
+                        {p.t("teach.action.review")}
+                      </Button>
+                    )}
+                    {view.action === "update" && p.canIngest && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => p.onRevise(source)}
+                      >
+                        {p.t("teach.action.update")}
+                      </Button>
+                    )}
+                    {p.canArchive && source.status === "active" && (
+                      <Button
+                        variant="quiet"
+                        onClick={() => void p.onArchive(source)}
+                      >
+                        {p.t("teach.action.stop")}
+                      </Button>
+                    )}
+                  </div>
+                </Surface>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+function aborted(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+function kindMethod(kind: KnowledgeSourceKind): Exclude<Method, "faq"> {
+  return kind === "manual_text"
+    ? "internal"
+    : kind === "public_url"
+      ? "website"
+      : "document";
+}

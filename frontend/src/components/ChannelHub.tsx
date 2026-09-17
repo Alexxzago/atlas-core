@@ -3,6 +3,7 @@ import { atlasApi } from "../api/atlasApi";
 import { useI18n } from "../i18n/I18nContext";
 import type { CompanyOperationalStatus } from "../types/api";
 import { ObjectGrid, ObjectSurface, Section } from "../design-system/product";
+import { Button } from "../design-system/primitives";
 
 interface Props { readonly companyId: number; readonly workspaceId?: string | null; readonly onNavigate: (path: string) => void; }
 
@@ -30,8 +31,8 @@ export function ChannelHub({ companyId, workspaceId = null, onNavigate }: Props)
 
   return <Section className="channel-hub" title={t("experience.channels.title")} description={t("experience.channels.description")}>
     <ObjectGrid>
-      <ObjectSurface className="channel-card" emphasis="featured"><div><span className="channel-card__mark" aria-hidden="true">W</span><p className="channel-card__meta">{state}</p><h3>{t("channels.whatsapp")}</h3><p>{t("experience.channels.whatsappDescription")}</p><p>{next}</p></div><button className="button button--primary" type="button" disabled={loading} onClick={() => failed ? setRetry(value => value + 1) : onNavigate(`/companies/${companyId}/channels/whatsapp`)}>{failed ? t("common.retry") : manageLabel}</button></ObjectSurface>
-      <ObjectSurface className="channel-card"><div><span className="channel-card__mark" aria-hidden="true">C</span><p className="channel-card__meta">{t("experience.channels.available")}</p><h3>{t("channels.webChat")}</h3><p>{t("experience.channels.webChatDescription")}</p></div><button className="button button--secondary" type="button" onClick={() => onNavigate(`/companies/${companyId}/channels/web-chat`)}>{t("experience.channels.manageWebChat")}</button></ObjectSurface>
+      <ObjectSurface className="channel-card" emphasis="featured"><div><span className="channel-card__mark" aria-hidden="true">W</span><p className="channel-card__meta">{state}</p><h3>{t("channels.whatsapp")}</h3><p>{t("experience.channels.whatsappDescription")}</p><p>{next}</p></div><Button disabled={loading} onClick={() => failed ? setRetry(value => value + 1) : onNavigate(`/companies/${companyId}/channels/whatsapp`)}>{failed ? t("common.retry") : manageLabel}</Button></ObjectSurface>
+      <ObjectSurface className="channel-card"><div><span className="channel-card__mark" aria-hidden="true">C</span><p className="channel-card__meta">{t("experience.channels.available")}</p><h3>{t("channels.webChat")}</h3><p>{t("experience.channels.webChatDescription")}</p></div><Button variant="secondary" onClick={() => onNavigate(`/companies/${companyId}/channels/web-chat`)}>{t("experience.channels.manageWebChat")}</Button></ObjectSurface>
     </ObjectGrid>
     <section className="channel-hub__future" aria-labelledby="upcoming-channels-title"><header><h2 id="upcoming-channels-title">{t("experience.channels.futureTitle")}</h2><p>{t("experience.channels.futureDescription")}</p></header><ul>{["Instagram", "Messenger", "Telegram", "Email"].map((channel) => <li key={channel}>{channel}</li>)}</ul></section>
   </Section>;
