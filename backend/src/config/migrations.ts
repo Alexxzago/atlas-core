@@ -2351,6 +2351,77 @@ const retiredMigrations = new Map<number, { readonly name: string; readonly chec
   [61, { name: "0061_voice_audio_upload_reservation", checksum: "56ed576cbc89fef1304834bb20dcb38cb49498460154045193421176e0ee6940" }],
 ]);
 
+export interface MigrationRegistryEntry { readonly id: number; readonly name: string; readonly checksum: string; readonly retired?: true; }
+export interface PortableMigrationOperation {
+  readonly kind: "script" | "statement";
+  readonly sql: string;
+  readonly args: readonly (string | number | bigint | null | Uint8Array)[];
+}
+export interface PortableMigration extends MigrationRegistryEntry { readonly operations: readonly PortableMigrationOperation[]; readonly disableForeignKeys?: true; }
+
+/** Immutable inventory of the complete synchronous bootstrap history, including retired migration 0061. */
+export const migrationRegistry: readonly MigrationRegistryEntry[] = Object.freeze([
+  ...migrations.map((migration) => Object.freeze({ id: migration.id, name: migration.name, checksum: migrationChecksum(migration) })),
+  ...retiredMigrations.entries().map(([id, migration]) => Object.freeze({ id, ...migration, retired: true as const })),
+].sort((left, right) => left.id - right.id));
+export const migrationHead: MigrationRegistryEntry = migrationRegistry[migrationRegistry.length - 1]!;
+
+/**
+ * Converts the legacy synchronous migration closures into an immutable plan for
+ * a brand-new database. The recorder never opens SQLite: it supplies only the
+ * deterministic empty-database results required by historical backfills.
+ */
+export function freshPortableMigrations(): readonly PortableMigration[] {
+  const recorded = migrations.map((migration) => {
+    const recorder = new FreshMigrationRecorder();
+    migration.apply(recorder as unknown as SynchronousDatabase);
+    return Object.freeze({
+      id: migration.id,
+      name: migration.name,
+      checksum: migrationChecksum(migration),
+      ...(migration.disableForeignKeys ? { disableForeignKeys: true as const } : {}),
+      operations: Object.freeze(recorder.operations),
+    });
+  });
+  const retired = [...retiredMigrations.entries()].map(([id, migration]) => Object.freeze({
+    id,
+    name: migration.name,
+    checksum: migration.checksum,
+    retired: true as const,
+    operations: Object.freeze([]),
+  }));
+  return Object.freeze([...recorded, ...retired].sort((left, right) => left.id - right.id));
+}
+
+class FreshMigrationRecorder {
+  public readonly operations: PortableMigrationOperation[] = [];
+
+  public exec(sql: string): void {
+    this.operations.push(Object.freeze({ kind: "script", sql, args: Object.freeze([]) }));
+  }
+
+  public prepare(sql: string): { run: (...args: (string | number | bigint | null | Uint8Array)[]) => void; get: () => Record<string, unknown> | undefined; all: () => Record<string, unknown>[] } {
+    return {
+      run: (...args): void => { this.operations.push(Object.freeze({ kind: "statement", sql, args: Object.freeze(args) })); },
+      get: (): Record<string, unknown> | undefined => this.emptyResult(sql),
+      all: (): Record<string, unknown>[] => {
+        const result = this.emptyResult(sql);
+        return result ? [result] : [];
+      },
+    };
+  }
+
+  private emptyResult(sql: string): Record<string, unknown> | undefined {
+    if (/SELECT id FROM workspaces WHERE key/u.test(sql)) return { id: 1 };
+    if (/COUNT\(\*\) AS count/u.test(sql)) return { count: 0 };
+    if (/sqlite_master/u.test(sql)) return { exists: 1 };
+    if (/PRAGMA table_info\(companies\)/u.test(sql)) return { name: "id" };
+    if (/PRAGMA table_info\(scheduling_bookings\)/u.test(sql)) return { name: "id" };
+    if (/PRAGMA table_info\(scheduling_/u.test(sql)) return { name: "id" };
+    return undefined;
+  }
+}
+
 function readCount(database: SynchronousDatabase, table: "companies" | "company_knowledge" | "companies_workspace_migration"): number {
   const row = database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
   return row.count;
