@@ -1,0 +1,4 @@
+import type { SqlDatabase } from "../../config/sqlDatabase.js";
+import { AsyncAssistantCapabilityRepository, AsyncAssistantProfileRepository, AsyncAssistantReadinessAssessmentRepository, AsyncDefaultAssistantRepository } from "./asyncAssistantPersistence.js";
+
+export function createAsyncAssistantPersistence(database: SqlDatabase): Readonly<{ profiles:AsyncAssistantProfileRepository; capabilities:AsyncAssistantCapabilityRepository; defaults:AsyncDefaultAssistantRepository; readiness:AsyncAssistantReadinessAssessmentRepository }> { return Object.freeze({ profiles:new AsyncAssistantProfileRepository(database),capabilities:new AsyncAssistantCapabilityRepository(database),defaults:new AsyncDefaultAssistantRepository(database),readiness:new AsyncAssistantReadinessAssessmentRepository(database) }); }
