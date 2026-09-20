@@ -5,6 +5,7 @@ import { setShuttingDown } from "./routes/health.js";
 import { markRuntimeReady, markRuntimeShuttingDown, registerRuntimeWorker } from "./config/runtimeReadiness.js";
 import { randomUUID } from "node:crypto";
 import { createRunId, normalizeOperationalError, operationalLogger, withRunContext } from "./observability/operationalLogger.js";
+import { WhatsAppRecoveryRuntime } from "./whatsapp/services/WhatsAppRecoveryRuntime.js";
 
 const portValue = Number(process.env.PORT ?? "3000");
 if (!Number.isSafeInteger(portValue) || portValue < 1 || portValue > 65_535) throw new Error("PORT must be a valid TCP port.");
@@ -13,18 +14,17 @@ async function start(): Promise<void> {
 await initializeSqlDatabase();
 const server = createApp(createProductionAppRouters(), { production: process.env.NODE_ENV === "production" }).listen(portValue, "0.0.0.0", () => {
   operationalLogger.info("process_started", { subsystem: "http", outcome: "started", migrationHead: "0069", deploymentVersion: process.env.ATLAS_DEPLOYMENT_VERSION ?? "unknown" });
-  registerRuntimeWorker("billing_reconciliation");
+  registerRuntimeWorker("billing_reconciliation", { configured: true, required: true });
   billingReconciliationRuntime.start();
-  registerRuntimeWorker("whatsapp_recovery");
+  const whatsAppRecoveryRequired = process.env.NODE_ENV === "production" && Boolean(process.env.WHATSAPP_APP_SECRET?.trim() && process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim());
+  registerRuntimeWorker("whatsapp_recovery", { configured: whatsAppRecoveryRequired, required: whatsAppRecoveryRequired });
   markRuntimeReady();
 });
 const dispatchOwner = `whatsapp-dispatch-${randomUUID()}`;
 const mediaRecoveryOwner = `whatsapp-media-recovery-${randomUUID()}`;
 const proactiveWorkerOwner = `proactive-runtime-${randomUUID()}`;
-async function recoverWhatsApp(): Promise<void> { const runId = createRunId(), started = performance.now(); try { await withRunContext(runId, async () => { operationalLogger.info("worker_cycle_started", { worker: "whatsapp_recovery" }); await proactiveDueWorkerService.executeAvailable(proactiveWorkerOwner); await whatsAppInboundMediaRecoveryService.recoverAvailable(mediaRecoveryOwner); await whatsAppWebhookService.resumeIncomplete(); await whatsAppOutboundDeliveryService.dispatchReady(dispatchOwner); await voiceDeferredSemanticRecoveryService.recoverAvailable(); await proactiveSemanticRecoveryService.recoverAvailable(); operationalLogger.info("worker_cycle_completed", { worker: "whatsapp_recovery", durationMs: Math.round(performance.now() - started), outcome: "completed" }); }); } catch (error: unknown) { operationalLogger.error("worker_cycle_failed", { worker: "whatsapp_recovery", runId, safeErrorCategory: normalizeOperationalError(error) }); } }
-void recoverWhatsApp();
-const recoveryTimer = setInterval(() => { void recoverWhatsApp(); }, 5_000);
-recoveryTimer.unref();
+  const whatsAppRecoveryRuntime = new WhatsAppRecoveryRuntime(async () => { const runId = createRunId(), started = performance.now(); await withRunContext(runId, async () => { operationalLogger.info("worker_cycle_started", { worker: "whatsapp_recovery" }); await proactiveDueWorkerService.executeAvailable(proactiveWorkerOwner); await whatsAppInboundMediaRecoveryService.recoverAvailable(mediaRecoveryOwner); await whatsAppWebhookService.resumeIncomplete(); await whatsAppOutboundDeliveryService.dispatchReady(dispatchOwner); await voiceDeferredSemanticRecoveryService.recoverAvailable(); await proactiveSemanticRecoveryService.recoverAvailable(); operationalLogger.info("worker_cycle_completed", { worker: "whatsapp_recovery", durationMs: Math.round(performance.now() - started), outcome: "completed" }); }); }, { reportError: () => operationalLogger.error("worker_cycle_failed", { worker: "whatsapp_recovery", safeErrorCategory: "internal_failure" }) });
+  whatsAppRecoveryRuntime.start();
 
 let isShuttingDown = false;
 
@@ -34,8 +34,8 @@ function gracefulShutdown(reason: string, exitCode: number): void {
   operationalLogger.info("process_shutdown_started", { subsystem: "process", outcome: reason });
 
   setShuttingDown(true);
-  markRuntimeShuttingDown();
-  clearInterval(recoveryTimer);
+   markRuntimeShuttingDown();
+   void whatsAppRecoveryRuntime.stop();
 
   if (typeof server.closeIdleConnections === "function") {
     server.closeIdleConnections();
@@ -70,7 +70,8 @@ function gracefulShutdown(reason: string, exitCode: number): void {
       operationalLogger.info("http_server_closed", { subsystem: "http", outcome: "completed" });
     }
 
-    await billingReconciliationRuntime.stop();
+     await billingReconciliationRuntime.stop();
+     await whatsAppRecoveryRuntime.stop();
     clearTimeout(forceTimeout);
 
     try {

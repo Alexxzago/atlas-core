@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createRunId, operationalLogger, withRunContext } from "../../observability/operationalLogger.js";
+import { runtimeWorkerCycleFailed, runtimeWorkerCycleStarted, runtimeWorkerCycleSucceeded, runtimeWorkerStarted, runtimeWorkerStopped } from "../../config/runtimeReadiness.js";
 
 const defaultIntervalMilliseconds = 5_000;
 const minimumIntervalMilliseconds = 1_000;
@@ -47,6 +48,7 @@ export class BillingReconciliationRuntime {
   public start(): void {
     if (this.started) return;
     this.started = true;
+    runtimeWorkerStarted("billing_reconciliation");
     this.timer = this.schedule(() => { this.run(); }, this.configuration.intervalMilliseconds);
     this.timer.unref();
     this.run();
@@ -57,15 +59,17 @@ export class BillingReconciliationRuntime {
     this.started = false;
     if (this.timer) { this.clear(this.timer); this.timer = null; }
     await this.running;
+    runtimeWorkerStopped("billing_reconciliation");
   }
 
   private run(): void {
     if (!this.started || this.running) return;
+    runtimeWorkerCycleStarted("billing_reconciliation");
     const runId = createRunId(), started = performance.now(); operationalLogger.info("worker_cycle_started", { runId, worker: "billing_reconciliation" });
     const cycle = withRunContext(runId, () => (this.operationRecovery ? this.operationRecovery.runBatch(this.configuration.batchSize, `${this.ownerPrefix}-operations`).then(()=>this.worker.runBatch(this.configuration.batchSize, this.ownerPrefix)) : this.worker.runBatch(this.configuration.batchSize, this.ownerPrefix)))
-      .then((results) => { operationalLogger.info("worker_cycle_completed", { runId, worker: "billing_reconciliation", durationMs: Math.round(performance.now() - started), outcome: "completed", attempt: results.length }); })
+      .then((results) => { runtimeWorkerCycleSucceeded("billing_reconciliation"); operationalLogger.info("worker_cycle_completed", { runId, worker: "billing_reconciliation", durationMs: Math.round(performance.now() - started), outcome: "completed", attempt: results.length }); })
       .then(() => undefined)
-      .catch(() => { this.reportError("Billing reconciliation cycle failed."); })
+      .catch(() => { runtimeWorkerCycleFailed("billing_reconciliation"); this.reportError("Billing reconciliation cycle failed."); })
       .finally(() => { if (this.running === cycle) this.running = null; });
     this.running = cycle;
   }
