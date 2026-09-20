@@ -6,6 +6,7 @@ import { markRuntimeReady, markRuntimeShuttingDown, registerRuntimeWorker } from
 import { randomUUID } from "node:crypto";
 import { createRunId, normalizeOperationalError, operationalLogger, withRunContext } from "./observability/operationalLogger.js";
 import { WhatsAppRecoveryRuntime } from "./whatsapp/services/WhatsAppRecoveryRuntime.js";
+import { migrationHead } from "./config/migrations.js";
 
 const portValue = Number(process.env.PORT ?? "3000");
 if (!Number.isSafeInteger(portValue) || portValue < 1 || portValue > 65_535) throw new Error("PORT must be a valid TCP port.");
@@ -13,7 +14,7 @@ if (!Number.isSafeInteger(portValue) || portValue < 1 || portValue > 65_535) thr
 async function start(): Promise<void> {
 await initializeSqlDatabase();
 const server = createApp(createProductionAppRouters(), { production: process.env.NODE_ENV === "production" }).listen(portValue, "0.0.0.0", () => {
-  operationalLogger.info("process_started", { subsystem: "http", outcome: "started", migrationHead: "0069", deploymentVersion: process.env.ATLAS_DEPLOYMENT_VERSION ?? "unknown" });
+  operationalLogger.info("process_started", { subsystem: "http", outcome: "started", migrationHead: migrationHead.name, deploymentVersion: process.env.ATLAS_DEPLOYMENT_VERSION ?? "unknown" });
   registerRuntimeWorker("billing_reconciliation", { configured: true, required: true });
   billingReconciliationRuntime.start();
   const whatsAppRecoveryRequired = process.env.NODE_ENV === "production" && Boolean(process.env.WHATSAPP_APP_SECRET?.trim() && process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim());
