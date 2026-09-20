@@ -19,7 +19,7 @@ import {
   type CompanyReadinessPolicy,
   type ReadinessAssessment,
 } from "../domain/company.js";
-import type { CompanyDomainRepositoryPort, CompanyEvent, CompanyEventType } from "./ports.js";
+import type { AsyncCompanyDomainRepositoryPort, CompanyDomainRepositoryPort, CompanyEvent, CompanyEventType } from "./ports.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import { type BillingEntitlementPort } from "../../billing/services/billingEntitlementService.js";
 
@@ -115,7 +115,7 @@ export class CompanyApplicationService {
   private readonly entitlements: BillingEntitlementPort | undefined;
 
   public constructor(
-    private readonly companies: CompanyDomainRepositoryPort,
+    private readonly companies: CompanyDomainRepositoryPort | AsyncCompanyDomainRepositoryPort,
     dependencies: CompanyApplicationDependencies = {},
     private readonly readinessPolicy: CompanyReadinessPolicy = unavailableReadinessPolicy,
   ) {
@@ -124,11 +124,11 @@ export class CompanyApplicationService {
     this.entitlements = dependencies.entitlements;
   }
 
-  public createCompany(context: WorkspaceContext, command: CreateCompanyCommand): CompanyCommandResult {
+  public async createCompany(context: WorkspaceContext, command: CreateCompanyCommand): Promise<CompanyCommandResult> {
     try {
-      if (!this.mayCreateCompany(context)) return { status: "commercial_limit_reached" };
+      if (!await this.mayCreateCompany(context)) return { status: "commercial_limit_reached" };
       const company = createCompany({ id: command.id, workspaceId: context.workspaceId, identity: command.identity, ...(command.branding === undefined ? {} : { branding: command.branding }), createdAt: this.clock.now() });
-      const persisted = this.companies.createWithEvents(context, company, this.events(company, command.actorId, [{ type: "CompanyCreated", payload: { companyId: company.id } }]));
+       const persisted = await this.companies.createWithEvents(context, company, this.events(company, command.actorId, [{ type: "CompanyCreated", payload: { companyId: company.id } }]));
       if (persisted.status === "created") return { status: "success", company: persisted.company };
       return persisted;
     } catch (error: unknown) {
@@ -136,20 +136,20 @@ export class CompanyApplicationService {
     }
   }
 
-  public createOnboardingCompany(context: WorkspaceContext, command: CreateOnboardingCompanyCommand): CompanyCommandResult {
+  public async createOnboardingCompany(context: WorkspaceContext, command: CreateOnboardingCompanyCommand): Promise<CompanyCommandResult> {
     try {
-      if (!this.mayCreateCompany(context)) return { status: "commercial_limit_reached" };
+      if (!await this.mayCreateCompany(context)) return { status: "commercial_limit_reached" };
       const baseSlug = this.onboardingSlug(command.name);
       for (let suffix = 1; suffix <= 100; suffix += 1) {
         const slug = suffix === 1 ? baseSlug : `${baseSlug.slice(0, 80 - String(suffix).length - 1)}-${suffix}`;
-        if (this.companies.existsBySlug(context, companySlug(slug))) continue;
+        if (await this.companies.existsBySlug(context, companySlug(slug))) continue;
         const company = createCompany({
           id: randomInt(1, 2_147_483_647), workspaceId: context.workspaceId,
           identity: { name: command.name, slug, ...(command.website === undefined ? {} : { website: command.website }) },
           ...(command.logoAssetReference === undefined ? {} : { branding: { logoAssetReference: command.logoAssetReference } }),
           createdAt: this.clock.now(),
         });
-        const persisted = this.companies.createWithEvents(context, company, this.events(company, command.actorId, [{ type: "CompanyCreated", payload: { companyId: company.id } }]));
+        const persisted = await this.companies.createWithEvents(context, company, this.events(company, command.actorId, [{ type: "CompanyCreated", payload: { companyId: company.id } }]));
         if (persisted.status === "created") return { status: "success", company: persisted.company };
         if (persisted.status !== "slug_conflict") return persisted;
       }
@@ -159,24 +159,24 @@ export class CompanyApplicationService {
     }
   }
 
-  public updateCompanyIdentity(context: WorkspaceContext, command: UpdateCompanyIdentityCommand): CompanyCommandResult {
-    return this.update(context, command, (company) => updateCompanyIdentity(company, command.identity, this.clock.now()), (company) => [{ type: "CompanyIdentityUpdated", payload: { companyId: company.id } }]);
+  public async updateCompanyIdentity(context: WorkspaceContext, command: UpdateCompanyIdentityCommand): Promise<CompanyCommandResult> {
+    return await this.update(context, command, (company) => updateCompanyIdentity(company, command.identity, this.clock.now()), (company) => [{ type: "CompanyIdentityUpdated", payload: { companyId: company.id } }]);
   }
 
-  public updateCompanyBranding(context: WorkspaceContext, command: UpdateCompanyBrandingCommand): CompanyCommandResult {
-    return this.update(context, command, (company) => updateCompanyBranding(company, command.branding, this.clock.now()), (company) => [{ type: "CompanyBrandingUpdated", payload: { companyId: company.id } }]);
+  public async updateCompanyBranding(context: WorkspaceContext, command: UpdateCompanyBrandingCommand): Promise<CompanyCommandResult> {
+    return await this.update(context, command, (company) => updateCompanyBranding(company, command.branding, this.clock.now()), (company) => [{ type: "CompanyBrandingUpdated", payload: { companyId: company.id } }]);
   }
 
-  public updateCompanyConfiguration(context: WorkspaceContext, command: UpdateCompanyConfigurationCommand): CompanyCommandResult {
-    return this.update(context, command, (company) => updateCompanyConfiguration(company, command.configuration, this.clock.now()), (company, previous) => [
+  public async updateCompanyConfiguration(context: WorkspaceContext, command: UpdateCompanyConfigurationCommand): Promise<CompanyCommandResult> {
+    return await this.update(context, command, (company) => updateCompanyConfiguration(company, command.configuration, this.clock.now()), (company, previous) => [
       { type: "CompanyConfigurationUpdated", payload: { companyId: company.id } },
       ...(previous.lifecycle === "draft" && company.lifecycle === "configured" ? [{ type: "CompanyConfigured" as const, payload: { companyId: company.id } }] : []),
     ]);
   }
 
-  public evaluateCompanyReadiness(context: WorkspaceContext, command: EvaluateCompanyReadinessCommand): CompanyReadinessEvaluationResult {
+  public async evaluateCompanyReadiness(context: WorkspaceContext, command: EvaluateCompanyReadinessCommand): Promise<CompanyReadinessEvaluationResult> {
     try {
-      const company = this.companies.findById(context, companyId(command.companyId));
+      const company = await this.companies.findById(context, companyId(command.companyId));
       if (!company) return { status: "not_found" };
       return { status: "success", assessment: evaluateCompanyReadiness(company, this.readinessPolicy, [], this.clock.now()) };
     } catch (error: unknown) {
@@ -185,15 +185,15 @@ export class CompanyApplicationService {
     }
   }
 
-  public applyReadinessAssessment(context: WorkspaceContext, command: ApplyReadinessAssessmentCommand): CompanyReadinessApplicationResult {
+  public async applyReadinessAssessment(context: WorkspaceContext, command: ApplyReadinessAssessmentCommand): Promise<CompanyReadinessApplicationResult> {
     try {
-      const company = this.companies.findById(context, companyId(command.companyId));
+      const company = await this.companies.findById(context, companyId(command.companyId));
       if (!company) return { status: "not_found" };
       if (company.version !== command.expectedVersion) return { status: "version_conflict" };
       const updated = applyReadinessAssessment(company, command.assessment, this.clock.now());
       if (updated === company) return { status: "success", company, assessment: command.assessment, persisted: false };
       const type: CompanyEventType = updated.lifecycle === "operational" ? "CompanyActivated" : "CompanyAttentionRequired";
-      const persisted = this.companies.saveWithEvents(context, updated, command.expectedVersion, this.events(updated, command.actorId, [{ type, payload: { companyId: updated.id, policyId: command.assessment.policy.id, policyVersion: command.assessment.policy.version, reasonCodes: command.assessment.reasonCodes } }]));
+      const persisted = await this.companies.saveWithEvents(context, updated, command.expectedVersion, this.events(updated, command.actorId, [{ type, payload: { companyId: updated.id, policyId: command.assessment.policy.id, policyVersion: command.assessment.policy.version, reasonCodes: command.assessment.reasonCodes } }]));
       if (persisted.status === "saved") return { status: "success", company: persisted.company, assessment: command.assessment, persisted: true };
       return persisted;
     } catch (error: unknown) {
@@ -201,56 +201,56 @@ export class CompanyApplicationService {
     }
   }
 
-  public suspendCompany(context: WorkspaceContext, command: SuspendCompanyCommand): CompanyCommandResult {
-    return this.update(context, command, (company) => suspendCompany(company, this.clock.now()), (company) => [{ type: "CompanySuspended", payload: { companyId: company.id } }]);
+  public async suspendCompany(context: WorkspaceContext, command: SuspendCompanyCommand): Promise<CompanyCommandResult> {
+    return await this.update(context, command, (company) => suspendCompany(company, this.clock.now()), (company) => [{ type: "CompanySuspended", payload: { companyId: company.id } }]);
   }
 
-  public restoreCompany(context: WorkspaceContext, command: RestoreCompanyCommand): CompanyCommandResult {
-    return this.update(context, command, (company) => restoreCompany(company, this.clock.now()), (company) => [{ type: "CompanyRestored", payload: { companyId: company.id } }]);
+  public async restoreCompany(context: WorkspaceContext, command: RestoreCompanyCommand): Promise<CompanyCommandResult> {
+    return await this.update(context, command, (company) => restoreCompany(company, this.clock.now()), (company) => [{ type: "CompanyRestored", payload: { companyId: company.id } }]);
   }
 
-  public archiveCompany(context: WorkspaceContext, command: ArchiveCompanyCommand): CompanyCommandResult {
-    return this.update(context, command, (company) => archiveCompany(company, this.clock.now()), (company) => [{ type: "CompanyArchived", payload: { companyId: company.id } }]);
+  public async archiveCompany(context: WorkspaceContext, command: ArchiveCompanyCommand): Promise<CompanyCommandResult> {
+    return await this.update(context, command, (company) => archiveCompany(company, this.clock.now()), (company) => [{ type: "CompanyArchived", payload: { companyId: company.id } }]);
   }
 
-  public getCompanyById(context: WorkspaceContext, query: GetCompanyByIdQuery): CompanyQueryResult {
+  public async getCompanyById(context: WorkspaceContext, query: GetCompanyByIdQuery): Promise<CompanyQueryResult> {
     try {
-      const company = this.companies.findById(context, companyId(query.companyId));
+      const company = await this.companies.findById(context, companyId(query.companyId));
       return company ? { status: "found", company } : { status: "not_found" };
     } catch (error: unknown) {
       return this.queryFailure(error);
     }
   }
 
-  public getCompanyBySlug(context: WorkspaceContext, query: GetCompanyBySlugQuery): CompanyQueryResult {
+  public async getCompanyBySlug(context: WorkspaceContext, query: GetCompanyBySlugQuery): Promise<CompanyQueryResult> {
     try {
-      const company = this.companies.findBySlug(context, companySlug(query.slug));
+      const company = await this.companies.findBySlug(context, companySlug(query.slug));
       return company ? { status: "found", company } : { status: "not_found" };
     } catch (error: unknown) {
       return this.queryFailure(error);
     }
   }
 
-  public listCompanies(context: WorkspaceContext, _query: ListCompaniesQuery = {}): CompanyListResult {
+  public async listCompanies(context: WorkspaceContext, _query: ListCompaniesQuery = {}): Promise<CompanyListResult> {
     try {
-      return { status: "success", companies: this.companies.listByWorkspace(context) };
+      return { status: "success", companies: await this.companies.listByWorkspace(context) };
     } catch {
       return { status: "persistence_failure" };
     }
   }
 
-  private update(
+  private async update(
     context: WorkspaceContext,
     command: CompanyVersionedCommand,
     operation: (company: Company) => Company,
     eventDefinitions: (company: Company, previous: Company) => readonly { readonly type: CompanyEventType; readonly payload: Readonly<Record<string, unknown>> }[],
-  ): CompanyCommandResult {
+  ): Promise<CompanyCommandResult> {
     try {
-      const company = this.companies.findById(context, companyId(command.companyId));
+      const company = await this.companies.findById(context, companyId(command.companyId));
       if (!company) return { status: "not_found" };
       if (company.version !== command.expectedVersion) return { status: "version_conflict" };
       const updated = operation(company);
-      const persisted = this.companies.saveWithEvents(context, updated, command.expectedVersion, this.events(updated, command.actorId, eventDefinitions(updated, company)));
+      const persisted = await this.companies.saveWithEvents(context, updated, command.expectedVersion, this.events(updated, command.actorId, eventDefinitions(updated, company)));
       if (persisted.status === "saved") return { status: "success", company: persisted.company };
       return persisted;
     } catch (error: unknown) {
@@ -258,8 +258,8 @@ export class CompanyApplicationService {
     }
   }
 
-  private mayCreateCompany(context: WorkspaceContext): boolean {
-    return this.entitlements?.mayCreateCompany(context.workspaceId).allowed ?? true;
+  private async mayCreateCompany(context: WorkspaceContext): Promise<boolean> {
+    return this.entitlements ? (await this.entitlements.mayCreateCompany(context.workspaceId)).allowed : true;
   }
 
   private events(company: Company, actorId: string | null | undefined, definitions: readonly { readonly type: CompanyEventType; readonly payload: Readonly<Record<string, unknown>> }[]): readonly CompanyEvent[] {

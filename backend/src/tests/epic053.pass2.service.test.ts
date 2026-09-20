@@ -12,12 +12,12 @@ function service(input: Input = {}): PilotReadinessService {
   const connection = { id: "wac_test", status: whatsApp === "operational" ? "active" : "inactive", assistantProfileId: profileId };
   const state = whatsApp === "operational" ? { validationState: "valid", healthState: "healthy" } : whatsApp === "validation_failed" ? { validationState: "invalid", healthState: "inactive" } : whatsApp === "health_degraded" ? { validationState: "valid", healthState: "degraded" } : { validationState: "not_validated", healthState: "inactive" };
   return new PilotReadinessService(
-    { findById: (_context: unknown, companyId: number) => companyId === 1 ? { lifecycle: input.lifecycle ?? "operational" } : null } as never,
-    { assess: () => ({ status: input.assistant ?? "ready", assistantProfileId: profileId, blockers: input.assistant === "blocked" ? ["default_assistant_not_executable"] : [] }) } as never,
-    { loadCurrentVersion: () => input.knowledge === false ? null : { id: "kver_test" } } as never,
-    { listByCompany: () => webChat === "absent" ? [] : [{ status: webChat === "operational" ? "active" : "inactive", assistantProfileId: profileId }] } as never,
-    { listByCompany: () => whatsApp === "absent" ? [] : [connection], findCredentials: () => whatsApp === "operational" ? { whatsAppConnectionId: connection.id } : null, findOperationalState: () => state } as never,
-    { pilotReadiness: () => input.commercial ?? "usable" },
+    { findById: async (_context: unknown, companyId: number) => companyId === 1 ? { lifecycle: input.lifecycle ?? "operational" } : null } as never,
+    { assess: async () => ({ status: input.assistant ?? "ready", assistantProfileId: profileId, blockers: input.assistant === "blocked" ? ["default_assistant_not_executable"] : [] }) } as never,
+    { loadCurrentVersion: async () => input.knowledge === false ? null : { id: "kver_test" } } as never,
+    { listByCompany: async () => webChat === "absent" ? [] : [{ status: webChat === "operational" ? "active" : "inactive", assistantProfileId: profileId }] } as never,
+    { listByCompany: async () => whatsApp === "absent" ? [] : [connection], findCredentials: async () => whatsApp === "operational" ? { whatsAppConnectionId: connection.id } : null, findOperationalState: async () => state } as never,
+    { pilotReadiness: async () => input.commercial ?? "usable" },
     { whatsAppEmbeddedSignupAvailable: input.platformAvailable ?? true },
     { now: () => "2026-01-01T00:00:00.000Z" },
   );

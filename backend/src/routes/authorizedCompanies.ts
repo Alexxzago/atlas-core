@@ -1,14 +1,13 @@
 import { Router, json, raw, type Request, type RequestHandler } from "express";
-import type { UserRepositoryPort } from "../application/ports/repositories.js";
 import type { AuthenticationService } from "../identity/services/authenticationService.js";
-import type { UserId } from "../identity/domain/user.js";
+import type { User, UserId } from "../identity/domain/user.js";
 import type { Permission } from "../workspace/domain/membership.js";
 import { AuthorizationService } from "../workspace/services/authorizationService.js";
 import { WorkspaceResolver } from "../workspace/services/workspaceResolver.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 import { createActorContext, type ActorContext } from "../knowledge/domain/actorContext.js";
 import type { CompanyCoreControllers } from "../controllers/companyCoreController.js";
-import { CommercialControlsRepository } from "../repositories/commercialControlsRepository.js";
+import type { AsyncCommercialControlsRepository } from "../platformAdmin/infrastructure/asyncPlatformAdministrationPersistence.js";
 import type { CompanyOperationalStatusService } from "../company/services/companyOperationalStatusService.js";
 import { createGetCompanyOperationalStatusController } from "../controllers/companyOperationalStatusController.js";
 import type { SchedulingConfigurationService } from "../scheduling/services/schedulingConfigurationService.js";
@@ -69,10 +68,11 @@ interface ContextualConversationReadControllers {
   markRead?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
 }
 interface ContextualConversationControlControllers { takeover: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; release: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; resolve: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; resume: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; }
+interface AuthorizedCompaniesUserReader { findById(id: UserId): User | null | Promise<User | null>; }
 
 interface AuthorizedCompanyDependencies {
   authentication: AuthenticationService;
-  users: UserRepositoryPort;
+  users: AuthorizedCompaniesUserReader;
   authorization: AuthorizationService;
   resolver: WorkspaceResolver;
   controllers: ContextualControllers;
@@ -92,7 +92,7 @@ interface AuthorizedCompanyDependencies {
   conversationReadControllers?: ContextualConversationReadControllers;
   conversationControlControllers?: ContextualConversationControlControllers;
   pdfBodyParser?: RequestHandler;
-  commercial?: CommercialControlsRepository;
+  commercial?: AsyncCommercialControlsRepository;
   schedulingConfigurationService?: SchedulingConfigurationService;
   pilotReadinessService?: PilotReadinessService;
   activationService?: ActivationService;
@@ -105,7 +105,7 @@ let productionCompanyCoreControllers: CompanyCoreControllers | null = null;
 let productionAssistantReadinessControllers: ContextualAssistantReadinessControllers | null = null;
 let productionDefaultAssistantControllers: ContextualDefaultAssistantControllers | null = null;
 let productionAssistantCapabilityControllers: ContextualAssistantCapabilityControllers | null = null;
-let productionCommercialControls: CommercialControlsRepository | null = null;
+let productionCommercialControls: AsyncCommercialControlsRepository | null = null;
 let productionVoicePolicyControllers: ContextualVoicePolicyControllers | null = null;
 let productionProactiveActionControllers: ContextualProactiveActionControllers | null = null;
 let productionCompanyOperationalStatusService: CompanyOperationalStatusService | null = null;
@@ -119,7 +119,7 @@ export function configureProductionCompanyCoreControllers(controllers: CompanyCo
 export function configureProductionAssistantReadinessControllers(controllers: ContextualAssistantReadinessControllers): void { productionAssistantReadinessControllers = controllers; }
 export function configureProductionDefaultAssistantControllers(controllers: ContextualDefaultAssistantControllers): void { productionDefaultAssistantControllers = controllers; }
 export function configureProductionAssistantCapabilityControllers(controllers: ContextualAssistantCapabilityControllers): void { productionAssistantCapabilityControllers = controllers; }
-export function configureProductionCommercialControls(controls: CommercialControlsRepository): void { productionCommercialControls = controls; }
+export function configureProductionCommercialControls(controls: AsyncCommercialControlsRepository): void { productionCommercialControls = controls; }
 export function configureProductionVoicePolicyControllers(controllers: ContextualVoicePolicyControllers): void { productionVoicePolicyControllers = controllers; }
 export function configureProductionProactiveActionControllers(controllers: ContextualProactiveActionControllers): void { productionProactiveActionControllers = controllers; }
 export function configureProductionCompanyOperationalStatusService(service: CompanyOperationalStatusService): void { productionCompanyOperationalStatusService = service; }
@@ -162,19 +162,19 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     res.setHeader("Pragma", "no-cache");
     try {
       const raw = rawCookie(req, dependencies.authentication.cookieName());
-      const identity = raw ? dependencies.authentication.current(raw) : null;
+      const identity = raw ? await dependencies.authentication.current(raw) : null;
       if (!raw || !identity) throw new Error();
       if (changing) {
         const csrf = req.headers["x-csrf-token"];
         const fetchSite = req.headers["sec-fetch-site"];
         if (!exactOrigin(req) || typeof csrf !== "string" || fetchSite !== "same-origin"
-          || !dependencies.authentication.validateCsrf(raw, csrf)) throw new Error();
+          || !await dependencies.authentication.validateCsrf(raw, csrf)) throw new Error();
       }
-      const user = dependencies.users.findById(identity.userId as UserId);
+      const user = await dependencies.users.findById(identity.userId as UserId);
       if (!user) throw new Error();
-      const decision = dependencies.authorization.authorize(user, workspaceId(req), permission);
-      if (changing && dependencies.commercial && !dependencies.commercial.isWorkspaceActive(decision.workspaceId)) { res.status(409).json({ error: { code: "commercial_account_suspended", message: "Commercial account is suspended." } }); return; }
-      const context = dependencies.resolver.resolve(decision);
+      const decision = await dependencies.authorization.authorize(user, workspaceId(req), permission);
+      if (changing && dependencies.commercial && !await dependencies.commercial.isWorkspaceActive(decision.workspaceId)) { res.status(409).json({ error: { code: "commercial_account_suspended", message: "Commercial account is suspended." } }); return; }
+      const context = await dependencies.resolver.resolve(decision);
       const actor = createActorContext({ userId: decision.userId, membershipId: decision.membershipId, role: decision.role, capabilities: decision.capabilities });
       res.locals.actorId = actor.userId;
       await controller(context, actor)(req, res, next);

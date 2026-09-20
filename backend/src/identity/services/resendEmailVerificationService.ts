@@ -23,17 +23,17 @@ export class ResendEmailVerificationService {
     const email = createEmailAddress(emailValue);
     const normalized = createNormalizedEmail(email);
     const selectedLocale = locale(localeValue);
-    const issued = this.transaction.execute(({ users, verifications }) => {
-      const user = users.findByNormalizedEmail(normalized);
+    const issued = await this.transaction.execute(async ({ users, verifications }) => {
+      const user = await users.findByNormalizedEmail(normalized);
       if (!user || user.status !== "pending_verification") return null;
       const identity = user.authenticationIdentities.find((candidate) => candidate.normalizedEmail === normalized);
       if (!identity) return null;
-      const current = verifications.findCurrent(identity.id, "email_verification");
+      const current = await verifications.findCurrent(identity.id, "email_verification");
       const now = this.clock.now();
       if (!mayResendVerification(current, now, this.cooldownMilliseconds)) return null;
       const replacement = issueEmailVerification(user.id, identity.id, this.random, this.hash, this.clock, this.lifetimeMilliseconds);
-      if (current && !verifications.update(supersedeVerification(current, now), "pending")) return null;
-      verifications.create(replacement.workflow);
+      if (current && !await verifications.update(supersedeVerification(current, now), "pending")) return null;
+      await verifications.create(replacement.workflow);
       return replacement;
     });
     if (!issued) return { status: "verification_requested" };

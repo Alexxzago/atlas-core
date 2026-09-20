@@ -1,5 +1,5 @@
 import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
-import type { WebChatSessionRepositoryPort } from "../webChat/application/sessionPorts.js";
+import type { SynchronousWebChatSessionRepositoryPort } from "../webChat/application/sessionPorts.js";
 import { conversationId, conversationParticipantId } from "../conversation/domain/conversation.js";
 import { webChatConnectionId } from "../webChat/domain/webChatConnection.js";
 import { reconstructWebChatSession, type WebChatSession, type WebChatSessionId, type WebChatSessionState } from "../webChat/domain/webChatSession.js";
@@ -7,7 +7,7 @@ import { reconstructWebChatSession, type WebChatSession, type WebChatSessionId, 
 interface Row { id:string; web_chat_connection_id:string; conversation_id:string; visitor_participant_id:string; responder_participant_id:string; token_digest:string; state:WebChatSessionState; created_at:string; updated_at:string; expires_at:string; last_seen_at:string; }
 function session(row: Row): WebChatSession { return reconstructWebChatSession({ id: row.id as WebChatSessionId, webChatConnectionId: webChatConnectionId(row.web_chat_connection_id), conversationId: conversationId(row.conversation_id), visitorParticipantId: conversationParticipantId(row.visitor_participant_id), responderParticipantId: conversationParticipantId(row.responder_participant_id), tokenDigest: row.token_digest, state: row.state, createdAt: row.created_at, updatedAt: row.updated_at, expiresAt: row.expires_at, lastSeenAt: row.last_seen_at }); }
 
-export class WebChatSessionRepository implements WebChatSessionRepositoryPort {
+export class WebChatSessionRepository implements SynchronousWebChatSessionRepositoryPort {
   public constructor(private readonly db: SynchronousDatabase) {}
   public transaction<T>(operation: () => T): T { try { this.db.exec("BEGIN IMMEDIATE"); const result = operation(); this.db.exec("COMMIT"); return result; } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; } }
   public create(value: WebChatSession): WebChatSession {

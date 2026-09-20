@@ -58,7 +58,7 @@ export class OperationalAssistantRuntime {
     if (profile.companyId !== company.id || knowledge.companyId !== company.id) throw new Error("Assistant runtime ownership does not match Company.");
     const startedAt = this.clock.now();
     const started = this.record(company, profile, knowledge, context, startedAt);
-    this.records.create(started);
+    await this.records.create(started);
     try {
       const request = buildAssistantExecution(profile, {
         purpose: context.purpose,
@@ -81,17 +81,17 @@ export class OperationalAssistantRuntime {
         ? context.fallbackOnUnavailable && result.outcome === "safe_fallback" ? fallback(profile.fallbackMessage) : result
         : fallback(profile.fallbackMessage);
       const completed = this.complete(started, response, null, this.clock.now());
-      this.persistCompletion(completed);
+      await this.persistCompletion(completed);
       return { response, record: completed, toolMemoryCandidates: Object.freeze(toolOutcome?.conversationMemory ?? []) };
     } catch (error: unknown) {
       if (context.fallbackOnUnavailable && (error instanceof AnswerGenerationUnavailableError || error instanceof ToolExecutionError)) {
         const response = fallback(profile.fallbackMessage);
         const completed = this.complete(started, response, null, this.clock.now());
-        this.persistCompletion(completed);
+        await this.persistCompletion(completed);
         return { response, record: completed, toolMemoryCandidates: Object.freeze([]) };
       }
       const completed = this.complete(started, null, "provider_unavailable", this.clock.now());
-      this.persistCompletion(completed);
+      await this.persistCompletion(completed);
       throw error;
     }
   }
@@ -126,8 +126,8 @@ export class OperationalAssistantRuntime {
     return Object.freeze({ ...started, state: "failed", errorCode, completedAt, durationMilliseconds });
   }
 
-  private persistCompletion(record: AssistantExecutionRecord): void {
-    if (!this.records.complete(record, "started")) throw new Error("Assistant execution record state changed.");
+  private async persistCompletion(record: AssistantExecutionRecord): Promise<void> {
+    if (!await this.records.complete(record, "started")) throw new Error("Assistant execution record state changed.");
   }
 }
 function snapshot(company: Company, profile: AssistantProfile, knowledge: CompanyKnowledgeVersion, context: OperationalAssistantRuntimeContext, createdAt: string): ImmutableExecutionSnapshot {

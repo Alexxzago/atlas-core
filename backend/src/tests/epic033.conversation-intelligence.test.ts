@@ -31,22 +31,22 @@ import { createWorkspaceContext } from "../types/workspaceContext.js";
 import { publishKnowledgeFixture } from "./knowledgeTestFixture.js";
 
 class Clock { private value = 0; public now(): string { return new Date(Date.UTC(2026, 7, 18, 0, 0, this.value++)).toISOString(); } }
-function setup() {
+async function setup() {
   const database = createDatabase(":memory:"), clock = new Clock(), context = createWorkspaceContext(new WorkspaceRepository(database).resolveDefault());
   const company = new CompanyRepository(database).create(context, { name: "Intelligence", website: "https://intelligence.test" });
-  const conversations = new ConversationService(new ConversationRepository(database), clock), conversation = conversations.open(context, company.id), participant = conversations.addParticipant(context, company.id, conversation.id, { type: "customer" });
+  const conversations = new ConversationService(new ConversationRepository(database), clock), conversation = await conversations.open(context, company.id), participant = await conversations.addParticipant(context, company.id, conversation.id, { type: "customer" });
   let derivations = 0;
   const intelligence = new ConversationIntelligenceService(new ConversationIntelligenceRepository(database), { derive: async ({ message }) => { derivations += 1; return [{ kind: "set_fact", key: "need", value: message.content }] as const; } }, clock);
   return { database, context, company, conversations, conversation, participant, intelligence, derivations: () => derivations };
 }
 
-test("EPIC033 migration creates unbounded applied-message and tool-trace ledgers and rejects mismatched associations", () => {
-  const value = setup();
+test("EPIC033 migration creates unbounded applied-message and tool-trace ledgers and rejects mismatched associations", async () => {
+  const value = await setup();
   try {
     const other = new CompanyRepository(value.database).create(value.context, { name: "Other Intelligence", website: "https://other-intelligence.test" });
-    const otherConversation = value.conversations.open(value.context, other.id);
-    const otherParticipant = value.conversations.addParticipant(value.context, other.id, otherConversation.id, { type: "customer" });
-    const otherMessage = value.conversations.addMessage(value.context, other.id, otherConversation.id, { senderParticipantId: otherParticipant.id, direction: "inbound", content: "Other" });
+    const otherConversation = await value.conversations.open(value.context, other.id);
+    const otherParticipant = await value.conversations.addParticipant(value.context, other.id, otherConversation.id, { type: "customer" });
+    const otherMessage = await value.conversations.addMessage(value.context, other.id, otherConversation.id, { senderParticipantId: otherParticipant.id, direction: "inbound", content: "Other" });
     assert.equal((value.database.prepare("SELECT name FROM schema_migrations WHERE id=39").get() as { name: string }).name, "0039_conversation_intelligence");
     assert.ok((value.database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='conversation_intelligence_applied_tool_traces'").get() as { sql: string }).sql.includes("PRIMARY KEY(conversation_id,tool_trace_id)"));
     assert.throws(() => value.database.prepare("INSERT INTO conversation_intelligence_states(conversation_id,workspace_id,company_id,memory,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?)").run(value.conversation.id, value.context.workspaceId, other.id, "", 1, "2026-08-18T00:00:00.000Z", "2026-08-18T00:00:00.000Z"));
@@ -56,22 +56,23 @@ test("EPIC033 migration creates unbounded applied-message and tool-trace ledgers
 });
 
 test("EPIC033 applies each message once and retains its ledger after reference pruning", async () => {
-  const value = setup();
+  const value = await setup();
   try {
-    const first = value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Need a two bedroom home" });
+    const first = await value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Need a two bedroom home" });
     assert.equal((await value.intelligence.apply(value.context, value.company.id, first)).state?.version, 1);
     assert.equal((await value.intelligence.apply(value.context, value.company.id, first)).state?.version, 1); assert.equal(value.derivations(), 1);
-    for (const content of ["Near transit", "Budget discussed"]) { const message = value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content }); await value.intelligence.apply(value.context, value.company.id, message); }
-    assert.equal(value.intelligence.state(value.context, value.company.id, value.conversation.id)?.facts.find((fact) => fact.key === "need")?.value, "Budget discussed");
+    for (const content of ["Near transit", "Budget discussed"]) { const message = await value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content }); await value.intelligence.apply(value.context, value.company.id, message); }
+    assert.equal((await value.intelligence.state(value.context, value.company.id, value.conversation.id))?.facts.find((fact) => fact.key === "need")?.value, "Budget discussed");
     assert.equal((value.database.prepare("SELECT COUNT(*) AS count FROM conversation_intelligence_applied_messages WHERE conversation_id=?").get(value.conversation.id) as { count: number }).count, 3);
-    assert.equal(value.intelligence.state(value.context, value.company.id, value.conversation.id)?.referenceGroups.length, 0);
+    assert.equal((await value.intelligence.state(value.context, value.company.id, value.conversation.id))?.referenceGroups.length, 0);
   } finally { value.database.close(); }
 });
 
 test("EPIC033 retains 257 distinct persisted messages and replays the first once", async () => {
-  const value = setup();
+  const value = await setup();
   try {
-    const messages = Array.from({ length: 257 }, (_, index) => value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: `Message ${index + 1}` }));
+    const messages = [];
+    for (let index = 0; index < 257; index += 1) messages.push(await value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: `Message ${index + 1}` }));
     for (const message of messages) await value.intelligence.apply(value.context, value.company.id, message);
     await value.intelligence.apply(value.context, value.company.id, messages[0]!);
     assert.equal(value.derivations(), 257);
@@ -80,15 +81,15 @@ test("EPIC033 retains 257 distinct persisted messages and replays the first once
 });
 
 test("EPIC033 records an outbound message and preserves current memory when derivation fails", async () => {
-  const value = setup();
+  const value = await setup();
   try {
-    const inbound = value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Need a garden" });
+    const inbound = await value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Need a garden" });
     await value.intelligence.apply(value.context, value.company.id, inbound);
-    const outboundParticipant = value.conversations.addParticipant(value.context, value.company.id, value.conversation.id, { type: "assistant" });
-    const outbound = value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: outboundParticipant.id, direction: "outbound", content: "I will look for garden options" });
+    const outboundParticipant = await value.conversations.addParticipant(value.context, value.company.id, value.conversation.id, { type: "assistant" });
+    const outbound = await value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: outboundParticipant.id, direction: "outbound", content: "I will look for garden options" });
     await value.intelligence.apply(value.context, value.company.id, outbound);
     const failing = new ConversationIntelligenceService(new ConversationIntelligenceRepository(value.database), { derive: async () => { throw new Error("unavailable"); } }, new Clock());
-    const later = value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Thanks" });
+    const later = await value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Thanks" });
     const state = await failing.apply(value.context, value.company.id, later);
     assert.equal(state.state?.facts.find((fact) => fact.key === "need")?.value, "Need a garden");
     assert.equal(state.state?.version, 2);
@@ -96,14 +97,14 @@ test("EPIC033 records an outbound message and preserves current memory when deri
 });
 
 test("EPIC033 does not let a first-seen older human message replace a newer human fact", async () => {
-  const value = setup();
+  const value = await setup();
   try {
-    const newer = value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Newer preference" });
-    const older = value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Older preference" });
+    const newer = await value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Newer preference" });
+    const older = await value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Older preference" });
     const olderAt = "2026-08-17T00:00:00.000Z";
     await value.intelligence.apply(value.context, value.company.id, newer);
     await value.intelligence.apply(value.context, value.company.id, { ...older, createdAt: olderAt });
-    const fact = value.intelligence.state(value.context, value.company.id, value.conversation.id)?.facts.find((item) => item.key === "need");
+    const fact = (await value.intelligence.state(value.context, value.company.id, value.conversation.id))?.facts.find((item) => item.key === "need");
     assert.equal(fact?.value, "Newer preference");
     assert.equal(fact?.sourceMessageId, newer.id);
   } finally { value.database.close(); }
@@ -141,10 +142,10 @@ test("EPIC033 returns a controlled skipped outcome after its bounded CAS retry",
 });
 
 test("EPIC033 persists active intent separately from conversation facts", async () => {
-  const value = setup();
+  const value = await setup();
   try {
     const intelligence = new ConversationIntelligenceService(new ConversationIntelligenceRepository(value.database), { derive: async () => [{ kind: "set_active_intent", value: "listing_search" }] }, new Clock());
-    const message = value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Find listings" });
+    const message = await value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content: "Find listings" });
     const result = await intelligence.apply(value.context, value.company.id, message);
     assert.equal(result.state?.activeIntent, "listing_search");
     assert.equal(result.state?.facts.some((fact) => fact.key === "active_intent"), false);
@@ -153,12 +154,12 @@ test("EPIC033 persists active intent separately from conversation facts", async 
 });
 
 test("EPIC033 applies facts, pending items, reference groups, and their deterministic limits", async () => {
-  const value = setup();
+  const value = await setup();
   try {
     const operations = Array.from({ length: 16 }, (_, index) => ({ kind: "set_fact" as const, key: `fact_${index}`, value: index }));
     const bounded = new ConversationIntelligenceService(new ConversationIntelligenceRepository(value.database), { derive: async ({ message }) => message.content.startsWith("facts-") ? operations.map((operation) => ({ ...operation, key: `${operation.key}_${message.content.at(-1)}` })) : message.content === "pending" ? Array.from({ length: 16 }, (_, index) => ({ kind: "mark_pending" as const, key: `pending_${index}`, askedAt: index === 0 })) : [{ kind: "replace_reference_group" as const, groupKind: "listings", options: Array.from({ length: CONVERSATION_REFERENCE_OPTION_LIMIT }, (_, index) => ({ referenceId: `listing_${index}`, label: `Listing ${index}`, safePayload: { index } })) }] }, new Clock());
-    for (const content of ["facts-a", "facts-b", "facts-c", "pending", "pending", "reference"]) { const message = value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content }); await bounded.apply(value.context, value.company.id, message); }
-    const state = bounded.state(value.context, value.company.id, value.conversation.id)!;
+    for (const content of ["facts-a", "facts-b", "facts-c", "pending", "pending", "reference"]) { const message = await value.conversations.addMessage(value.context, value.company.id, value.conversation.id, { senderParticipantId: value.participant.id, direction: "inbound", content }); await bounded.apply(value.context, value.company.id, message); }
+    const state = (await bounded.state(value.context, value.company.id, value.conversation.id))!;
     assert.equal(state.facts.length, CONVERSATION_FACT_LIMIT); assert.equal(state.pending.length, CONVERSATION_PENDING_LIMIT);
     assert.equal(state.pending[0]?.askedAt !== null, true); assert.equal(state.referenceGroups.filter((group) => group.status === "active").length, 1); assert.equal(state.referenceGroups[0]?.options.length, CONVERSATION_REFERENCE_OPTION_LIMIT);
   } finally { value.database.close(); }
@@ -219,7 +220,7 @@ test("EPIC033 operational tool traces remain idempotent after pruning, reject st
   try {
     const companies = new CompanyRepository(database), company = companies.create(context, { name: "Referent Realty", website: "https://referent.test", status: "ready" });
     publishKnowledgeFixture(database, context, company.id, { company: { name: company.name, website: company.website, phone: "", email: "" }, business: { services: ["Listings"], hours: "Always", locations: [] }, faq: [] });
-    const clock = new Clock(), conversations = new ConversationService(new ConversationRepository(database), clock), conversation = conversations.open(context, company.id), customer = conversations.addParticipant(context, company.id, conversation.id, { type: "customer" }), assistant = conversations.addParticipant(context, company.id, conversation.id, { type: "assistant" });
+    const clock = new Clock(), conversations = new ConversationService(new ConversationRepository(database), clock), conversation = await conversations.open(context, company.id), customer = await conversations.addParticipant(context, company.id, conversation.id, { type: "customer" }), assistant = await conversations.addParticipant(context, company.id, conversation.id, { type: "assistant" });
     const profile = reconstructAssistantProfile({ id: "asp_abcdef0123456789abcdef0123456789" as never, companyId: company.id, name: "Listings", normalizedName: "listings", description: null, businessRole: "Advisor", objective: "Help", audience: null, tone: "professional", assistantLanguage: "en", welcomeMessage: "Welcome", fallbackMessage: "Fallback", status: "ready", createdAt: clock.now(), updatedAt: clock.now(), archivedAt: null });
     new AssistantProfileRepository(database).create(context, company.id, profile);
     database.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('usr_epic033','active','en',?,?)").run(clock.now(), clock.now());
@@ -234,7 +235,7 @@ test("EPIC033 operational tool traces remain idempotent after pruning, reject st
 
     await service.execute(context, company.id, conversation.id, input("Show me listings"));
     await service.execute(context, company.id, conversation.id, input("I prefer the second one"));
-    const persisted = intelligence.state(context, company.id, conversation.id)!;
+    const persisted = (await intelligence.state(context, company.id, conversation.id))!;
     assert.equal((database.prepare("SELECT COUNT(*) AS count FROM tool_execution_traces WHERE state='completed'").get() as { count: number }).count, 2);
     assert.equal(persisted.toolMemory.length, 2);
     assert.deepEqual(persisted.toolMemory.map((item) => item.value), [{ listing: "listing-2" }, { listing: "listing-2" }]);
@@ -297,13 +298,13 @@ function turnSetup(failAppend = false, intelligence?: { apply(): Promise<{ reado
     { loadCurrentVersion: () => ({ companyId: 1 }) } as never,
     { findById: () => profile } as never,
     {
-      validateOpen: () => conversation,
-      findMessageByIdempotencyKey: () => persistedOutbound,
-      listMessages: () => messages,
-      addMessage: (_context: unknown, _companyId: number, _conversationId: string, input: { direction: "outbound"; content: string }) => {
-        persistedOutbound = { id: "cmsg_1123456789abcdef0123456789abcdef", content: input.content, direction: "outbound", executionRecordId: "aex_0123456789abcdef0123456789abcdef" };
-        messages.push({ direction: input.direction, content: input.content });
-        return { ...persistedOutbound, conversationId: conversation.id };
+      validateOpen: async () => conversation,
+      findMessageByIdempotencyKey: async () => persistedOutbound,
+      listMessages: async () => messages,
+      finalizeAssistantResponse: async (_context: unknown, _companyId: number, _conversationId: string, input: { content: string; executionRecordId: string }) => {
+        persistedOutbound = { id: "cmsg_1123456789abcdef0123456789abcdef", content: input.content, direction: "outbound", executionRecordId: input.executionRecordId };
+        messages.push({ direction: "outbound", content: input.content });
+        return { kind: "finalized" as const, message: { ...persistedOutbound, conversationId: conversation.id } };
       },
     } as never,
     { execute: async () => ({ response: { outcome: "answered" as const, answer: "Answer" }, record: { id: "aex_0123456789abcdef0123456789abcdef" }, toolMemoryCandidates: ["a", "b", "c", "a"].map((suffix) => ({ traceId: `ttr_0000000000000000000000000000000${suffix}`, value: { suffix } })) }) } as never,

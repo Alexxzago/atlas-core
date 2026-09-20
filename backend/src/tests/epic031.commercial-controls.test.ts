@@ -79,28 +79,28 @@ test("EPIC-031 rejects a finite user allowance below current ownership without a
   db.close();
 });
 
-test("EPIC-031 persists an unlimited user allowance that permits a normal user to own multiple workspaces", () => {
+test("EPIC-031 persists an unlimited user allowance that permits a normal user to own multiple workspaces", async () => {
   const db = database(), controls = new CommercialControlsRepository(db), service = administration(db); user(db, "normal");
   const current = controls.user("normal")!;
   assert.equal(controls.updateUser("normal", "normal", null, current.version, at)?.maxOwnedWorkspaces, null);
-  assert.doesNotThrow(() => service.createWorkspace("normal" as UserId, "First workspace"));
-  assert.doesNotThrow(() => service.createWorkspace("normal" as UserId, "Second workspace"));
+  await assert.doesNotReject(() => service.createWorkspace("normal" as UserId, "First workspace"));
+  await assert.doesNotReject(() => service.createWorkspace("normal" as UserId, "Second workspace"));
   assert.equal(controls.ownedWorkspaceCount("normal"), 2);
   db.close();
 });
 
-test("EPIC-031 changeMembership owner promotion enforces available, exhausted, bypassed, and revoked allowances", () => {
+test("EPIC-031 changeMembership owner promotion enforces available, exhausted, bypassed, and revoked allowances", async () => {
   const db = database(), service = administration(db); user(db, "owner"); user(db, "target");
   const first = namedWorkspace(db, "promotion-a"), second = namedWorkspace(db, "promotion-b"), third = namedWorkspace(db, "promotion-c");
   membership(db, "owner-a", first, "owner", "owner"); membership(db, "owner-b", second, "owner", "owner"); membership(db, "owner-c", third, "owner", "owner");
   membership(db, "target-a", first, "target", "viewer"); membership(db, "target-b", second, "target", "viewer"); membership(db, "target-c", third, "target", "viewer");
   const firstPublicId = String((db.prepare("SELECT public_id FROM workspaces WHERE id=?").get(first) as { public_id: string }).public_id), secondPublicId = String((db.prepare("SELECT public_id FROM workspaces WHERE id=?").get(second) as { public_id: string }).public_id), thirdPublicId = String((db.prepare("SELECT public_id FROM workspaces WHERE id=?").get(third) as { public_id: string }).public_id);
-  assert.doesNotThrow(() => service.changeMembership("owner" as UserId, firstPublicId, "target-a", "role", "owner"));
-  assert.throws(() => service.changeMembership("owner" as UserId, secondPublicId, "target-b", "role", "owner"), WorkspaceAdministrationError);
+  await assert.doesNotReject(() => service.changeMembership("owner" as UserId, firstPublicId, "target-a", "role", "owner"));
+  await assert.rejects(() => service.changeMembership("owner" as UserId, secondPublicId, "target-b", "role", "owner"), WorkspaceAdministrationError);
   db.prepare("INSERT INTO platform_administrators(user_id,status,granted_at,granted_by_user_id,revoked_at) VALUES('target','active',?,NULL,NULL)").run(at);
-  assert.doesNotThrow(() => service.changeMembership("owner" as UserId, secondPublicId, "target-b", "role", "owner"));
+  await assert.doesNotReject(() => service.changeMembership("owner" as UserId, secondPublicId, "target-b", "role", "owner"));
   db.prepare("UPDATE platform_administrators SET status='revoked',revoked_at=? WHERE user_id='target'").run(at);
-  assert.throws(() => service.changeMembership("owner" as UserId, thirdPublicId, "target-c", "role", "owner"), WorkspaceAdministrationError);
+  await assert.rejects(() => service.changeMembership("owner" as UserId, thirdPublicId, "target-c", "role", "owner"), WorkspaceAdministrationError);
   assert.throws(() => invitationRole("owner"));
   db.close();
 });
@@ -125,7 +125,7 @@ test("EPIC-031 suspended WhatsApp webhooks acknowledge with no operations and re
   const raw = Buffer.from(JSON.stringify({ entry: [{ changes: [{ field: "messages", value: { metadata: { phone_number_id: "phone" }, messages: [{ type: "text", from: "wa", id: "wamid", text: { body: "Hello" } }] } }] }] }));
   let captures = 0, released = 0;
   const request = { id: "cex_00000000000000000000000000000000", snapshot: { whatsAppConnectionId: "wac_00000000000000000000000000000000" } };
-  const service = new WhatsAppWebhookService({ appSecret: "secret", verifyToken: "verify" }, { resolveActiveByPhoneNumberId: () => null, resolveForRecovery: () => null } as never, {} as never, { captureInboundExecution: () => { captures += 1; throw new Error("must not capture"); }, leaseExecutionRequests: () => [request], releaseExecutionRequest: () => { released += 1; return null; } } as never, {} as never, {} as never);
+  const service = new WhatsAppWebhookService({ appSecret: "secret", verifyToken: "verify" }, { recordWebhookActivity: async () => undefined, resolveActiveByPhoneNumberId: () => null, resolveForRecovery: () => null } as never, {} as never, { captureInboundExecution: () => { captures += 1; throw new Error("must not capture"); }, leaseExecutionRequests: () => [request], releaseExecutionRequest: () => { released += 1; return null; } } as never, {} as never, {} as never);
   const app = express(); app.post("/webhooks/whatsapp", express.raw({ type: "*/*" }), createWhatsAppWebhookControllers(service).receive);
   const listener = app.listen(0, "127.0.0.1"); await new Promise<void>(resolve => listener.once("listening", resolve));
   try { const port = (listener.address() as { port: number }).port, signature = `sha256=${createHmac("sha256", "secret").update(raw).digest("hex")}`, response = await fetch(`http://127.0.0.1:${port}/webhooks/whatsapp`, { method: "POST", headers: { "content-type": "application/json", "x-hub-signature-256": signature }, body: raw }); assert.equal(response.status, 200); await service.resumeIncomplete(); assert.equal(captures, 0); assert.equal(released, 1); } finally { listener.close(); }

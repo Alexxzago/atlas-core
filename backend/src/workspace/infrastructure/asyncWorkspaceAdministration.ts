@@ -3,8 +3,22 @@ import type { NormalizedEmail } from "../../identity/domain/email.js";
 import type { UserId } from "../../identity/domain/user.js";
 import type { Invitation } from "../domain/invitation.js";
 import type { Membership, MembershipId } from "../domain/membership.js";
+import type { Workspace } from "../../types/workspace.js";
+import type { WorkspacePublicId } from "../domain/membership.js";
 
 type Row = Record<string, unknown>;
+
+function workspace(row: Row): Workspace { return Object.freeze({ id:Number(row.id),publicId:String(row.public_id),key:String(row.key),name:String(row.name),timezone:row.timezone as string|null,defaultLocale:row.default_locale as Workspace["defaultLocale"],createdAt:String(row.created_at) }); }
+
+export class AsyncWorkspaceRepository {
+  public constructor(private readonly database: SqlDatabase) {}
+  public async findById(id: number): Promise<Workspace | null> { return this.one("id=?", [id]); }
+  public async findByPublicId(id: WorkspacePublicId): Promise<Workspace | null> { return this.one("public_id=?", [id]); }
+  public async findByKey(key: string): Promise<Workspace | null> { return this.one("key=?", [key]); }
+  public async resolveDefault(): Promise<Workspace> { const value=await this.findByKey("default");if(!value)throw new Error("Default workspace is not available.");return value; }
+  public async create(input: { publicId: WorkspacePublicId; key: string; name: string; timezone: string | null; defaultLocale: "en" | "es" | null }): Promise<Workspace> { const result=await this.database.execute("INSERT INTO workspaces(public_id,key,name,timezone,default_locale) VALUES(?,?,?,?,?)",[input.publicId,input.key,input.name,input.timezone,input.defaultLocale]); const created=await this.findById(Number(result.lastInsertRowid)); if(!created)throw new Error("Workspace could not be created."); return created; }
+  private async one(where: string, args: readonly (string | number)[]): Promise<Workspace | null> { const rows=await this.database.query<Row>(`SELECT id,public_id,key,name,timezone,default_locale,created_at FROM workspaces WHERE ${where}`,args); return rows[0] ? workspace(rows[0]) : null; }
+}
 
 function membership(row: Row): Membership { return { id: String(row.id) as MembershipId, workspaceId: Number(row.workspace_id), userId: String(row.user_id) as UserId, role: row.role as Membership["role"], status: row.status as Membership["status"], version: Number(row.version), createdAt: String(row.created_at), activatedAt: String(row.activated_at), suspendedAt: row.suspended_at as string | null, reactivatedAt: row.reactivated_at as string | null, removedAt: row.removed_at as string | null, roleChangedAt: row.role_changed_at as string | null }; }
 function invitation(row: Row): Invitation { return { id: String(row.id), workspaceId: Number(row.workspace_id), issuerMembershipId: String(row.issuer_membership_id) as Invitation["issuerMembershipId"], issuerUserId: String(row.issuer_user_id) as UserId, recipient: String(row.recipient_normalized_email) as NormalizedEmail, proposedRole: row.proposed_role as Invitation["proposedRole"], purpose: "workspace_invitation", digestVersion: "sha256-v1", proofDigest: String(row.proof_digest), status: row.status as Invitation["status"], deliveryStatus: row.delivery_status as Invitation["deliveryStatus"], version: Number(row.version), issuedAt: String(row.issued_at), expiresAt: String(row.expires_at), acceptedAt: row.accepted_at as string | null, acceptedByUserId: row.accepted_by_user_id as UserId | null, acceptedIp: row.accepted_ip as string | null, acceptedUserAgent: row.accepted_user_agent as string | null, rejectedAt: row.rejected_at as string | null, revokedAt: row.revoked_at as string | null, supersededAt: row.superseded_at as string | null, updatedAt: String(row.updated_at) }; }

@@ -35,3 +35,18 @@ export interface CompanyDomainRepositoryPort {
   createWithEvents(context: WorkspaceContext, company: Company, events: readonly CompanyEvent[]): CreateCompanyPersistenceResult;
   saveWithEvents(context: WorkspaceContext, company: Company, expectedVersion: number, events: readonly CompanyEvent[]): SaveCompanyPersistenceResult;
 }
+
+export interface AsyncCompanyDomainRepositoryPort {
+  findById(context: WorkspaceContext, companyId: CompanyId): Promise<Company | null>;
+  findBySlug(context: WorkspaceContext, slug: CompanySlug): Promise<Company | null>;
+  listByWorkspace(context: WorkspaceContext): Promise<readonly Company[]>;
+  existsBySlug(context: WorkspaceContext, slug: CompanySlug, excludingCompanyId?: CompanyId): Promise<boolean>;
+  existsByNormalizedName(context: WorkspaceContext, normalizedName: string, excludingCompanyId?: CompanyId): Promise<boolean>;
+  createWithEvents(context: WorkspaceContext, company: Company, events: readonly CompanyEvent[]): Promise<CreateCompanyPersistenceResult>;
+  saveWithEvents(context: WorkspaceContext, company: Company, expectedVersion: number, events: readonly CompanyEvent[]): Promise<SaveCompanyPersistenceResult>;
+}
+
+/** Narrow async read seam for live operational projections. */
+export interface AsyncCompanyLookupPort {
+  findById(context: WorkspaceContext, companyId: CompanyId): Promise<Company | null>;
+}

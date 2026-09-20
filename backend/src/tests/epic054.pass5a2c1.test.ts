@@ -23,8 +23,8 @@ test("EPIC054 PASS5A2C1 persists Assistant configuration, capabilities, defaults
     assert.equal((await createAsyncWorkspaceCompanyPersistence(database).companies.createWithEvents(context,company,[event(company)])).status,"created");
     const assistants=createAsyncAssistantPersistence(database),profile=reconstructAssistantProfile({id:assistantProfileId("asp_00000000000000000000000000005421"),companyId:5421,name:"Atlas",normalizedName:"atlas",description:null,businessRole:null,objective:null,audience:null,tone:"friendly",assistantLanguage:"en",welcomeMessage:null,fallbackMessage:"A human will help.",status:"ready",createdAt:at,updatedAt:at,archivedAt:null});
     events.length=0;const turn=new Promise<void>(resolve=>setImmediate(()=>{events.push("event-loop");resolve();}));
-    assert.equal((await assistants.profiles.listActive(context,5421))?.length,0);await turn;assert.equal(events[0],"event-loop");assert.equal(events.filter(event=>event==="query").length,2);
-    assert.equal((await assistants.profiles.create(context,5421,profile))?.id,profile.id);
+    const listed=await assistants.profiles.listActive(context,5421);assert.equal(listed.status,"found");if(listed.status==="found")assert.equal(listed.profiles.length,0);await turn;assert.equal(events[0],"event-loop");assert.equal(events.filter(event=>event==="query").length,2);
+    const created=await assistants.profiles.create(context,5421,profile);assert.equal(created.status,"created");if(created.status==="created")assert.equal(created.profile.id,profile.id);
     await database.execute("INSERT INTO users(id,status,full_name,locale,created_at,updated_at) VALUES(?,?,?,?,?,?)",["actor-pass5a2c1","active",null,"en",at,at]);
     assert.equal(await assistants.capabilities.replaceForProfile(context,5421,profile.id,[assistantCapabilityKey("live_data.read")],"actor-pass5a2c1",at),true);
     assert.deepEqual(await assistants.capabilities.listForProfile(context,5421,profile.id),[assistantCapabilityKey("live_data.read")]);

@@ -12,53 +12,55 @@ export interface ResolvedPublicWebChatSession { readonly workspaceId:number; rea
 export class PublicWebChatSessionService {
   public constructor(private readonly connections: WebChatConnectionService, private readonly conversations: ConversationService, private readonly sessions: WebChatSessionRepositoryPort, private readonly clock: PublicWebChatSessionClock, private readonly lifetimeMilliseconds = 24 * 60 * 60 * 1000) {}
 
-  public start(connectionPublicId: unknown, currentRawToken: string | null): PublicWebChatSessionResult {
-    const connection = this.connections.resolveActiveByPublicId(connectionPublicId);
+  public async start(connectionPublicId: unknown, currentRawToken: string | null, onCreated?: (session: Pick<ResolvedPublicWebChatSession, "sessionId" | "conversationId">) => Promise<void>): Promise<PublicWebChatSessionResult> {
+    const connection = await this.connections.resolveActiveByPublicId(connectionPublicId);
     if (!connection) throw new PublicWebChatSessionUnavailableError();
     if (currentRawToken) {
-      const existing = this.resolve(currentRawToken, false);
+      const existing = await this.resolve(currentRawToken, false);
       if (existing && existing.connectionId === connection.id) return { state: "active", expiresAt: existing.context.expiresAt, rawToken: currentRawToken };
     }
     const rawToken = randomBytes(32).toString("base64url"), now = this.clock.now(), expiresAt = new Date(Date.parse(now) + this.lifetimeMilliseconds).toISOString();
-    this.sessions.transaction(() => {
-      const conversation = this.conversations.open({ workspaceId: connection.workspaceId, workspaceKey: "public" }, connection.companyId, "web_chat");
-      const visitor = this.conversations.addParticipant({ workspaceId: connection.workspaceId, workspaceKey: "public" }, connection.companyId, conversation.id, { type: "anonymous_visitor", reference: null });
-      const responder = this.conversations.addParticipant({ workspaceId: connection.workspaceId, workspaceKey: "public" }, connection.companyId, conversation.id, { type: "assistant", reference: connection.assistantProfileId });
-      this.sessions.create(reconstructWebChatSession({ id: webChatSessionId(`wcs_${randomUUID().replaceAll("-", "")}`), webChatConnectionId: connection.id, conversationId: conversation.id, visitorParticipantId: visitor.id, responderParticipantId: responder.id, tokenDigest: digest(rawToken), state: "active", createdAt: now, updatedAt: now, expiresAt, lastSeenAt: now }));
+    const context = { workspaceId: connection.workspaceId, workspaceKey: "public" };
+    await this.sessions.transaction(async () => {
+      const conversation = await this.conversations.open(context, connection.companyId, "web_chat");
+      const visitor = await this.conversations.addParticipant(context, connection.companyId, conversation.id, { type: "anonymous_visitor", reference: null });
+      const responder = await this.conversations.addParticipant(context, connection.companyId, conversation.id, { type: "assistant", reference: connection.assistantProfileId });
+      const session = await this.sessions.create(reconstructWebChatSession({ id: webChatSessionId(`wcs_${randomUUID().replaceAll("-", "")}`), webChatConnectionId: connection.id, conversationId: conversation.id, visitorParticipantId: visitor.id, responderParticipantId: responder.id, tokenDigest: digest(rawToken), state: "active", createdAt: now, updatedAt: now, expiresAt, lastSeenAt: now }));
+      await onCreated?.({ sessionId: session.id, conversationId: session.conversationId });
     });
     return { state: "active", expiresAt, rawToken };
   }
 
-  public state(connectionPublicId: unknown, rawToken: string | null): { state: "active"; expiresAt: string } {
-    const context = this.resolveSessionForConnection(connectionPublicId, rawToken);
+  public async state(connectionPublicId: unknown, rawToken: string | null): Promise<{ state: "active"; expiresAt: string }> {
+    const context = await this.resolveSessionForConnection(connectionPublicId, rawToken);
     if (!context) throw new PublicWebChatSessionUnavailableError();
     return { state: "active", expiresAt: context.expiresAt };
   }
 
-  public close(connectionPublicId: unknown, rawToken: string | null): void {
+  public async close(connectionPublicId: unknown, rawToken: string | null): Promise<void> {
     if (typeof connectionPublicId !== "string" || !rawToken || !/^[A-Za-z0-9_-]{43}$/.test(rawToken)) throw new PublicWebChatSessionUnavailableError();
-    const session = this.sessions.findForCloseByTokenDigest(digest(rawToken), connectionPublicId);
+    const session = await this.sessions.findForCloseByTokenDigest(digest(rawToken), connectionPublicId);
     if (!session) throw new PublicWebChatSessionUnavailableError();
-    this.sessions.updateState(session.id, "active", "closed", this.clock.now());
+    await this.sessions.updateState(session.id, "active", "closed", this.clock.now());
   }
 
-  public resolveSession(rawToken: string): ResolvedPublicWebChatSession | null { const resolved = this.resolve(rawToken, true); return resolved?.context ?? null; }
+  public async resolveSession(rawToken: string): Promise<ResolvedPublicWebChatSession | null> { const resolved = await this.resolve(rawToken, true); return resolved?.context ?? null; }
 
-  public resolveSessionForConnection(connectionPublicId: unknown, rawToken: string | null): ResolvedPublicWebChatSession | null {
-    const connection = this.connections.resolveActiveByPublicId(connectionPublicId), resolved = rawToken ? this.resolve(rawToken, true) : null;
+  public async resolveSessionForConnection(connectionPublicId: unknown, rawToken: string | null): Promise<ResolvedPublicWebChatSession | null> {
+    const connection = await this.connections.resolveActiveByPublicId(connectionPublicId), resolved = rawToken ? await this.resolve(rawToken, true) : null;
     return connection && resolved && resolved.connectionId === connection.id ? resolved.context : null;
   }
 
-  private resolve(rawToken: string, touch: boolean): { session: WebChatSession; connectionId: string; context: ResolvedPublicWebChatSession } | null {
+  private async resolve(rawToken: string, touch: boolean): Promise<{ session: WebChatSession; connectionId: string; context: ResolvedPublicWebChatSession } | null> {
     if (!/^[A-Za-z0-9_-]{43}$/.test(rawToken)) return null;
-    const session = this.sessions.findByTokenDigest(digest(rawToken));
+    const session = await this.sessions.findByTokenDigest(digest(rawToken));
     if (!session || session.state !== "active" || Date.parse(session.expiresAt) <= Date.parse(this.clock.now())) {
-      if (session?.state === "active") this.sessions.updateState(session.id, "active", "expired", this.clock.now());
+      if (session?.state === "active") await this.sessions.updateState(session.id, "active", "expired", this.clock.now());
       return null;
     }
-    const connection = this.connections.resolveActiveById(session.webChatConnectionId);
+    const connection = await this.connections.resolveActiveById(session.webChatConnectionId);
     if (!connection) return null;
-    const updated = touch ? this.sessions.updateLastSeen(session.id, "active", this.clock.now(), this.clock.now()) ?? session : session;
+    const updated = touch ? await this.sessions.updateLastSeen(session.id, "active", this.clock.now(), this.clock.now()) ?? session : session;
     return { session: updated, connectionId: updated.webChatConnectionId, context: { workspaceId: connection.workspaceId, companyId: connection.companyId, assistantProfileId: connection.assistantProfileId, conversationId: updated.conversationId, visitorParticipantId: updated.visitorParticipantId, responderParticipantId: updated.responderParticipantId, sessionId: updated.id, expiresAt: updated.expiresAt } };
   }
 }

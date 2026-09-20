@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CompanyRepositoryPort } from "../../application/ports/repositories.js";
+import type { CompanyPersistencePort } from "../../application/ports/repositories.js";
 import type { AssistantProfileRepositoryPort } from "../../assistant/application/ports.js";
 import { assistantProfileId } from "../../assistant/domain/assistantProfile.js";
 import { AssistantProfileExecutionPolicy, AssistantProfilePolicyError } from "../../assistant/domain/assistantProfilePolicies.js";
@@ -19,22 +19,22 @@ export class WebChatConnectionService {
   private readonly profilePolicy = new AssistantProfileExecutionPolicy();
 
   public constructor(
-    private readonly companies: CompanyRepositoryPort,
+    private readonly companies: CompanyPersistencePort,
     private readonly profiles: AssistantProfileRepositoryPort,
     private readonly connections: WebChatConnectionRepositoryPort,
     private readonly clock: WebChatConnectionClock,
     private readonly entitlements?: BillingEntitlementPort,
   ) {}
 
-  public create(context: WorkspaceContext, companyIdValue: unknown, value: unknown): WebChatConnection {
+  public async create(context: WorkspaceContext, companyIdValue: unknown, value: unknown): Promise<WebChatConnection> {
     const companyId = parseCompanyId(companyIdValue), profileId = createInput(value);
-    this.company(context, companyId);
-    const profile = this.profiles.findById(context, companyId, profileId);
+    await this.company(context, companyId);
+    const profile = await this.profiles.findById(context, companyId, profileId);
     if (!profile) throw new WebChatConnectionNotFoundError("Assistant Profile was not found.");
     this.assertExecutable(profile);
-    this.assertCapacity(context);
+    await this.assertCapacity(context);
     const now = this.clock.now();
-    const created = this.connections.create(context, reconstructWebChatConnection({
+    const created = await this.connections.create(context, reconstructWebChatConnection({
       id: webChatConnectionId(`wcc_${randomUUID().replaceAll("-", "")}`),
       publicId: webChatConnectionPublicId(`wcp_${randomUUID().replaceAll("-", "")}`),
       workspaceId: context.workspaceId, companyId, assistantProfileId: profile.id, status: "active", createdAt: now, updatedAt: now,
@@ -43,51 +43,51 @@ export class WebChatConnectionService {
     return created;
   }
 
-  public list(context: WorkspaceContext, companyIdValue: unknown): WebChatConnection[] {
-    const id = parseCompanyId(companyIdValue); this.company(context, id); return this.connections.listByCompany(context, id);
+  public async list(context: WorkspaceContext, companyIdValue: unknown): Promise<WebChatConnection[]> {
+    const id = parseCompanyId(companyIdValue); await this.company(context, id); return this.connections.listByCompany(context, id);
   }
 
-  public get(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): WebChatConnection {
+  public async get(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): Promise<WebChatConnection> {
     const company = parseCompanyId(companyIdValue), id = parseConnectionId(connectionIdValue);
-    const value = this.connections.findById(context, company, id);
+    const value = await this.connections.findById(context, company, id);
     if (!value) throw new WebChatConnectionNotFoundError("Web Chat Connection was not found.");
     return value;
   }
 
-  public setStatus(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown, value: unknown): WebChatConnection {
-    const current = this.get(context, companyIdValue, connectionIdValue), status = statusInput(value);
+  public async setStatus(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown, value: unknown): Promise<WebChatConnection> {
+    const current = await this.get(context, companyIdValue, connectionIdValue), status = statusInput(value);
     if (status === "active") {
-      this.company(context, current.companyId);
-      const profile = this.profiles.findById(context, current.companyId, current.assistantProfileId);
+      await this.company(context, current.companyId);
+      const profile = await this.profiles.findById(context, current.companyId, current.assistantProfileId);
       if (!profile) throw new WebChatConnectionNotFoundError("Assistant Profile was not found.");
       this.assertExecutable(profile);
     }
     if (current.status === status) return current;
-    if (current.status !== "active" && status === "active") this.assertCapacity(context);
-    const updated = this.connections.updateStatus(context, current.companyId, current.id, status, this.clock.now());
+    if (current.status !== "active" && status === "active") await this.assertCapacity(context);
+    const updated = await this.connections.updateStatus(context, current.companyId, current.id, status, this.clock.now());
     if (!updated) throw new WebChatConnectionNotFoundError("Web Chat Connection was not found.");
     return updated;
   }
 
-  public resolveActiveByPublicId(publicIdValue: unknown): WebChatConnection | null {
+  public async resolveActiveByPublicId(publicIdValue: unknown): Promise<WebChatConnection | null> {
     if (typeof publicIdValue !== "string") return null;
-    try { return this.active(this.connections.findActiveByPublicId(webChatConnectionPublicId(publicIdValue))); }
+    try { return await this.active(await this.connections.findActiveByPublicId(webChatConnectionPublicId(publicIdValue))); }
     catch { return null; }
   }
 
-  public resolveActiveById(connectionIdValue: unknown): WebChatConnection | null {
+  public async resolveActiveById(connectionIdValue: unknown): Promise<WebChatConnection | null> {
     if (typeof connectionIdValue !== "string") return null;
-    try { return this.active(this.connections.findActiveById(webChatConnectionId(connectionIdValue))); }
+    try { return await this.active(await this.connections.findActiveById(webChatConnectionId(connectionIdValue))); }
     catch { return null; }
   }
 
-  private company(context: WorkspaceContext, id: number): void {
-    if (!this.companies.findById(context, id)) throw new WebChatConnectionNotFoundError("Company was not found.");
+  private async company(context: WorkspaceContext, id: number): Promise<void> {
+    if (!await this.companies.findById(context, id)) throw new WebChatConnectionNotFoundError("Company was not found.");
   }
 
-  private active(connection: WebChatConnection | null): WebChatConnection | null {
+  private async active(connection: WebChatConnection | null): Promise<WebChatConnection | null> {
     if (!connection) return null;
-    const profile = this.profiles.findById({ workspaceId: connection.workspaceId, workspaceKey: "public" }, connection.companyId, connection.assistantProfileId);
+    const profile = await this.profiles.findById({ workspaceId: connection.workspaceId, workspaceKey: "public" }, connection.companyId, connection.assistantProfileId);
     if (!profile) return null;
     try { this.profilePolicy.assert(profile); return connection; }
     catch { return null; }
@@ -100,8 +100,8 @@ export class WebChatConnectionService {
       throw error;
     }
   }
-  private assertCapacity(context: WorkspaceContext): void {
-    try { if (this.entitlements) assertBillingEntitlement(this.entitlements.mayActivateChannel(context.workspaceId)); }
+  private async assertCapacity(context: WorkspaceContext): Promise<void> {
+    try { if (this.entitlements) assertBillingEntitlement(await this.entitlements.mayActivateChannel(context.workspaceId)); }
     catch (error: unknown) { if (error instanceof BillingEntitlementDeniedError) throw new WebChatConnectionCapacityError(error.message); throw error; }
   }
 }

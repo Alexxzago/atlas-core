@@ -5,8 +5,8 @@ export class AbuseLimitExceededError extends Error { public constructor(public r
 
 export class RateLimitService {
   public constructor(private readonly limits: SharedRateLimitRepository, private readonly now: () => string) {}
-  public enforce(scope: string, scopeType: "identity" | "actor" | "company", policy: RateLimitPolicy): void {
-    const result = this.limits.consume(scope, policy, this.now());
+  public async enforce(scope: string, scopeType: "identity" | "actor" | "company", policy: RateLimitPolicy): Promise<void> {
+    const result = await this.limits.consume(scope, policy, this.now());
     if (result.allowed) return;
     operationalLogger.warn("abuse_limit_exceeded", { operation: policy.action, scopeType, outcome: "rejected", safeErrorCategory: "rate_limited" });
     throw new AbuseLimitExceededError(result.retryAfterSeconds);

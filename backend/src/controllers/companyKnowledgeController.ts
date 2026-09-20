@@ -7,19 +7,19 @@ import { abuseScope } from "../abuse/sharedRateLimitRepository.js";
 import { AbuseLimitExceededError, knowledgeIngestionActorLimit, knowledgeIngestionCompanyLimit, type RateLimitService } from "../abuse/rateLimitService.js";
 
 export function createCompanyKnowledgeControllers(service:KnowledgeService,limits?:RateLimitService):Record<string,(context:WorkspaceContext,actor:ActorContext)=>RequestHandler>{
-  const wrap=(handler:(c:WorkspaceContext,a:ActorContext,req:Parameters<RequestHandler>[0],res:Response)=>unknown,ingestion=false)=>(c:WorkspaceContext,a:ActorContext):RequestHandler=>async(req,res)=>{res.setHeader("Cache-Control","no-store, private");res.setHeader("Pragma","no-cache");try{if(ingestion){const companyId=Number(req.params.companyId);service.list(c,companyId);limits?.enforce(abuseScope("workspace",c.workspaceId,"company",companyId,"actor",a.userId),"actor",knowledgeIngestionActorLimit);limits?.enforce(abuseScope("workspace",c.workspaceId,"company",companyId),"company",knowledgeIngestionCompanyLimit);}await handler(c,a,req,res);}catch(error){respond(res,error);}};
+  const wrap=(handler:(c:WorkspaceContext,a:ActorContext,req:Parameters<RequestHandler>[0],res:Response)=>unknown,ingestion=false)=>(c:WorkspaceContext,a:ActorContext):RequestHandler=>async(req,res)=>{res.setHeader("Cache-Control","no-store, private");res.setHeader("Pragma","no-cache");try{if(ingestion){const companyId=Number(req.params.companyId);await service.list(c,companyId);await limits?.enforce(abuseScope("workspace",c.workspaceId,"company",companyId,"actor",a.userId),"actor",knowledgeIngestionActorLimit);await limits?.enforce(abuseScope("workspace",c.workspaceId,"company",companyId),"company",knowledgeIngestionCompanyLimit);}await handler(c,a,req,res);}catch(error){respond(res,error);}};
   return{
-    list:wrap((c,_a,req,res)=>res.json(service.list(c,req.params.companyId))),
-    revision:wrap((c,_a,req,res)=>res.json(service.revision(c,req.params.companyId,req.params.sourceId,req.params.revisionId))),
-    publication:wrap((c,_a,req,res)=>res.json(service.current(c,req.params.companyId))),
+    list:wrap(async(c,_a,req,res)=>res.json(await service.list(c,req.params.companyId))),
+    revision:wrap(async(c,_a,req,res)=>res.json(await service.revision(c,req.params.companyId,req.params.sourceId,req.params.revisionId))),
+    publication:wrap(async(c,_a,req,res)=>res.json(await service.current(c,req.params.companyId))),
     createManual:wrap(async(c,a,req,res)=>res.status(201).json(await service.create(c,a,req.params.companyId,"manual_text",req.body)),true),
     createUrl:wrap(async(c,a,req,res)=>res.status(201).json(await service.create(c,a,req.params.companyId,"public_url",req.body)),true),
     createPdf:wrap(async(c,a,req,res)=>res.status(201).json(await service.create(c,a,req.params.companyId,"pdf",{name:req.query.name},buffer(req.body))),true),
     reviseManual:wrap(async(c,a,req,res)=>res.status(201).json(await service.revise(c,a,req.params.companyId,req.params.sourceId,"manual_text",req.body)),true),
     reviseUrl:wrap(async(c,a,req,res)=>res.status(201).json(await service.revise(c,a,req.params.companyId,req.params.sourceId,"public_url",req.body)),true),
     revisePdf:wrap(async(c,a,req,res)=>res.status(201).json(await service.revise(c,a,req.params.companyId,req.params.sourceId,"pdf",{expectedSourceVersion:Number(req.query.expectedSourceVersion)},buffer(req.body))),true),
-    archive:wrap((c,_a,req,res)=>res.json(service.archive(c,req.params.companyId,req.params.sourceId,req.body))),
-    publish:wrap((c,a,req,res)=>{const result=service.publish(c,a,req.params.companyId,req.body);res.status(result.status==="created"?201:200).json(result.version);}),
+    archive:wrap(async(c,_a,req,res)=>res.json(await service.archive(c,req.params.companyId,req.params.sourceId,req.body))),
+    publish:wrap(async(c,a,req,res)=>{const result=await service.publish(c,a,req.params.companyId,req.body);res.status(result.status==="created"?201:200).json(result.version);}),
   };
 }
 function buffer(value:unknown):Uint8Array{if(!Buffer.isBuffer(value))throw new KnowledgeDomainError("unsupported_pdf");return value;}

@@ -22,6 +22,18 @@ export interface ActivationVerificationAttempt {
 }
 
 export interface ActivationVerificationAttemptRepositoryPort {
+  create(context: WorkspaceContext, value: ActivationVerificationAttempt): Promise<ActivationVerificationAttempt>;
+  findLatest(context: WorkspaceContext, companyId: number, webChatConnectionId: string): Promise<ActivationVerificationAttempt | null>;
+  hasSucceeded(context: WorkspaceContext, companyId: number, webChatConnectionId: string): Promise<boolean>;
+  findClaimableByTokenDigest(tokenDigest: string): Promise<ActivationVerificationAttempt | null>;
+  claim(id: string, webChatSessionId: string, conversationId: string, at: string): Promise<ActivationVerificationAttempt | null>;
+  succeedForTurn(webChatSessionId: string, conversationId: string, inboundMessageId: string, executionRecordId: string, outcomeRef: "answered" | "safe_fallback", at: string): Promise<ActivationVerificationAttempt | null>;
+  failForSession(webChatSessionId: string, conversationId: string, at: string): Promise<ActivationVerificationAttempt | null>;
+  expire(id: string, at: string): Promise<ActivationVerificationAttempt | null>;
+}
+
+/** Compatibility contract for the synchronous activation runtime. */
+export interface SynchronousActivationVerificationAttemptRepositoryPort {
   create(context: WorkspaceContext, value: ActivationVerificationAttempt): ActivationVerificationAttempt;
   findLatest(context: WorkspaceContext, companyId: number, webChatConnectionId: string): ActivationVerificationAttempt | null;
   hasSucceeded(context: WorkspaceContext, companyId: number, webChatConnectionId: string): boolean;

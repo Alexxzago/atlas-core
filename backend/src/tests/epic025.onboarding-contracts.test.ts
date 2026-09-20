@@ -97,10 +97,10 @@ test("Company onboarding enforces commercial company limits while Company Core r
     assert.ok(controls.updateWorkspaceLimits("manage", workspace.id, { maxCompanies: 1, maxAssistantProfiles: null, maxActiveChannels: null }, current.version, now));
     const denied = await fetch(`${base}/onboarding`, { method: "POST", headers, body: JSON.stringify({ name: "Second", website: "https://example.test" }) });
     assert.equal(denied.status, 409); assert.equal((await denied.json() as { error: { code: string } }).error.code, "commercial_limit_reached");
-    const afterDenied = service.listCompanies(context); assert.equal(afterDenied.status, "success"); if (afterDenied.status === "success") assert.equal(afterDenied.companies.length, 1);
+    const afterDenied = await service.listCompanies(context); assert.equal(afterDenied.status, "success"); if (afterDenied.status === "success") assert.equal(afterDenied.companies.length, 1);
     const raised = controls.workspace(workspace.id)!;
     assert.ok(controls.updateWorkspaceLimits("manage", workspace.id, { maxCompanies: 2, maxAssistantProfiles: null, maxActiveChannels: null }, raised.version, now));
     assert.equal((await fetch(`${base}/onboarding`, { method: "POST", headers, body: JSON.stringify({ name: "Second", website: "https://example.test" }) })).status, 201);
-    const afterRaised = service.listCompanies(context); assert.equal(afterRaised.status, "success"); if (afterRaised.status === "success") assert.equal(afterRaised.companies.length, 2);
+    const afterRaised = await service.listCompanies(context); assert.equal(afterRaised.status, "success"); if (afterRaised.status === "success") assert.equal(afterRaised.companies.length, 2);
   } finally { await http.close(); db.close(); }
 });

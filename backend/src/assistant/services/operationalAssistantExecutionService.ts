@@ -1,4 +1,4 @@
-import type { CompanyRepositoryPort, KnowledgeRepositoryPort } from "../../application/ports/repositories.js";
+import type { CompanyPersistencePort, KnowledgeRepositoryPort } from "../../application/ports/repositories.js";
 import type { CompanyKnowledgeVersion } from "../../knowledge/domain/knowledge.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import type { AssistantExecutionResult } from "../application/assistantExecution.js";
@@ -21,8 +21,8 @@ export class OperationalAssistantExecutionService {
   private readonly executionPolicy = new AssistantProfileExecutionPolicy();
 
   public constructor(
-    private readonly companies: CompanyRepositoryPort,
-    private readonly knowledge: KnowledgeRepositoryPort & { loadCurrentVersion(context: WorkspaceContext, companyId: number): CompanyKnowledgeVersion | null },
+    private readonly companies: CompanyPersistencePort,
+    private readonly knowledge: KnowledgeRepositoryPort & { loadCurrentVersion(context: WorkspaceContext, companyId: number): Promise<CompanyKnowledgeVersion | null> },
     private readonly profiles: AssistantProfileRepositoryPort,
     private readonly runtime: OperationalAssistantRuntime,
     private readonly budget: OperationalExecutionBudgetPort,
@@ -33,9 +33,9 @@ export class OperationalAssistantExecutionService {
   public async execute(context: WorkspaceContext, companyIdValue: unknown, input: unknown, actorId = "unknown"): Promise<AssistantExecutionResult> {
     const scopedCompanyId = parseCompanyId(companyIdValue);
     const parsed = parseInput(input);
-    const company = this.companies.findById(context, scopedCompanyId);
+    const company = await this.companies.findById(context, scopedCompanyId);
     if (!company) throw new OperationalAssistantExecutionNotFoundError();
-    const profile = this.profiles.findById(context, scopedCompanyId, parsed.profileId);
+    const profile = await this.profiles.findById(context, scopedCompanyId, parsed.profileId);
     if (!profile) throw new OperationalAssistantExecutionNotFoundError();
     try { this.executionPolicy.assert(profile); }
     catch (error: unknown) {
@@ -43,16 +43,16 @@ export class OperationalAssistantExecutionService {
       throw error;
     }
     if (company.status !== "ready") throw new OperationalAssistantCompanyNotReadyError();
-    const knowledge = this.knowledge.loadCurrentVersion(context, scopedCompanyId);
+    const knowledge = await this.knowledge.loadCurrentVersion(context, scopedCompanyId);
     if (!knowledge) throw new OperationalAssistantKnowledgeUnavailableError();
     let lease;
-    try { lease = this.budget.acquire(context, scopedCompanyId, actorId); }
+    try { lease = await this.budget.acquire(context, scopedCompanyId, actorId); }
     catch (error: unknown) { if (error instanceof AbuseLimitExceededError) throw new OperationalAssistantExecutionRateLimitedError(error.retryAfterSeconds); throw error; }
     if (!lease) throw new OperationalAssistantExecutionRateLimitedError();
     try {
       return (await this.runtime.execute(company, profile, knowledge, parsed.message, [], {
         purpose: "operational_execution", provider: this.provider, fallbackOnUnavailable: true,
-        ...(this.retrieval ? { retrieval: this.retrieval.context(context, scopedCompanyId, knowledge.sourceRevisionIds, parsed.message) } : {}),
+        ...(this.retrieval ? { retrieval: await this.retrieval.context(context, scopedCompanyId, knowledge.sourceRevisionIds, parsed.message) } : {}),
       })).response;
     } finally { lease.release(); }
   }

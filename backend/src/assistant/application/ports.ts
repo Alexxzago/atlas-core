@@ -16,8 +16,8 @@ export type ListActiveAssistantProfilesResult =
   | { status: "company_not_found" };
 
 export interface AssistantProfileRepositoryPort {
-  listActive(context: WorkspaceContext, companyId: number): ListActiveAssistantProfilesResult;
-  findById(context: WorkspaceContext, companyId: number, assistantProfileId: AssistantProfileId): AssistantProfile | null;
-  create(context: WorkspaceContext, companyId: number, profile: AssistantProfile): CreateAssistantProfileResult;
-  update(context: WorkspaceContext, companyId: number, profile: AssistantProfile): UpdateAssistantProfileResult;
+  listActive(context: WorkspaceContext, companyId: number): Promise<ListActiveAssistantProfilesResult>;
+  findById(context: WorkspaceContext, companyId: number, assistantProfileId: AssistantProfileId): Promise<AssistantProfile | null>;
+  create(context: WorkspaceContext, companyId: number, profile: AssistantProfile): Promise<CreateAssistantProfileResult>;
+  update(context: WorkspaceContext, companyId: number, profile: AssistantProfile): Promise<UpdateAssistantProfileResult>;
 }

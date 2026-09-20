@@ -12,7 +12,6 @@ import { runMigrations } from "../config/migrations.js";
 import { BillingAccountRepository, BillingCatalogRepository, BillingEntitlementSnapshotRepository, BillingSubscriptionRepository } from "../repositories/billingRepository.js";
 import { CommercialControlsRepository } from "../repositories/commercialControlsRepository.js";
 import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
-import { BillingEntitlementService } from "../billing/services/billingEntitlementService.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
 import { CompanyService } from "../services/companyService.js";
 import { CompanyCapacityError } from "../services/companyValidation.js";
@@ -29,14 +28,14 @@ import { webChatConnectionId } from "../webChat/domain/webChatConnection.js";
 import { billingOperationFingerprint, billingProviderIdempotencyKey } from "../billing/domain/billingOperations.js";
 import { DeterministicFakeBillingProvider, mercadoPagoBillingProviderCapabilities, stripeBillingProviderCapabilities } from "../billing/application/billingProvider.js";
 import { BillingOperationRepository } from "../repositories/billingOperationRepository.js";
-import { BillingOperationService } from "../billing/application/billingOperationService.js";
+import { BillingOperationService as AsyncBillingOperationService } from "../billing/application/billingOperationService.js";
 import { BillingProviderRegistry } from "../billing/application/billingProviderRegistry.js";
 import type { BillingProvider, BillingProviderResult } from "../billing/application/billingProvider.js";
 import { StripeBillingConfigurationError, StripeBillingProvider, stripeBillingProviderFromEnvironment } from "../billing/providers/stripeBillingProvider.js";
 import { MercadoPagoBillingConfigurationError, MercadoPagoBillingProvider, mercadoPagoBillingProviderFromEnvironment } from "../billing/providers/mercadoPagoBillingProvider.js";
 import { BillingProviderConfigurationError, billingProviderKindsFromEnvironment, billingProviderRegistryFromEnvironment } from "../billing/application/billingProviderConfiguration.js";
-import { BillingPayerIdentityResolver } from "../billing/application/billingPayerIdentityResolver.js";
-import { BillingPayerIdentityService } from "../billing/application/billingPayerIdentityService.js";
+import { BillingPayerIdentityResolver as AsyncBillingPayerIdentityResolver } from "../billing/application/billingPayerIdentityResolver.js";
+import { BillingPayerIdentityService as AsyncBillingPayerIdentityService } from "../billing/application/billingPayerIdentityService.js";
 import { effectiveSubscriptionStateForEvidence, entitlementForEffectiveSubscription } from "../billing/domain/effectiveSubscriptionMapper.js";
 import { BillingSubscriptionReadService } from "../billing/services/billingSubscriptionReadService.js";
 import { createHmac } from "node:crypto";
@@ -45,14 +44,77 @@ import { BillingWebhookRepository } from "../repositories/billingWebhookReposito
 import { BillingReconciliationRepository } from "../repositories/billingReconciliationRepository.js";
 import { BillingReconciliationWorker } from "../billing/services/billingReconciliationWorker.js";
 import { BillingOperationRecoveryWorker } from "../billing/services/billingOperationRecoveryWorker.js";
-import { BillingApplicationService } from "../billing/application/billingApplicationService.js";
+import { BillingApplicationService as AsyncBillingApplicationService } from "../billing/application/billingApplicationService.js";
 import { createBillingControllers } from "../controllers/billingController.js";
 import { createBillingRouter } from "../routes/billing.js";
 import { createBillingWebhookController } from "../controllers/billingWebhookController.js";
 import { createBillingWebhookRouter } from "../routes/billingWebhook.js";
+import { asyncBillingEntitlements, asyncBillingPersistence } from "./helpers/asyncBillingTestComposition.js";
 import { createApp } from "../app.js";
 
 const at = "2026-09-01T00:00:00.000Z", stripeTimestamp = Math.floor(Date.parse(at) / 1_000);
+class BillingOperationService {
+  public readonly service: AsyncBillingOperationService;
+  public constructor(accounts: BillingAccountRepository, _catalog: BillingCatalogRepository, _subscriptions: BillingSubscriptionRepository, _operations: BillingOperationRepository, providers: BillingProviderRegistry, now: () => string) {
+    const persistence = asyncBillingPersistence((accounts as unknown as { db: DatabaseSync }).db);
+    this.service = new AsyncBillingOperationService(persistence.customer, persistence.operations, providers, now, persistence.payerIdentities);
+  }
+  public checkout(...input: Parameters<AsyncBillingOperationService["checkout"]>) { return this.service.checkout(...input); }
+  public portal(...input: Parameters<AsyncBillingOperationService["portal"]>) { return this.service.portal(...input); }
+  public cancelAtPeriodEnd(...input: Parameters<AsyncBillingOperationService["cancelAtPeriodEnd"]>) { return this.service.cancelAtPeriodEnd(...input); }
+  public reactivate(...input: Parameters<AsyncBillingOperationService["reactivate"]>) { return this.service.reactivate(...input); }
+  public supportedManagementActions(...input: Parameters<AsyncBillingOperationService["supportedManagementActions"]>) { return this.service.supportedManagementActions(...input); }
+  public managementCapabilities(...input: Parameters<AsyncBillingOperationService["managementCapabilities"]>) { return this.service.managementCapabilities(...input); }
+}
+class BillingApplicationService {
+  private readonly service: AsyncBillingApplicationService;
+  public constructor(database: DatabaseSync, operations: BillingOperationService | null, targets: Readonly<{ checkoutSuccess: string; checkoutCancel: string; portalReturn: string }>, now: () => string = () => at) {
+    const persistence = asyncBillingPersistence(database);
+    const operationService = operations?.service ?? new AsyncBillingOperationService(persistence.customer, persistence.operations, new BillingProviderRegistry(), now, persistence.payerIdentities);
+    this.service = new AsyncBillingApplicationService(persistence.customer, persistence.payerIdentities, operationService, targets, now);
+  }
+  public summary(...input: Parameters<AsyncBillingApplicationService["summary"]>) { return this.service.summary(...input); }
+  public customerSummary(...input: Parameters<AsyncBillingApplicationService["customerSummary"]>) { return this.service.customerSummary(...input); }
+  public entitlementsFor(...input: Parameters<AsyncBillingApplicationService["entitlementsFor"]>) { return this.service.entitlementsFor(...input); }
+  public catalogForWorkspace(...input: Parameters<AsyncBillingApplicationService["catalogForWorkspace"]>) { return this.service.catalogForWorkspace(...input); }
+  public offersForWorkspace(...input: Parameters<AsyncBillingApplicationService["offersForWorkspace"]>) { return this.service.offersForWorkspace(...input); }
+  public managementActionsFor(...input: Parameters<AsyncBillingApplicationService["managementActionsFor"]>) { return this.service.managementActionsFor(...input); }
+  public payerIdentityOptionsFor(...input: Parameters<AsyncBillingApplicationService["payerIdentityOptionsFor"]>) { return this.service.payerIdentityOptionsFor(...input); }
+  public setPayerIdentity(...input: Parameters<AsyncBillingApplicationService["setPayerIdentity"]>) { return this.service.setPayerIdentity(...input); }
+  public clearPayerIdentity(...input: Parameters<AsyncBillingApplicationService["clearPayerIdentity"]>) { return this.service.clearPayerIdentity(...input); }
+  public checkout(...input: Parameters<AsyncBillingApplicationService["checkout"]>) { return this.service.checkout(...input); }
+  public checkoutOffer(...input: Parameters<AsyncBillingApplicationService["checkoutOffer"]>) { return this.service.checkoutOffer(...input); }
+  public portal(...input: Parameters<AsyncBillingApplicationService["portal"]>) { return this.service.portal(...input); }
+  public cancel(...input: Parameters<AsyncBillingApplicationService["cancel"]>) { return this.service.cancel(...input); }
+  public reactivate(...input: Parameters<AsyncBillingApplicationService["reactivate"]>) { return this.service.reactivate(...input); }
+}
+class BillingPayerIdentityResolver {
+  private readonly resolver: AsyncBillingPayerIdentityResolver;
+  public constructor(database: DatabaseSync) { this.resolver = new AsyncBillingPayerIdentityResolver(asyncBillingPersistence(database).payerIdentities); }
+  public resolveForBillingAccount(accountId: string) { return this.resolver.resolveForBillingAccount(accountId); }
+}
+class BillingPayerIdentityService {
+  private readonly persistence;
+  public constructor(private readonly database: DatabaseSync, private readonly now: () => string) { this.persistence = asyncBillingPersistence(database); }
+  public async setForWorkspace(input: Readonly<{ workspaceId: number; identityId: string; expectedVersion: number }>) {
+    const before = await this.persistence.customer.account(input.workspaceId);
+    if (!before) return { kind: "not_found" as const };
+    const result = await this.persistence.payerIdentities.setOwned(input.workspaceId, input.identityId, input.identityId, input.expectedVersion, this.now());
+    if (result !== "succeeded") return { kind: result === "not_found" ? "not_found" as const : result };
+    const account = (await this.persistence.customer.account(input.workspaceId))!;
+    return { kind: "succeeded" as const, account, changed: account.version !== before.version };
+  }
+  public async clearForWorkspace(input: Readonly<{ workspaceId: number; expectedVersion: number }>) {
+    const before = await this.persistence.customer.account(input.workspaceId);
+    if (!before) return { kind: "not_found" as const };
+    const identityId = before.billingPayerIdentityId;
+    if (!identityId) return { kind: "succeeded" as const, account: before, changed: false };
+    const result = await this.persistence.payerIdentities.clearOwned(input.workspaceId, identityId, identityId, input.expectedVersion, this.now());
+    if (result !== "succeeded") return { kind: result === "not_found" ? "not_found" as const : result };
+    const account = (await this.persistence.customer.account(input.workspaceId))!;
+    return { kind: "succeeded" as const, account, changed: account.version !== before.version };
+  }
+}
 function open(path = ":memory:"): DatabaseSync { const db = new DatabaseSync(path); db.exec("PRAGMA foreign_keys=ON"); runMigrations(db); return db; }
 function defaultWorkspace(db: DatabaseSync): number { return (db.prepare("SELECT id FROM workspaces WHERE key='default'").get() as { id:number }).id; }
 function catalogInput(overrides: Record<string, unknown> = {}) { return { planKey:"test", catalogVersion:1, displayName:"Test", interval:"month" as const, currency:"USD", amountMinor:100, lifecycle:"active" as const, maxCompanies:null, maxAssistantProfiles:null, maxActiveChannels:null, mutationEligible:true, entitlementDefinitionVersion:1, providerKind:null, providerPriceId:null, ...overrides }; }
@@ -158,7 +220,7 @@ test("EPIC046 reads paused provider evidence without changing trusted local auth
   const stripe=new StripeBillingProvider({secretKey:"sk",apiBaseUrl:"https://api.stripe.test",timeoutMs:50,allowedRedirectOrigins:["https://atlas.test"]},async(url,init)=>{assert.equal(url,"https://api.stripe.test/v1/subscriptions/sub_paused");assert.equal(init.method,"GET");return new Response(JSON.stringify({id:"sub_paused",status:"paused",current_period_start:1,current_period_end:2,trial_end:null,cancel_at_period_end:false}));});
   const evidence=await stripe.readSubscription({subscriptionReference:"sub_paused"});assert.equal(evidence.kind,"success");if(evidence.kind!=="success")throw new Error("expected evidence");assert.equal(evidence.evidence.providerEvidenceState,"paused");assert.equal(effectiveSubscriptionStateForEvidence(evidence.evidence),"paused");assert.deepEqual(entitlementForEffectiveSubscription("paused"),{state:"restricted",mutationEligible:false});
   const mercado=new MercadoPagoBillingProvider({accessToken:"token",apiBaseUrl:"https://api.mercadopago.test",timeoutMs:50,allowedRedirectOrigins:["https://atlas.test"]},async(url,init)=>{assert.equal(url,"https://api.mercadopago.test/preapproval/pre_paused");assert.equal(init.method,"GET");return new Response(JSON.stringify({id:"pre_paused",status:"paused",date_created:"2026-09-01T00:00:00Z",next_payment_date:"2026-10-01T00:00:00Z"}));});assert.equal((await mercado.readSubscription({subscriptionReference:"pre_paused"})).kind,"success");
-  const db=open();try{const workspace=defaultWorkspace(db),account=new BillingAccountRepository(db).findByWorkspace(workspace)!;db.prepare("UPDATE billing_accounts SET rollout_mode='managed',provider_kind='stripe',provider_customer_id='cus' WHERE id=?").run(account.id);db.prepare("UPDATE billing_subscriptions SET provider_kind='stripe',provider_subscription_id='sub_paused',effective_state='active' WHERE billing_account_id=?").run(account.id);const before=db.prepare("SELECT effective_state,version FROM billing_subscriptions WHERE billing_account_id=?").get(account.id),service=new BillingSubscriptionReadService(new BillingAccountRepository(db),new BillingSubscriptionRepository(db),new BillingProviderRegistry([{kind:"stripe",provider:stripe}]));const read=await service.read(workspace);assert.equal(read.kind,"available");assert.equal(read.kind==="available"&&read.effectiveState,"paused");assert.deepEqual(db.prepare("SELECT effective_state,version FROM billing_subscriptions WHERE billing_account_id=?").get(account.id),before);assert.equal(new BillingEntitlementService(db).mayCreateCompany(workspace).safeReason,"allowed");db.prepare("UPDATE billing_subscriptions SET effective_state='paused' WHERE billing_account_id=?").run(account.id);assert.equal(new BillingEntitlementService(db).mayCreateCompany(workspace).safeReason,"billing_restricted");}finally{db.close();}
+  const db=open();try{const workspace=defaultWorkspace(db),account=new BillingAccountRepository(db).findByWorkspace(workspace)!;db.prepare("UPDATE billing_accounts SET rollout_mode='managed',provider_kind='stripe',provider_customer_id='cus' WHERE id=?").run(account.id);db.prepare("UPDATE billing_subscriptions SET provider_kind='stripe',provider_subscription_id='sub_paused',effective_state='active' WHERE billing_account_id=?").run(account.id);const before=db.prepare("SELECT effective_state,version FROM billing_subscriptions WHERE billing_account_id=?").get(account.id),service=new BillingSubscriptionReadService(new BillingAccountRepository(db),new BillingSubscriptionRepository(db),new BillingProviderRegistry([{kind:"stripe",provider:stripe}])),entitlements=asyncBillingEntitlements(db);const read=await service.read(workspace);assert.equal(read.kind,"available");assert.equal(read.kind==="available"&&read.effectiveState,"paused");assert.deepEqual(db.prepare("SELECT effective_state,version FROM billing_subscriptions WHERE billing_account_id=?").get(account.id),before);assert.equal((await entitlements.mayCreateCompany(workspace)).safeReason,"allowed");db.prepare("UPDATE billing_subscriptions SET effective_state='paused' WHERE billing_account_id=?").run(account.id);db.prepare("UPDATE billing_entitlement_snapshots SET entitlement_state='restricted',mutation_eligible=0 WHERE billing_account_id=?").run(account.id);assert.equal((await entitlements.mayCreateCompany(workspace)).safeReason,"billing_restricted");}finally{db.close();}
 });
 
 test("EPIC046 maps provider subscription 404 reads to explicit not_found", async () => {
@@ -294,85 +356,85 @@ test("EPIC046 Mercado Pago environment factory is opt-in, bounded, and secret-sa
   for(const environment of [{...enabled,MERCADOPAGO_ACCESS_TOKEN:""},{...enabled,MERCADOPAGO_API_BASE_URL:"http://api.mercadopago.test"},{...enabled,MERCADOPAGO_TIMEOUT_MS:"0"},{...enabled,MERCADOPAGO_TIMEOUT_MS:"60001"},{...enabled,MERCADOPAGO_ALLOWED_REDIRECT_ORIGINS:"http://atlas.test"}])assert.throws(()=>mercadoPagoBillingProviderFromEnvironment(environment),error=>error instanceof MercadoPagoBillingConfigurationError&&!error.message.includes("mp-secret-not-to-leak"));
 });
 
-test("EPIC046 resolves only the explicitly selected active verified payer identity", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accountId=(db.prepare("SELECT id FROM billing_accounts WHERE workspace_id=?").get(workspaceId)as{id:string}).id,resolver=new BillingPayerIdentityResolver(db),now=at;
-    assert.equal((db.prepare("SELECT billing_payer_identity_id value FROM billing_accounts WHERE id=?").get(accountId)as{value:null}).value,null); assert.equal(resolver.resolveForBillingAccount("unknown"),null);
+    assert.equal((db.prepare("SELECT billing_payer_identity_id value FROM billing_accounts WHERE id=?").get(accountId)as{value:null}).value,null); assert.equal(await resolver.resolveForBillingAccount("unknown"),null);
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer','active','en',?,?)").run(now,now); db.prepare("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at) VALUES('payer-member',?,'payer','owner','active',1,?,?)").run(workspaceId,now,now);
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-a','payer','a@example.test','a@example.test',1,?,?),('payer-b','payer','b@example.test','b@example.test',1,?,?),('payer-unverified','payer','u@example.test','u@example.test',0,?,?)").run(now,now,now,now,now,now); const accounts=new BillingAccountRepository(db),initial=accounts.findById(accountId)!;
     const set=accounts.setPayerIdentity(accountId,"payer-b",initial.version,now)!; assert.equal(set.billingPayerIdentityId,"payer-b"); assert.equal(set.version,initial.version+1); assert.equal(accounts.setPayerIdentity(accountId,"payer-a",initial.version,now),null); assert.equal(accounts.findById(accountId)!.billingPayerIdentityId,"payer-b"); const cleared=accounts.clearPayerIdentity(accountId,set.version,now)!; assert.equal(cleared.billingPayerIdentityId,null); assert.equal(cleared.version,set.version+1);
-    db.prepare("UPDATE billing_accounts SET billing_payer_identity_id='payer-b' WHERE id=?").run(accountId); assert.deepEqual(resolver.resolveForBillingAccount(accountId),{identityId:"payer-b",userId:"payer",email:"b@example.test"});
-    db.prepare("UPDATE billing_accounts SET billing_payer_identity_id='payer-a' WHERE id=?").run(accountId); assert.deepEqual(resolver.resolveForBillingAccount(accountId),{identityId:"payer-a",userId:"payer",email:"a@example.test"});
+    db.prepare("UPDATE billing_accounts SET billing_payer_identity_id='payer-b' WHERE id=?").run(accountId); assert.deepEqual(await resolver.resolveForBillingAccount(accountId),{identityId:"payer-b",userId:"payer",email:"b@example.test"});
+    db.prepare("UPDATE billing_accounts SET billing_payer_identity_id='payer-a' WHERE id=?").run(accountId); assert.deepEqual(await resolver.resolveForBillingAccount(accountId),{identityId:"payer-a",userId:"payer",email:"a@example.test"});
     assert.throws(()=>db.prepare("UPDATE billing_accounts SET billing_payer_identity_id='missing' WHERE id=?").run(accountId)); assert.equal((db.prepare("SELECT billing_payer_identity_id value FROM billing_accounts WHERE id=?").get(accountId)as{value:string}).value,"payer-a");
-    db.prepare("UPDATE billing_accounts SET billing_payer_identity_id='payer-unverified' WHERE id=?").run(accountId); assert.equal(resolver.resolveForBillingAccount(accountId),null); db.prepare("UPDATE memberships SET status='suspended' WHERE id='payer-member'").run(); db.prepare("UPDATE billing_accounts SET billing_payer_identity_id='payer-b' WHERE id=?").run(accountId); assert.equal(resolver.resolveForBillingAccount(accountId),null);
-    db.prepare("UPDATE memberships SET status='active' WHERE id='payer-member'").run(); db.prepare("DELETE FROM authentication_identities WHERE id='payer-b'").run(); assert.equal((db.prepare("SELECT billing_payer_identity_id value FROM billing_accounts WHERE id=?").get(accountId)as{value:null}).value,null); assert.equal(resolver.resolveForBillingAccount(accountId),null); assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(),[]);
+    db.prepare("UPDATE billing_accounts SET billing_payer_identity_id='payer-unverified' WHERE id=?").run(accountId); assert.equal(await resolver.resolveForBillingAccount(accountId),null); db.prepare("UPDATE memberships SET status='suspended' WHERE id='payer-member'").run(); db.prepare("UPDATE billing_accounts SET billing_payer_identity_id='payer-b' WHERE id=?").run(accountId); assert.equal(await resolver.resolveForBillingAccount(accountId),null);
+    db.prepare("UPDATE memberships SET status='active' WHERE id='payer-member'").run(); db.prepare("DELETE FROM authentication_identities WHERE id='payer-b'").run(); assert.equal((db.prepare("SELECT billing_payer_identity_id value FROM billing_accounts WHERE id=?").get(accountId)as{value:null}).value,null); assert.equal(await resolver.resolveForBillingAccount(accountId),null); assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(),[]);
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityService sets the selected active verified payer identity", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),initial=accounts.findByWorkspace(workspaceId)!,service=new BillingPayerIdentityService(db,()=>at),resolver=new BillingPayerIdentityResolver(db);
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-set','active','en',?,?)").run(at,at);
     db.prepare("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at) VALUES('payer-set-member',?,'payer-set','owner','active',1,?,?)").run(workspaceId,at,at);
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-set-other','payer-set','other@example.test','other@example.test',1,?,?),('payer-set-selected','payer-set','selected@example.test','selected@example.test',1,?,?)").run(at,at,at,at);
-    const result=service.setForWorkspace({workspaceId,identityId:"payer-set-selected",expectedVersion:initial.version});
+    const result=await service.setForWorkspace({workspaceId,identityId:"payer-set-selected",expectedVersion:initial.version});
     assert.equal(result.kind,"succeeded"); assert.equal(result.changed,true); if(result.kind!=="succeeded")throw new Error("expected succeeded"); assert.equal(result.account.billingPayerIdentityId,"payer-set-selected"); assert.equal(result.account.version,initial.version+1);
-    const resolved=resolver.resolveForBillingAccount(initial.id)!;
+    const resolved=await resolver.resolveForBillingAccount(initial.id)!;
     assert.equal(resolved.identityId,"payer-set-selected"); assert.equal(resolved.email,"selected@example.test");
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityService preserves same payer identity without mutation", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),account=accounts.findByWorkspace(workspaceId)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-noop','active','en',?,?)").run(at,at);
     db.prepare("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at) VALUES('payer-noop-member',?,'payer-noop','owner','active',1,?,?)").run(workspaceId,at,at);
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-noop-identity','payer-noop','noop@example.test','noop@example.test',1,?,?)").run(at,at);
     const initial=accounts.setPayerIdentity(account.id,"payer-noop-identity",account.version,at)!;
-    const result=new BillingPayerIdentityService(db,()=>"2026-09-02T00:00:00.000Z").setForWorkspace({workspaceId,identityId:"payer-noop-identity",expectedVersion:initial.version});
+    const result=await new BillingPayerIdentityService(db,()=>"2026-09-02T00:00:00.000Z").setForWorkspace({workspaceId,identityId:"payer-noop-identity",expectedVersion:initial.version});
     assert.equal(result.kind,"succeeded"); assert.equal(result.changed,false); if(result.kind!=="succeeded")throw new Error("expected succeeded"); assert.equal(result.account.billingPayerIdentityId,"payer-noop-identity"); assert.equal(result.account.version,initial.version);
     const persisted=accounts.findById(account.id)!;
     assert.equal(persisted.billingPayerIdentityId,"payer-noop-identity"); assert.equal(persisted.version,initial.version); assert.equal(persisted.updatedAt,initial.updatedAt);
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityService clears the selected payer identity", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),account=accounts.findByWorkspace(workspaceId)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-clear','active','en',?,?)").run(at,at);
     db.prepare("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at) VALUES('payer-clear-member',?,'payer-clear','owner','active',1,?,?)").run(workspaceId,at,at);
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-clear-identity','payer-clear','clear@example.test','clear@example.test',1,?,?)").run(at,at);
     const initial=accounts.setPayerIdentity(account.id,"payer-clear-identity",account.version,at)!;
-    const result=new BillingPayerIdentityService(db,()=>at).clearForWorkspace({workspaceId,expectedVersion:initial.version});
+    const result=await await new BillingPayerIdentityService(db,()=>at).clearForWorkspace({workspaceId,expectedVersion:initial.version});
     assert.equal(result.kind,"succeeded"); assert.equal(result.changed,true); if(result.kind!=="succeeded")throw new Error("expected succeeded"); assert.equal(result.account.billingPayerIdentityId,null); assert.equal(result.account.version,initial.version+1);
     const persisted=accounts.findById(account.id)!;
-    assert.equal(persisted.billingPayerIdentityId,null); assert.equal(persisted.version,initial.version+1); assert.equal(new BillingPayerIdentityResolver(db).resolveForBillingAccount(account.id),null);
+    assert.equal(persisted.billingPayerIdentityId,null); assert.equal(persisted.version,initial.version+1); assert.equal(await new BillingPayerIdentityResolver(db).resolveForBillingAccount(account.id),null);
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityService maps a stale expected version to conflict", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),initial=accounts.findByWorkspace(workspaceId)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-stale','active','en',?,?)").run(at,at);
     db.prepare("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at) VALUES('payer-stale-member',?,'payer-stale','owner','active',1,?,?)").run(workspaceId,at,at);
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-stale-identity','payer-stale','stale@example.test','stale@example.test',1,?,?)").run(at,at);
-    const service=new BillingPayerIdentityService(db,()=>at),set=service.setForWorkspace({workspaceId,identityId:"payer-stale-identity",expectedVersion:initial.version});
-    assert.equal(set.kind,"succeeded"); if(set.kind!=="succeeded")throw new Error("expected succeeded"); const stale=service.clearForWorkspace({workspaceId,expectedVersion:initial.version});
+    const service=new BillingPayerIdentityService(db,()=>at),set=await service.setForWorkspace({workspaceId,identityId:"payer-stale-identity",expectedVersion:initial.version});
+    assert.equal(set.kind,"succeeded"); if(set.kind!=="succeeded")throw new Error("expected succeeded"); const stale=await service.clearForWorkspace({workspaceId,expectedVersion:initial.version});
     assert.equal(stale.kind,"conflict"); const persisted=accounts.findById(initial.id)!;
     assert.equal(persisted.billingPayerIdentityId,"payer-stale-identity"); assert.equal(persisted.version,initial.version+1);
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityService preserves an already clear payer identity without mutation", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),initial=accounts.findByWorkspace(workspaceId)!;
-    const result=new BillingPayerIdentityService(db,()=>"2026-09-02T00:00:00.000Z").clearForWorkspace({workspaceId,expectedVersion:initial.version});
+    const result=await new BillingPayerIdentityService(db,()=>"2026-09-02T00:00:00.000Z").clearForWorkspace({workspaceId,expectedVersion:initial.version});
     assert.equal(result.kind,"succeeded"); assert.equal(result.changed,false); if(result.kind!=="succeeded")throw new Error("expected succeeded"); assert.equal(result.account.billingPayerIdentityId,null); assert.equal(result.account.version,initial.version); assert.equal(result.account.updatedAt,initial.updatedAt);
     assert.deepEqual(accounts.findById(initial.id),initial);
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityService switches to the exact selected payer identity without authority creep", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),account=accounts.findByWorkspace(workspaceId)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-switch','active','en',?,?)").run(at,at);
@@ -380,113 +442,113 @@ test("EPIC046 BillingPayerIdentityService switches to the exact selected payer i
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-switch-a','payer-switch','a@example.test','a@example.test',1,?,?),('payer-switch-b','payer-switch','b@example.test','b@example.test',1,?,?)").run(at,at,at,at);
     const initial=accounts.setPayerIdentity(account.id,"payer-switch-a",account.version,at)!;
     const authority=()=>Object.freeze({account:db.prepare("SELECT rollout_mode,provider_kind,provider_customer_id FROM billing_accounts WHERE id=?").get(account.id),subscriptionCount:db.prepare("SELECT COUNT(*) count FROM billing_subscriptions WHERE billing_account_id=?").get(account.id),subscription:db.prepare("SELECT id,provider_kind,provider_subscription_id,effective_state,version FROM billing_subscriptions WHERE billing_account_id=? AND is_current=1").get(account.id),snapshotCount:db.prepare("SELECT COUNT(*) count FROM billing_entitlement_snapshots WHERE billing_account_id=?").get(account.id),snapshot:db.prepare("SELECT entitlement_state,mutation_eligible,max_companies,max_assistant_profiles,max_active_channels FROM billing_entitlement_snapshots WHERE billing_account_id=? AND is_current=1").get(account.id),commercial:db.prepare("SELECT status,max_companies,max_assistant_profiles,max_active_channels FROM workspace_commercial_controls WHERE workspace_id=?").get(workspaceId),operationCount:db.prepare("SELECT COUNT(*) count FROM billing_operations WHERE billing_account_id=?").get(account.id)});
-    const before=authority(),result=new BillingPayerIdentityService(db,()=>at).setForWorkspace({workspaceId,identityId:"payer-switch-b",expectedVersion:initial.version});
+    const before=authority(),result=await await new BillingPayerIdentityService(db,()=>at).setForWorkspace({workspaceId,identityId:"payer-switch-b",expectedVersion:initial.version});
     assert.equal(result.kind,"succeeded"); assert.equal(result.changed,true); if(result.kind!=="succeeded")throw new Error("expected succeeded"); assert.equal(result.account.billingPayerIdentityId,"payer-switch-b"); assert.equal(result.account.version,initial.version+1);
-    const resolved=new BillingPayerIdentityResolver(db).resolveForBillingAccount(account.id)!;
+    const resolved=await new BillingPayerIdentityResolver(db).resolveForBillingAccount(account.id)!;
     assert.equal(resolved.identityId,"payer-switch-b"); assert.equal(resolved.email,"b@example.test"); assert.notEqual(resolved.identityId,"payer-switch-a"); assert.notEqual(resolved.email,"a@example.test"); assert.deepEqual(authority(),before);
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityService rejects a foreign Workspace identity", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceA=defaultWorkspace(db),workspaces=new WorkspaceRepository(db),workspaceB=workspaces.create({publicId:"wsp_payer_foreign",key:"payer-foreign",name:"Payer Foreign",timezone:null,defaultLocale:null}),accounts=new BillingAccountRepository(db),accountA=accounts.findByWorkspace(workspaceA)!,accountB=accounts.findByWorkspace(workspaceB.id)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-foreign','active','en',?,?)").run(at,at);
     db.prepare("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at) VALUES('payer-foreign-member',?,'payer-foreign','owner','active',1,?,?)").run(workspaceB.id,at,at);
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-foreign-identity','payer-foreign','foreign@example.test','foreign@example.test',1,?,?)").run(at,at);
-    const result=new BillingPayerIdentityService(db,()=>at).setForWorkspace({workspaceId:workspaceA,identityId:"payer-foreign-identity",expectedVersion:accountA.version});
+    const result=await await new BillingPayerIdentityService(db,()=>at).setForWorkspace({workspaceId:workspaceA,identityId:"payer-foreign-identity",expectedVersion:accountA.version});
     assert.equal(result.kind,"invalid"); assert.deepEqual(accounts.findById(accountA.id),accountA); assert.deepEqual(accounts.findById(accountB.id),accountB);
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityService rejects a suspended member identity", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),initial=accounts.findByWorkspace(workspaceId)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-suspended','active','en',?,?)").run(at,at);
     db.prepare("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at) VALUES('payer-suspended-member',?,'payer-suspended','owner','suspended',1,?,?)").run(workspaceId,at,at);
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-suspended-identity','payer-suspended','suspended@example.test','suspended@example.test',1,?,?)").run(at,at);
-    assert.equal(new BillingPayerIdentityService(db,()=>at).setForWorkspace({workspaceId,identityId:"payer-suspended-identity",expectedVersion:initial.version}).kind,"invalid"); assert.deepEqual(accounts.findById(initial.id),initial);
+    assert.equal((await new BillingPayerIdentityService(db,()=>at).setForWorkspace({workspaceId,identityId:"payer-suspended-identity",expectedVersion:initial.version})).kind,"invalid"); assert.deepEqual(accounts.findById(initial.id),initial);
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityService rejects an unverified exact identity without fallback", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),initial=accounts.findByWorkspace(workspaceId)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-unverified','active','en',?,?)").run(at,at);
     db.prepare("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at) VALUES('payer-unverified-member',?,'payer-unverified','owner','active',1,?,?)").run(workspaceId,at,at);
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-unverified-verified','payer-unverified','verified@example.test','verified@example.test',1,?,?),('payer-unverified-exact','payer-unverified','unverified@example.test','unverified@example.test',0,?,?)").run(at,at,at,at);
-    const result=new BillingPayerIdentityService(db,()=>at).setForWorkspace({workspaceId,identityId:"payer-unverified-exact",expectedVersion:initial.version});
+    const result=await new BillingPayerIdentityService(db,()=>at).setForWorkspace({workspaceId,identityId:"payer-unverified-exact",expectedVersion:initial.version});
     assert.equal(result.kind,"invalid"); const persisted=accounts.findById(initial.id)!; assert.equal(persisted.billingPayerIdentityId,null); assert.equal(persisted.version,initial.version); assert.notEqual(persisted.billingPayerIdentityId,"payer-unverified-verified");
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityService maps an unknown identity to not found", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),initial=accounts.findByWorkspace(workspaceId)!;
-    assert.equal(new BillingPayerIdentityService(db,()=>at).setForWorkspace({workspaceId,identityId:"payer-unknown-identity",expectedVersion:initial.version}).kind,"not_found"); assert.deepEqual(accounts.findById(initial.id),initial);
+    assert.equal((await new BillingPayerIdentityService(db,()=>at).setForWorkspace({workspaceId,identityId:"payer-unknown-identity",expectedVersion:initial.version})).kind,"not_found"); assert.deepEqual(accounts.findById(initial.id),initial);
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityService maps an unknown Workspace to not found without creating an account", () => {
+test("$1", async () => {
   const db=open(); try {
     const before=(db.prepare("SELECT COUNT(*) count FROM billing_accounts").get() as {count:number}).count;
-    assert.equal(new BillingPayerIdentityService(db,()=>at).clearForWorkspace({workspaceId:999999,expectedVersion:1}).kind,"not_found"); assert.equal((db.prepare("SELECT COUNT(*) count FROM billing_accounts").get() as {count:number}).count,before);
+    assert.equal((await new BillingPayerIdentityService(db,()=>at).clearForWorkspace({workspaceId:999999,expectedVersion:1})).kind,"not_found"); assert.equal((db.prepare("SELECT COUNT(*) count FROM billing_accounts").get() as {count:number}).count,before);
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityService isolates a successful payer selection to its Workspace", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceA=defaultWorkspace(db),workspaceB=new WorkspaceRepository(db).create({publicId:"wsp_payer_isolated",key:"payer-isolated",name:"Payer Isolated",timezone:null,defaultLocale:null}),accounts=new BillingAccountRepository(db),accountA=accounts.findByWorkspace(workspaceA)!,beforeB=accounts.findByWorkspace(workspaceB.id)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-isolated','active','en',?,?)").run(at,at);
     db.prepare("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at) VALUES('payer-isolated-member',?,'payer-isolated','owner','active',1,?,?)").run(workspaceA,at,at);
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-isolated-identity','payer-isolated','isolated@example.test','isolated@example.test',1,?,?)").run(at,at);
-    assert.equal(new BillingPayerIdentityService(db,()=>at).setForWorkspace({workspaceId:workspaceA,identityId:"payer-isolated-identity",expectedVersion:accountA.version}).kind,"succeeded"); assert.deepEqual(accounts.findById(beforeB.id),beforeB);
+    assert.equal((await new BillingPayerIdentityService(db,()=>at).setForWorkspace({workspaceId:workspaceA,identityId:"payer-isolated-identity",expectedVersion:accountA.version})).kind,"succeeded"); assert.deepEqual(accounts.findById(beforeB.id),beforeB);
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityResolver closes and restores membership lifecycle without fallback or Billing mutations", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),account=accounts.findByWorkspace(workspaceId)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-membership','active','en',?,?),('payer-membership-other','active','en',?,?)").run(at,at,at,at);
     db.prepare("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at) VALUES('payer-membership-member',?,'payer-membership','owner','active',1,?,?),('payer-membership-other-member',?,'payer-membership-other','viewer','active',1,?,?)").run(workspaceId,at,at,workspaceId,at,at);
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-membership-selected','payer-membership','membership@example.test','membership@example.test',1,?,?),('payer-membership-alternate','payer-membership','alternate@example.test','alternate@example.test',1,?,?),('payer-membership-cross','payer-membership-other','cross@example.test','cross@example.test',1,?,?)").run(at,at,at,at,at,at);
     const selected=accounts.setPayerIdentity(account.id,"payer-membership-selected",account.version,at)!,resolver=new BillingPayerIdentityResolver(db),authority=()=>Object.freeze({account:accounts.findById(account.id),subscription:db.prepare("SELECT id,provider_kind,provider_subscription_id,effective_state,version FROM billing_subscriptions WHERE billing_account_id=? AND is_current=1").get(account.id),snapshot:db.prepare("SELECT entitlement_state,mutation_eligible,max_companies,max_assistant_profiles,max_active_channels FROM billing_entitlement_snapshots WHERE billing_account_id=? AND is_current=1").get(account.id),commercial:db.prepare("SELECT status,max_companies,max_assistant_profiles,max_active_channels FROM workspace_commercial_controls WHERE workspace_id=?").get(workspaceId),operationCount:db.prepare("SELECT COUNT(*) count FROM billing_operations WHERE billing_account_id=?").get(account.id)});
-    assert.deepEqual(resolver.resolveForBillingAccount(account.id),{identityId:"payer-membership-selected",userId:"payer-membership",email:"membership@example.test"}); const before=authority();
+    assert.deepEqual(await resolver.resolveForBillingAccount(account.id),{identityId:"payer-membership-selected",userId:"payer-membership",email:"membership@example.test"}); const before=authority();
     db.prepare("UPDATE memberships SET status='suspended' WHERE id='payer-membership-member'").run();
-    assert.equal(resolver.resolveForBillingAccount(account.id),null); assert.notEqual(resolver.resolveForBillingAccount(account.id)?.identityId,"payer-membership-alternate"); assert.notEqual(resolver.resolveForBillingAccount(account.id)?.identityId,"payer-membership-cross"); assert.deepEqual(authority(),before);
+    assert.equal(await resolver.resolveForBillingAccount(account.id),null); assert.notEqual((await resolver.resolveForBillingAccount(account.id))?.identityId,"payer-membership-alternate"); assert.notEqual((await resolver.resolveForBillingAccount(account.id))?.identityId,"payer-membership-cross"); assert.deepEqual(authority(),before);
     db.prepare("UPDATE memberships SET status='active' WHERE id='payer-membership-member'").run();
-    assert.deepEqual(accounts.findById(account.id),selected); assert.deepEqual(resolver.resolveForBillingAccount(account.id),{identityId:"payer-membership-selected",userId:"payer-membership",email:"membership@example.test"});
+    assert.deepEqual(accounts.findById(account.id),selected); assert.deepEqual(await resolver.resolveForBillingAccount(account.id),{identityId:"payer-membership-selected",userId:"payer-membership",email:"membership@example.test"});
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityResolver closes and restores verification lifecycle without fallback", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),account=accounts.findByWorkspace(workspaceId)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-verification','active','en',?,?)").run(at,at);
     db.prepare("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at) VALUES('payer-verification-member',?,'payer-verification','owner','active',1,?,?)").run(workspaceId,at,at);
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-verification-selected','payer-verification','selected-verified@example.test','selected-verified@example.test',1,?,?),('payer-verification-alternate','payer-verification','alternate-verified@example.test','alternate-verified@example.test',1,?,?)").run(at,at,at,at);
     const selected=accounts.setPayerIdentity(account.id,"payer-verification-selected",account.version,at)!,resolver=new BillingPayerIdentityResolver(db);
-    assert.equal(resolver.resolveForBillingAccount(account.id)?.identityId,"payer-verification-selected"); db.prepare("UPDATE authentication_identities SET email_verified=0 WHERE id='payer-verification-selected'").run();
-    assert.equal(resolver.resolveForBillingAccount(account.id),null); assert.notEqual(resolver.resolveForBillingAccount(account.id)?.identityId,"payer-verification-alternate"); assert.deepEqual(accounts.findById(account.id),selected);
+    assert.equal((await resolver.resolveForBillingAccount(account.id))?.identityId,"payer-verification-selected"); db.prepare("UPDATE authentication_identities SET email_verified=0 WHERE id='payer-verification-selected'").run();
+    assert.equal(await resolver.resolveForBillingAccount(account.id),null); assert.notEqual((await resolver.resolveForBillingAccount(account.id))?.identityId,"payer-verification-alternate"); assert.deepEqual(accounts.findById(account.id),selected);
     db.prepare("UPDATE authentication_identities SET email_verified=1 WHERE id='payer-verification-selected'").run();
-    assert.deepEqual(resolver.resolveForBillingAccount(account.id),{identityId:"payer-verification-selected",userId:"payer-verification",email:"selected-verified@example.test"});
+    assert.deepEqual(await resolver.resolveForBillingAccount(account.id),{identityId:"payer-verification-selected",userId:"payer-verification",email:"selected-verified@example.test"});
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityResolver isolates alternate deletion and clears selected identity by FK", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),account=accounts.findByWorkspace(workspaceId)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-delete','active','en',?,?)").run(at,at);
     db.prepare("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at) VALUES('payer-delete-member',?,'payer-delete','owner','active',1,?,?)").run(workspaceId,at,at);
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-delete-selected','payer-delete','delete-selected@example.test','delete-selected@example.test',1,?,?),('payer-delete-alternate','payer-delete','delete-alternate@example.test','delete-alternate@example.test',1,?,?)").run(at,at,at,at);
     const selected=accounts.setPayerIdentity(account.id,"payer-delete-selected",account.version,at)!,resolver=new BillingPayerIdentityResolver(db);
-    assert.equal(resolver.resolveForBillingAccount(account.id)?.identityId,"payer-delete-selected"); db.prepare("DELETE FROM authentication_identities WHERE id='payer-delete-alternate'").run();
-    assert.deepEqual(accounts.findById(account.id),selected); assert.equal(resolver.resolveForBillingAccount(account.id)?.identityId,"payer-delete-selected");
+    assert.equal((await resolver.resolveForBillingAccount(account.id))?.identityId,"payer-delete-selected"); db.prepare("DELETE FROM authentication_identities WHERE id='payer-delete-alternate'").run();
+    assert.deepEqual(accounts.findById(account.id),selected); assert.equal((await resolver.resolveForBillingAccount(account.id))?.identityId,"payer-delete-selected");
     db.prepare("DELETE FROM authentication_identities WHERE id='payer-delete-selected'").run();
-    assert.equal(accounts.findById(account.id)?.billingPayerIdentityId,null); assert.equal(resolver.resolveForBillingAccount(account.id),null); assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(),[]);
+    assert.equal(accounts.findById(account.id)?.billingPayerIdentityId,null); assert.equal(await resolver.resolveForBillingAccount(account.id),null); assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(),[]);
   } finally { db.close(); }
 });
 
-test("EPIC046 BillingPayerIdentityResolver follows selected email changes and rejects invalid email bounds", () => {
+test("$1", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db),accounts=new BillingAccountRepository(db),account=accounts.findByWorkspace(workspaceId)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-email','active','en',?,?)").run(at,at);
@@ -494,9 +556,9 @@ test("EPIC046 BillingPayerIdentityResolver follows selected email changes and re
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-email-selected','payer-email','old@example.test','old@example.test',1,?,?)").run(at,at);
     const selected=accounts.setPayerIdentity(account.id,"payer-email-selected",account.version,at)!,resolver=new BillingPayerIdentityResolver(db);
     db.prepare("UPDATE authentication_identities SET email='new@example.test',normalized_email='new@example.test' WHERE id='payer-email-selected'").run();
-    assert.deepEqual(resolver.resolveForBillingAccount(account.id),{identityId:"payer-email-selected",userId:"payer-email",email:"new@example.test"}); assert.deepEqual(accounts.findById(account.id),selected);
+    assert.deepEqual(await resolver.resolveForBillingAccount(account.id),{identityId:"payer-email-selected",userId:"payer-email",email:"new@example.test"}); assert.deepEqual(accounts.findById(account.id),selected);
     db.prepare("UPDATE authentication_identities SET email='x',normalized_email='x' WHERE id='payer-email-selected'").run();
-    assert.equal(resolver.resolveForBillingAccount(account.id),null); assert.deepEqual(accounts.findById(account.id),selected);
+    assert.equal(await resolver.resolveForBillingAccount(account.id),null); assert.deepEqual(accounts.findById(account.id),selected);
   } finally { db.close(); }
 });
 
@@ -705,24 +767,24 @@ test("EPIC046 active Web Chat consumes the shared slot before WhatsApp activatio
   } finally { db.close(); }
 });
 
-test("EPIC046 entitlement service applies neutral, managed-state, limit, and missing-snapshot decisions", () => {
+test("EPIC046 entitlement service applies neutral, managed-state, limit, and missing-snapshot decisions", async () => {
   const db=open();
   try {
-    const workspace=defaultWorkspace(db),service=new BillingEntitlementService(db),account=(db.prepare("SELECT id FROM billing_accounts WHERE workspace_id=?").get(workspace)as{id:string}).id,snapshot=(db.prepare("SELECT id FROM billing_entitlement_snapshots WHERE billing_account_id=? AND is_current=1").get(account)as{id:string}).id;
-    assert.equal(service.mayCreateCompany(workspace).safeReason,"allowed");
+    const workspace=defaultWorkspace(db),service=asyncBillingEntitlements(db),account=(db.prepare("SELECT id FROM billing_accounts WHERE workspace_id=?").get(workspace)as{id:string}).id,snapshot=(db.prepare("SELECT id FROM billing_entitlement_snapshots WHERE billing_account_id=? AND is_current=1").get(account)as{id:string}).id;
+    assert.equal((await service.mayCreateCompany(workspace)).safeReason,"allowed");
     assert.throws(()=>db.prepare("UPDATE workspace_commercial_controls SET max_companies=0 WHERE workspace_id=?").run(workspace));
     db.prepare("UPDATE workspace_commercial_controls SET max_companies=NULL,status='suspended',suspended_at=? WHERE workspace_id=?").run("2026-09-01T00:00:00.000Z",workspace);
-    assert.equal(service.mayCreateCompany(workspace).safeReason,"administrative_suspended");
+    assert.equal((await service.mayCreateCompany(workspace)).safeReason,"administrative_suspended");
     db.prepare("UPDATE workspace_commercial_controls SET status='active',suspended_at=NULL WHERE workspace_id=?").run(workspace);
     db.prepare("UPDATE billing_entitlement_snapshots SET entitlement_state='grace_enabled',max_companies=2 WHERE id=?").run(snapshot);
-    assert.deepEqual([service.mayCreateCompany(workspace).allowed,service.mayCreateCompany(workspace).effectiveLimit],[true,2]);
+    assert.deepEqual([(await service.mayCreateCompany(workspace)).allowed,(await service.mayCreateCompany(workspace)).effectiveLimit],[true,2]);
     db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=0,max_assistant_profiles=0,max_active_channels=0 WHERE id=?").run(snapshot);
-    assert.deepEqual([service.mayCreateCompany(workspace).allowed,service.mayCreateCompany(workspace).effectiveLimit],[false,0]);
-    for(const state of ["restricted","suspended","unavailable"]){db.prepare("UPDATE billing_entitlement_snapshots SET entitlement_state=? WHERE id=?").run(state,snapshot);assert.equal(service.mayCreateCompany(workspace).safeReason,"billing_restricted");}
+    assert.deepEqual([(await service.mayCreateCompany(workspace)).allowed,(await service.mayCreateCompany(workspace)).effectiveLimit],[false,0]);
+    for(const state of ["restricted","suspended","unavailable"]){db.prepare("UPDATE billing_entitlement_snapshots SET entitlement_state=? WHERE id=?").run(state,snapshot);assert.equal((await service.mayCreateCompany(workspace)).safeReason,"billing_restricted");}
     db.prepare("UPDATE billing_entitlement_snapshots SET entitlement_state='enabled',mutation_eligible=0 WHERE id=?").run(snapshot);
-    assert.equal(service.mayCreateCompany(workspace).safeReason,"billing_mutation_ineligible");
+    assert.equal((await service.mayCreateCompany(workspace)).safeReason,"billing_mutation_ineligible");
     db.prepare("DELETE FROM billing_entitlement_snapshots WHERE id=?").run(snapshot);
-    assert.equal(service.mayCreateCompany(workspace).safeReason,"billing_entitlement_unavailable");
+    assert.equal((await service.mayCreateCompany(workspace)).safeReason,"billing_entitlement_unavailable");
   } finally {db.close();}
 });
 
@@ -741,39 +803,39 @@ test("EPIC046 zero Billing ceilings deny Company, Profile, Web Chat, and WhatsAp
   } finally {db.close();}
 });
 
-test("EPIC046 entitlement service isolates Workspace authorities and evaluates limit boundaries", () => {
+test("EPIC046 entitlement service isolates Workspace authorities and evaluates limit boundaries", async () => {
   const db=open();
   try {
-    const a=defaultWorkspace(db),b=new WorkspaceRepository(db).create({publicId:"wsp_isolated",key:"isolated",name:"Isolated",timezone:null,defaultLocale:null}).id,service=new BillingEntitlementService(db),at="2026-09-01T00:00:00.000Z";
+    const a=defaultWorkspace(db),b=new WorkspaceRepository(db).create({publicId:"wsp_isolated",key:"isolated",name:"Isolated",timezone:null,defaultLocale:null}).id,service=asyncBillingEntitlements(db),at="2026-09-01T00:00:00.000Z";
     const company=(workspace:number,name:string)=>db.prepare("INSERT INTO companies(workspace_id,name,website,phone,email,status,slug,name_normalized,lifecycle_state,brand_colors_json,version,created_at,updated_at,lifecycle_changed_at) VALUES(?,?,?,?,?,'ready',?,?, 'operational','{}',1,?,?,?)").run(workspace,name,`https://${name}.test`,"","",name,name,at,at,at);
     company(a,"a");
     const accountA=(db.prepare("SELECT id FROM billing_accounts WHERE workspace_id=?").get(a)as{id:string}).id,snapshotA=(db.prepare("SELECT id FROM billing_entitlement_snapshots WHERE billing_account_id=?").get(accountA)as{id:string}).id;
     db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=1 WHERE id=?").run(snapshotA);
-    assert.equal(service.mayCreateCompany(a).allowed,false);assert.equal(service.mayCreateCompany(b).allowed,true);
+    assert.equal((await service.mayCreateCompany(a)).allowed,false);assert.equal((await service.mayCreateCompany(b)).allowed,true);
     db.prepare("UPDATE workspace_commercial_controls SET max_companies=1 WHERE workspace_id=?").run(b);
-    assert.equal(service.mayCreateCompany(a).allowed,false);assert.equal(service.mayCreateCompany(b).allowed,true);
+    assert.equal((await service.mayCreateCompany(a)).allowed,false);assert.equal((await service.mayCreateCompany(b)).allowed,true);
     db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=NULL,max_assistant_profiles=1,max_active_channels=1 WHERE id=?").run(snapshotA);
-    assert.equal(service.mayCreateCompany(a).allowed,true);assert.equal(service.mayCreateAssistantProfile(a).effectiveLimit,1);assert.equal(service.mayActivateChannel(a).effectiveLimit,1);
+    assert.equal((await service.mayCreateCompany(a)).allowed,true);assert.equal((await service.mayCreateAssistantProfile(a)).effectiveLimit,1);assert.equal((await service.mayActivateChannel(a)).effectiveLimit,1);
     const cases:Array<[number|null,number|null,number|null]>=[[null,null,null],[5,null,5],[null,5,5],[10,4,4],[2,10,2],[0,null,0],[0,5,0]];
-    for(const [billing,admin,effective] of cases){db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=? WHERE id=?").run(billing,snapshotA);db.prepare("UPDATE workspace_commercial_controls SET max_companies=? WHERE workspace_id=?").run(admin,a);assert.equal(service.mayCreateCompany(a).effectiveLimit,effective);}
-    db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=0 WHERE id=?").run(snapshotA);assert.equal(service.mayCreateCompany(a).allowed,false);
-    db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=NULL WHERE id=?").run(snapshotA);db.prepare("UPDATE workspace_commercial_controls SET max_companies=NULL WHERE workspace_id=?").run(a);for(const name of ["a2","a3","a4","a5"]){company(a,name);}db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=3 WHERE id=?").run(snapshotA);assert.equal(service.mayCreateCompany(a).allowed,false);db.prepare("DELETE FROM companies WHERE workspace_id=? AND name IN ('a2','a3','a4')").run(a);assert.equal(service.mayCreateCompany(a).allowed,true);
+    for(const [billing,admin,effective] of cases){db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=? WHERE id=?").run(billing,snapshotA);db.prepare("UPDATE workspace_commercial_controls SET max_companies=? WHERE workspace_id=?").run(admin,a);assert.equal((await service.mayCreateCompany(a)).effectiveLimit,effective);}
+    db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=0 WHERE id=?").run(snapshotA);assert.equal((await service.mayCreateCompany(a)).allowed,false);
+    db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=NULL WHERE id=?").run(snapshotA);db.prepare("UPDATE workspace_commercial_controls SET max_companies=NULL WHERE workspace_id=?").run(a);for(const name of ["a2","a3","a4","a5"]){company(a,name);}db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=3 WHERE id=?").run(snapshotA);assert.equal((await service.mayCreateCompany(a)).allowed,false);db.prepare("DELETE FROM companies WHERE workspace_id=? AND name IN ('a2','a3','a4')").run(a);assert.equal((await service.mayCreateCompany(a)).allowed,true);
   } finally {db.close();}
 });
 
-test("EPIC046 operational preflight denies before writes and leaves SQLite triggers as fallback", () => {
+test("EPIC046 operational preflight denies before writes and leaves SQLite triggers as fallback", async () => {
   const db = open();
   try {
-    const workspace = defaultWorkspace(db), context = { workspaceId: workspace, workspaceKey: "default" }, clock = { now: () => at }, entitlements = new BillingEntitlementService(db), companies = new CompanyRepository(db);
+    const workspace = defaultWorkspace(db), context = { workspaceId: workspace, workspaceKey: "default" }, clock = { now: () => at }, entitlements = asyncBillingEntitlements(db), companies = new CompanyRepository(db);
     db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=0,max_assistant_profiles=0,max_active_channels=0 WHERE billing_account_id=(SELECT id FROM billing_accounts WHERE workspace_id=? AND rollout_mode='unmanaged')").run(workspace);
-    assert.throws(() => new CompanyService(companies, entitlements).create(context, { name: "Denied", website: "https://denied.test" }), CompanyCapacityError);
+    await assert.rejects(new CompanyService(companies, entitlements).create(context, { name: "Denied", website: "https://denied.test" }), CompanyCapacityError);
     assert.equal((db.prepare("SELECT COUNT(*) count FROM companies WHERE workspace_id=?").get(workspace) as { count:number }).count, 0);
     assert.throws(() => companies.create(context, { name: "Trigger", website: "https://trigger.test" }));
 
     db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=NULL WHERE billing_account_id=(SELECT id FROM billing_accounts WHERE workspace_id=?)").run(workspace);
     const company = companies.create(context, { name: "Allowed", website: "https://allowed.test" });
     const profiles = new AssistantProfileRepository(db), profileService = new AssistantProfileService(profiles, clock, entitlements);
-    assert.throws(() => profileService.create(context, company.id, { name: "Denied", assistantLanguage: "en" }), AssistantProfileConflictError);
+    await assert.rejects(profileService.create(context, company.id, { name: "Denied", assistantLanguage: "en" }), AssistantProfileConflictError);
     assert.equal((db.prepare("SELECT COUNT(*) count FROM assistant_profiles").get() as { count:number }).count, 0);
 
     db.prepare("UPDATE billing_entitlement_snapshots SET max_assistant_profiles=NULL,max_active_channels=NULL WHERE billing_account_id=(SELECT id FROM billing_accounts WHERE workspace_id=?)").run(workspace);
@@ -783,139 +845,139 @@ test("EPIC046 operational preflight denies before writes and leaves SQLite trigg
     db.prepare("INSERT INTO web_chat_connections(id,public_id,workspace_id,company_id,assistant_profile_id,status,created_at,updated_at) VALUES('wcc_04600000000000000000000000000001','wcp_04600000000000000000000000000001',?,?,?,'inactive',?,?)").run(workspace, company.id, profile.id, at, at);
     const whatsapp = new WhatsAppConnectionRepository(db), whatsAppService = new WhatsAppConnectionService(companies, profiles, whatsapp, clock, undefined, undefined, entitlements);
     db.prepare("UPDATE billing_entitlement_snapshots SET max_active_channels=0 WHERE billing_account_id=(SELECT id FROM billing_accounts WHERE workspace_id=?)").run(workspace);
-    assert.throws(() => webService.setStatus(context, company.id, "wcc_04600000000000000000000000000001", { status: "active" }), WebChatConnectionCapacityError);
+    await assert.rejects(webService.setStatus(context, company.id, "wcc_04600000000000000000000000000001", { status: "active" }), WebChatConnectionCapacityError);
     assert.equal((db.prepare("SELECT status FROM web_chat_connections WHERE id='wcc_04600000000000000000000000000001'").get() as { status:string }).status, "inactive");
     db.prepare("INSERT INTO whatsapp_connections(id,workspace_id,company_id,assistant_profile_id,phone_number_id,whatsapp_business_account_id,status,created_at,updated_at) VALUES('wac_04600000000000000000000000000001',?,?,?,'phone046','waba046','inactive',?,?)").run(workspace, company.id, profile.id, at, at);
-    assert.throws(() => whatsAppService.update(context, company.id, "wac_04600000000000000000000000000001", { status: "active" }), WhatsAppConnectionConflictError);
+    await assert.rejects(whatsAppService.update(context, company.id, "wac_04600000000000000000000000000001", { status: "active" }), WhatsAppConnectionConflictError);
     assert.equal((db.prepare("SELECT status FROM whatsapp_connections WHERE id='wac_04600000000000000000000000000001'").get() as { status:string }).status, "inactive");
   } finally { db.close(); }
 });
 
-test("EPIC046 Company Core preflights both counted creation paths without changing suspended restores", () => {
+test("EPIC046 Company Core preflights both counted creation paths without changing suspended restores", async () => {
   const db = open();
   try {
-    const workspace = new WorkspaceRepository(db).resolveDefault(), context = { workspaceId: workspace.id, workspaceKey: workspace.key }, entitlements = new BillingEntitlementService(db);
+    const workspace = new WorkspaceRepository(db).resolveDefault(), context = { workspaceId: workspace.id, workspaceKey: workspace.key }, entitlements = asyncBillingEntitlements(db);
     let tick = 0;
     const companies = new CompanyApplicationService(new CompanyDomainRepository(db), { clock: { now: () => new Date(Date.parse(at) + tick++).toISOString() }, entitlements });
     const snapshot = db.prepare("SELECT s.id FROM billing_entitlement_snapshots s JOIN billing_accounts a ON a.id=s.billing_account_id WHERE a.workspace_id=?").get(workspace.id) as { id:string };
     db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=0 WHERE id=?").run(snapshot.id);
-    assert.equal(companies.createCompany(context, { id: 4601, identity: { name: "Denied", slug: "denied" } }).status, "commercial_limit_reached");
-    assert.equal(companies.createOnboardingCompany(context, { name: "Denied onboarding" }).status, "commercial_limit_reached");
+    assert.equal((await companies.createCompany(context, { id: 4601, identity: { name: "Denied", slug: "denied" } })).status, "commercial_limit_reached");
+    assert.equal((await companies.createOnboardingCompany(context, { name: "Denied onboarding" })).status, "commercial_limit_reached");
     assert.equal((db.prepare("SELECT COUNT(*) count FROM companies WHERE workspace_id=?").get(workspace.id) as { count:number }).count, 0);
     db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=2 WHERE id=?").run(snapshot.id);
-    const created = companies.createCompany(context, { id: 4602, identity: { name: "Allowed", slug: "allowed" } });
+    const created = await companies.createCompany(context, { id: 4602, identity: { name: "Allowed", slug: "allowed" } });
     assert.equal(created.status, "success");
-    assert.equal(companies.createOnboardingCompany(context, { name: "Allowed onboarding" }).status, "success");
+    assert.equal((await companies.createOnboardingCompany(context, { name: "Allowed onboarding" })).status, "success");
     if (created.status !== "success") throw new Error("Expected Company creation.");
-    const configured = companies.updateCompanyConfiguration(context, { companyId: created.company.id, expectedVersion: 1, configuration: { timezone: "UTC", locale: "en", operatingLocale: { countryCode: "US", currencyCode: "USD", dateFormat: "MM/DD/YYYY", phoneFormat: "national" }, businessHours: { weekly: { monday: [], tuesday: [], wednesday: [], thursday: [], friday: [], saturday: [], sunday: [] } } } });
+    const configured = await companies.updateCompanyConfiguration(context, { companyId: created.company.id, expectedVersion: 1, configuration: { timezone: "UTC", locale: "en", operatingLocale: { countryCode: "US", currencyCode: "USD", dateFormat: "MM/DD/YYYY", phoneFormat: "national" }, businessHours: { weekly: { monday: [], tuesday: [], wednesday: [], thursday: [], friday: [], saturday: [], sunday: [] } } } });
     if (configured.status !== "success") throw new Error("Expected configuration.");
-    const suspended = companies.suspendCompany(context, { companyId: configured.company.id, expectedVersion: 2 });
+    const suspended = await companies.suspendCompany(context, { companyId: configured.company.id, expectedVersion: 2 });
     if (suspended.status !== "success") throw new Error("Expected suspension.");
     db.prepare("UPDATE billing_entitlement_snapshots SET max_companies=0 WHERE id=?").run(snapshot.id);
-    assert.equal(companies.restoreCompany(context, { companyId: suspended.company.id, expectedVersion: 3 }).status, "success");
+    assert.equal((await companies.restoreCompany(context, { companyId: suspended.company.id, expectedVersion: 3 })).status, "success");
   } finally { db.close(); }
 });
 
-test("EPIC046 Company Core fails closed before persistence when its current Billing snapshot is missing", () => {
+test("EPIC046 Company Core fails closed before persistence when its current Billing snapshot is missing", async () => {
   const db = open();
   try {
-    const workspace = new WorkspaceRepository(db).resolveDefault(), context = { workspaceId: workspace.id, workspaceKey: workspace.key }, entitlements = new BillingEntitlementService(db);
+    const workspace = new WorkspaceRepository(db).resolveDefault(), context = { workspaceId: workspace.id, workspaceKey: workspace.key }, entitlements = asyncBillingEntitlements(db);
     const companies = new CompanyApplicationService(new CompanyDomainRepository(db), { entitlements });
     db.prepare("DELETE FROM billing_entitlement_snapshots WHERE billing_account_id=(SELECT id FROM billing_accounts WHERE workspace_id=?)").run(workspace.id);
-    assert.equal(companies.createCompany(context, { id: 4611, identity: { name: "Missing snapshot", slug: "missing-snapshot" } }).status, "commercial_limit_reached");
+    assert.equal((await companies.createCompany(context, { id: 4611, identity: { name: "Missing snapshot", slug: "missing-snapshot" } })).status, "commercial_limit_reached");
     assert.equal((db.prepare("SELECT COUNT(*) count FROM companies WHERE workspace_id=?").get(workspace.id) as { count:number }).count, 0);
     assert.equal((db.prepare("SELECT COUNT(*) count FROM billing_entitlement_snapshots s JOIN billing_accounts a ON a.id=s.billing_account_id WHERE a.workspace_id=?").get(workspace.id) as { count:number }).count, 0);
   } finally { db.close(); }
 });
 
-test("EPIC046 Company Core preserves unmanaged administrative Company limits", () => {
-  const run = (configure: (db: DatabaseSync, workspaceId: number) => void, expected: "success" | "commercial_limit_reached", initial = 0): void => {
+test("EPIC046 Company Core preserves unmanaged administrative Company limits", async () => {
+  const run = async (configure: (db: DatabaseSync, workspaceId: number) => void, expected: "success" | "commercial_limit_reached", initial = 0): Promise<void> => {
     const db = open();
     try {
-      const workspace = new WorkspaceRepository(db).resolveDefault(), context = { workspaceId: workspace.id, workspaceKey: workspace.key }, companies = new CompanyApplicationService(new CompanyDomainRepository(db), { entitlements: new BillingEntitlementService(db) });
-      for (let index = 0; index < initial; index += 1) assert.equal(companies.createCompany(context, { id: 4620 + index, identity: { name: `Initial ${index}`, slug: `initial-${index}` } }).status, "success");
+      const workspace = new WorkspaceRepository(db).resolveDefault(), context = { workspaceId: workspace.id, workspaceKey: workspace.key }, companies = new CompanyApplicationService(new CompanyDomainRepository(db), { entitlements: asyncBillingEntitlements(db) });
+      for (let index = 0; index < initial; index += 1) assert.equal((await companies.createCompany(context, { id: 4620 + index, identity: { name: `Initial ${index}`, slug: `initial-${index}` } })).status, "success");
       configure(db, workspace.id);
-      assert.equal(companies.createCompany(context, { id: 4630, identity: { name: "Candidate", slug: "candidate" } }).status, expected);
+      assert.equal((await companies.createCompany(context, { id: 4630, identity: { name: "Candidate", slug: "candidate" } })).status, expected);
       assert.equal((db.prepare("SELECT COUNT(*) count FROM companies WHERE workspace_id=?").get(workspace.id) as { count:number }).count, initial + (expected === "success" ? 1 : 0));
     } finally { db.close(); }
   };
-  run(() => {}, "success");
-  run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET max_companies=2 WHERE workspace_id=?").run(workspaceId), "success", 1);
-  run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET max_companies=1 WHERE workspace_id=?").run(workspaceId), "commercial_limit_reached", 1);
-  run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET status='suspended',suspended_at=? WHERE workspace_id=?").run(at, workspaceId), "commercial_limit_reached");
+  await run(() => {}, "success");
+  await run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET max_companies=2 WHERE workspace_id=?").run(workspaceId), "success", 1);
+  await run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET max_companies=1 WHERE workspace_id=?").run(workspaceId), "commercial_limit_reached", 1);
+  await run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET status='suspended',suspended_at=? WHERE workspace_id=?").run(at, workspaceId), "commercial_limit_reached");
 });
 
-test("EPIC046 Profile service preflights counted creates and archived restores only", () => {
+test("EPIC046 Profile service preflights counted creates and archived restores only", async () => {
   const db = open();
   try {
     const workspace = new WorkspaceRepository(db).resolveDefault(), context = { workspaceId: workspace.id, workspaceKey: workspace.key }, companies = new CompanyRepository(db), company = companies.create(context, { name: "Profiles", website: "https://profiles.test" });
-    let tick = 0; const profiles = new AssistantProfileRepository(db), service = new AssistantProfileService(profiles, { now: () => new Date(Date.parse(at) + tick++).toISOString() }, new BillingEntitlementService(db));
+    let tick = 0; const profiles = new AssistantProfileRepository(db), service = new AssistantProfileService(profiles, { now: () => new Date(Date.parse(at) + tick++).toISOString() }, asyncBillingEntitlements(db));
     const snapshot = db.prepare("SELECT s.id FROM billing_entitlement_snapshots s JOIN billing_accounts a ON a.id=s.billing_account_id WHERE a.workspace_id=?").get(workspace.id) as { id:string };
     db.prepare("UPDATE billing_entitlement_snapshots SET max_assistant_profiles=1 WHERE id=?").run(snapshot.id);
-    const first = service.create(context, company.id, { name: "First", assistantLanguage: "en" });
+    const first = await service.create(context, company.id, { name: "First", assistantLanguage: "en" });
     assert.equal(first.status, "draft");
-    assert.throws(() => service.create(context, company.id, { name: "Denied", assistantLanguage: "en" }), AssistantProfileConflictError);
+    await assert.rejects(service.create(context, company.id, { name: "Denied", assistantLanguage: "en" }), AssistantProfileConflictError);
     assert.equal((db.prepare("SELECT COUNT(*) count FROM assistant_profiles").get() as { count:number }).count, 1);
-    assert.equal(service.transition(context, company.id, first.id, "archived").status, "archived");
-    assert.equal(service.transition(context, company.id, first.id, "draft").status, "draft");
-    assert.equal(service.transition(context, company.id, first.id, "archived").status, "archived");
-    const live = service.create(context, company.id, { name: "Live", assistantLanguage: "en" });
-    assert.throws(() => service.transition(context, company.id, first.id, "draft"), AssistantProfileConflictError);
+    assert.equal((await service.transition(context, company.id, first.id, "archived")).status, "archived");
+    assert.equal((await service.transition(context, company.id, first.id, "draft")).status, "draft");
+    assert.equal((await service.transition(context, company.id, first.id, "archived")).status, "archived");
+    const live = await service.create(context, company.id, { name: "Live", assistantLanguage: "en" });
+    await assert.rejects(service.transition(context, company.id, first.id, "draft"), AssistantProfileConflictError);
     assert.equal(profiles.findById(context, company.id, first.id)?.status, "archived");
     db.prepare("UPDATE billing_entitlement_snapshots SET max_assistant_profiles=0 WHERE id=?").run(snapshot.id);
-    assert.equal(service.update(context, company.id, live.id, { description: "Non-capacity" }).description, "Non-capacity");
+    assert.equal((await service.update(context, company.id, live.id, { description: "Non-capacity" })).description, "Non-capacity");
   } finally { db.close(); }
 });
 
-test("EPIC046 channel services preflight shared activation without blocking non-capacity mutations", () => {
+test("EPIC046 channel services preflight shared activation without blocking non-capacity mutations", async () => {
   const db = open();
   try {
     const workspace = new WorkspaceRepository(db).resolveDefault(), context = { workspaceId: workspace.id, workspaceKey: workspace.key }, companies = new CompanyRepository(db), company = companies.create(context, { name: "Channels", website: "https://channels.test" });
     const profile = reconstructAssistantProfile({ id: assistantProfileId("asp_04600000000000000000000000000002"), companyId: company.id, name: "Ready", normalizedName: "ready", description: null, businessRole: "Advisor", objective: "Help", audience: null, tone: "friendly", assistantLanguage: "en", welcomeMessage: "Welcome", fallbackMessage: "Fallback", status: "ready", createdAt: at, updatedAt: at, archivedAt: null });
     const profiles = new AssistantProfileRepository(db); profiles.create(context, company.id, profile);
-    const entitlements = new BillingEntitlementService(db), webRepository = new WebChatConnectionRepository(db), whatsRepository = new WhatsAppConnectionRepository(db), clock = { now: () => at };
+    const entitlements = asyncBillingEntitlements(db), webRepository = new WebChatConnectionRepository(db), whatsRepository = new WhatsAppConnectionRepository(db), clock = { now: () => at };
     const web = new WebChatConnectionService(companies, profiles, webRepository, clock, entitlements), whatsapp = new WhatsAppConnectionService(companies, profiles, whatsRepository, clock, undefined, undefined, entitlements);
     const snapshot = db.prepare("SELECT s.id FROM billing_entitlement_snapshots s JOIN billing_accounts a ON a.id=s.billing_account_id WHERE a.workspace_id=?").get(workspace.id) as { id:string };
     db.prepare("UPDATE billing_entitlement_snapshots SET max_active_channels=1 WHERE id=?").run(snapshot.id);
-    const activeWeb = web.create(context, company.id, { assistantProfileId: profile.id });
-    const inactiveWhats = whatsapp.create(context, company.id, { assistantProfileId: profile.id, phoneNumberId: "phone046a", whatsappBusinessAccountId: "waba046a" });
+    const activeWeb = await web.create(context, company.id, { assistantProfileId: profile.id });
+    const inactiveWhats = await whatsapp.create(context, company.id, { assistantProfileId: profile.id, phoneNumberId: "phone046a", whatsappBusinessAccountId: "waba046a" });
     assert.equal(inactiveWhats.status, "inactive");
-    assert.throws(() => whatsapp.update(context, company.id, inactiveWhats.id, { status: "active" }), WhatsAppConnectionConflictError);
+    await assert.rejects(whatsapp.update(context, company.id, inactiveWhats.id, { status: "active" }), WhatsAppConnectionConflictError);
     assert.equal(whatsRepository.findById(context, company.id, inactiveWhats.id)?.status, "inactive");
-    assert.equal(web.setStatus(context, company.id, activeWeb.id, { status: "inactive" }).status, "inactive");
-    assert.equal(whatsapp.update(context, company.id, inactiveWhats.id, { status: "active" }).status, "active");
+    assert.equal((await web.setStatus(context, company.id, activeWeb.id, { status: "inactive" })).status, "inactive");
+    assert.equal((await whatsapp.update(context, company.id, inactiveWhats.id, { status: "active" })).status, "active");
     const inactiveWebId = webChatConnectionId("wcc_04600000000000000000000000000002");
     db.prepare("INSERT INTO web_chat_connections(id,public_id,workspace_id,company_id,assistant_profile_id,status,created_at,updated_at) VALUES(?,?,?,?,?,'inactive',?,?)").run(inactiveWebId, "wcp_04600000000000000000000000000002", workspace.id, company.id, profile.id, at, at);
-    assert.throws(() => web.setStatus(context, company.id, inactiveWebId, { status: "active" }), WebChatConnectionCapacityError);
+    await assert.rejects(web.setStatus(context, company.id, inactiveWebId, { status: "active" }), WebChatConnectionCapacityError);
     assert.equal(webRepository.findById(context, company.id, inactiveWebId)?.status, "inactive");
-    assert.equal(whatsapp.deactivate(context, company.id, inactiveWhats.id).connection.status, "inactive");
+    assert.equal((await whatsapp.deactivate(context, company.id, inactiveWhats.id)).connection.status, "inactive");
     db.prepare("DELETE FROM billing_entitlement_snapshots WHERE id=?").run(snapshot.id);
-    assert.throws(() => web.setStatus(context, company.id, inactiveWebId, { status: "active" }), WebChatConnectionCapacityError);
+    await assert.rejects(web.setStatus(context, company.id, inactiveWebId, { status: "active" }), WebChatConnectionCapacityError);
     assert.equal(webRepository.findById(context, company.id, inactiveWebId)?.status, "inactive");
   } finally { db.close(); }
 });
 
-test("EPIC046 unmanaged Profile preflight preserves administrative compatibility", () => {
-  const run = (configure: (db: DatabaseSync, workspaceId: number) => void, initial = 0, expected: "allowed" | "denied" = "allowed"): void => {
+test("EPIC046 unmanaged Profile preflight preserves administrative compatibility", async () => {
+  const run = async (configure: (db: DatabaseSync, workspaceId: number) => void, initial = 0, expected: "allowed" | "denied" = "allowed"): Promise<void> => {
     const db = open();
     try {
       const workspace = new WorkspaceRepository(db).resolveDefault(), context = { workspaceId: workspace.id, workspaceKey: workspace.key }, company = new CompanyRepository(db).create(context, { name: "Profile compatibility", website: "https://profile-compatibility.test" });
-      let tick = 0; const service = new AssistantProfileService(new AssistantProfileRepository(db), { now: () => new Date(Date.parse(at) + tick++).toISOString() }, new BillingEntitlementService(db));
-      for (let index = 0; index < initial; index += 1) service.create(context, company.id, { name: `Initial ${index}`, assistantLanguage: "en" });
+      let tick = 0; const service = new AssistantProfileService(new AssistantProfileRepository(db), { now: () => new Date(Date.parse(at) + tick++).toISOString() }, asyncBillingEntitlements(db));
+      for (let index = 0; index < initial; index += 1) await service.create(context, company.id, { name: `Initial ${index}`, assistantLanguage: "en" });
       configure(db, workspace.id);
-      if (expected === "allowed") assert.equal(service.create(context, company.id, { name: "Candidate", assistantLanguage: "en" }).status, "draft");
-      else assert.throws(() => service.create(context, company.id, { name: "Candidate", assistantLanguage: "en" }), AssistantProfileConflictError);
+      if (expected === "allowed") assert.equal((await service.create(context, company.id, { name: "Candidate", assistantLanguage: "en" })).status, "draft");
+      else await assert.rejects(service.create(context, company.id, { name: "Candidate", assistantLanguage: "en" }), AssistantProfileConflictError);
       assert.equal((db.prepare("SELECT COUNT(*) count FROM assistant_profiles").get() as { count:number }).count, initial + (expected === "allowed" ? 1 : 0));
     } finally { db.close(); }
   };
-  run(() => {});
-  run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET max_assistant_profiles=2 WHERE workspace_id=?").run(workspaceId), 1);
-  run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET max_assistant_profiles=1 WHERE workspace_id=?").run(workspaceId), 1, "denied");
-  run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET status='suspended',suspended_at=? WHERE workspace_id=?").run(at, workspaceId), 0, "denied");
+  await run(() => {});
+  await run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET max_assistant_profiles=2 WHERE workspace_id=?").run(workspaceId), 1);
+  await run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET max_assistant_profiles=1 WHERE workspace_id=?").run(workspaceId), 1, "denied");
+  await run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET status='suspended',suspended_at=? WHERE workspace_id=?").run(at, workspaceId), 0, "denied");
 });
 
-test("EPIC046 unmanaged Web Chat preflight preserves shared administrative compatibility", () => {
-  const run = (configure: (db: DatabaseSync, workspaceId: number, companyId: number, profileId: string) => void, expected: "allowed" | "denied"): void => {
+test("EPIC046 unmanaged Web Chat preflight preserves shared administrative compatibility", async () => {
+  const run = async (configure: (db: DatabaseSync, workspaceId: number, companyId: number, profileId: string) => void, expected: "allowed" | "denied"): Promise<void> => {
     const db = open();
     try {
       const workspace = new WorkspaceRepository(db).resolveDefault(), context = { workspaceId: workspace.id, workspaceKey: workspace.key }, companies = new CompanyRepository(db), company = companies.create(context, { name: "Channel compatibility", website: "https://channel-compatibility.test" });
@@ -924,16 +986,16 @@ test("EPIC046 unmanaged Web Chat preflight preserves shared administrative compa
       const target = webChatConnectionId("wcc_04600000000000000000000000000003");
       db.prepare("INSERT INTO web_chat_connections(id,public_id,workspace_id,company_id,assistant_profile_id,status,created_at,updated_at) VALUES(?,?,?,?,?,'inactive',?,?)").run(target, "wcp_04600000000000000000000000000003", workspace.id, company.id, profile.id, at, at);
       configure(db, workspace.id, company.id, profile.id);
-      const service = new WebChatConnectionService(companies, new AssistantProfileRepository(db), new WebChatConnectionRepository(db), { now: () => at }, new BillingEntitlementService(db));
-      if (expected === "allowed") assert.equal(service.setStatus(context, company.id, target, { status: "active" }).status, "active");
-      else assert.throws(() => service.setStatus(context, company.id, target, { status: "active" }), WebChatConnectionCapacityError);
+      const service = new WebChatConnectionService(companies, new AssistantProfileRepository(db), new WebChatConnectionRepository(db), { now: () => at }, asyncBillingEntitlements(db));
+      if (expected === "allowed") assert.equal((await service.setStatus(context, company.id, target, { status: "active" })).status, "active");
+      else await assert.rejects(service.setStatus(context, company.id, target, { status: "active" }), WebChatConnectionCapacityError);
       assert.equal((new WebChatConnectionRepository(db).findById(context, company.id, target)!).status, expected === "allowed" ? "active" : "inactive");
     } finally { db.close(); }
   };
-  run(() => {}, "allowed");
-  run((db, workspaceId, companyId, profileId) => { db.prepare("INSERT INTO whatsapp_connections(id,workspace_id,company_id,assistant_profile_id,phone_number_id,whatsapp_business_account_id,status,created_at,updated_at) VALUES('wac_046compat',?,?,?,'phonecompat','wabacompat','active',?,?)").run(workspaceId, companyId, profileId, at, at); db.prepare("UPDATE workspace_commercial_controls SET max_active_channels=2 WHERE workspace_id=?").run(workspaceId); }, "allowed");
-  run((db, workspaceId, companyId, profileId) => { db.prepare("INSERT INTO whatsapp_connections(id,workspace_id,company_id,assistant_profile_id,phone_number_id,whatsapp_business_account_id,status,created_at,updated_at) VALUES('wac_046limit',?,?,?,'phonelimit','wabalimit','active',?,?)").run(workspaceId, companyId, profileId, at, at); db.prepare("UPDATE workspace_commercial_controls SET max_active_channels=1 WHERE workspace_id=?").run(workspaceId); }, "denied");
-  run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET status='suspended',suspended_at=? WHERE workspace_id=?").run(at, workspaceId), "denied");
+  await run(() => {}, "allowed");
+  await run((db, workspaceId, companyId, profileId) => { db.prepare("INSERT INTO whatsapp_connections(id,workspace_id,company_id,assistant_profile_id,phone_number_id,whatsapp_business_account_id,status,created_at,updated_at) VALUES('wac_046compat',?,?,?,'phonecompat','wabacompat','active',?,?)").run(workspaceId, companyId, profileId, at, at); db.prepare("UPDATE workspace_commercial_controls SET max_active_channels=2 WHERE workspace_id=?").run(workspaceId); }, "allowed");
+  await run((db, workspaceId, companyId, profileId) => { db.prepare("INSERT INTO whatsapp_connections(id,workspace_id,company_id,assistant_profile_id,phone_number_id,whatsapp_business_account_id,status,created_at,updated_at) VALUES('wac_046limit',?,?,?,'phonelimit','wabalimit','active',?,?)").run(workspaceId, companyId, profileId, at, at); db.prepare("UPDATE workspace_commercial_controls SET max_active_channels=1 WHERE workspace_id=?").run(workspaceId); }, "denied");
+  await run((db, workspaceId) => db.prepare("UPDATE workspace_commercial_controls SET status='suspended',suspended_at=? WHERE workspace_id=?").run(at, workspaceId), "denied");
 });
 
 test("EPIC046 two SQLite workers preserve effective Billing capacity ceilings", async () => {
@@ -1069,7 +1131,7 @@ test("EPIC046 PASS4F7B payer identity mutations require exact own identity bodie
   assert.equal((fixture.db.prepare("SELECT billing_payer_identity_id FROM billing_accounts WHERE id=?").get(fixture.account.id) as {billing_payer_identity_id:string|null}).billing_payer_identity_id,null);
 }));
 
-test("EPIC046 PASS4F7B payer identity mutation returns one CAS conflict without retrying a deterministic race", () => {
+test("EPIC046 PASS4F7B payer identity mutation returns one CAS conflict without retrying a deterministic race", async () => {
   const db=open(); try {
     const workspaceId=defaultWorkspace(db), accounts=new BillingAccountRepository(db), account=accounts.findByWorkspace(workspaceId)!;
     db.prepare("INSERT INTO users(id,status,locale,created_at,updated_at) VALUES('payer-race','active','en',?,?)").run(at,at);
@@ -1077,7 +1139,7 @@ test("EPIC046 PASS4F7B payer identity mutation returns one CAS conflict without 
     db.prepare("INSERT INTO authentication_identities(id,user_id,email,normalized_email,email_verified,created_at,updated_at) VALUES('payer-race-caller','payer-race','caller@example.test','caller@example.test',1,?,?),('payer-race-selected','payer-race','selected@example.test','selected@example.test',1,?,?)").run(at,at,at,at);
     let raced=false;
     const service=new BillingApplicationService(db,null as never,{checkoutSuccess:"https://atlas.test/success",checkoutCancel:"https://atlas.test/cancel",portalReturn:"https://atlas.test/portal"},()=>{ if(!raced) { raced=true; db.prepare("UPDATE billing_accounts SET version=version+1 WHERE id=?").run(account.id); } return at; });
-    assert.deepEqual(service.setPayerIdentity(workspaceId,"payer-race-caller","payer-race-selected"),{status:"conflict"});
+    assert.deepEqual(await service.setPayerIdentity(workspaceId,"payer-race-caller","payer-race-selected"),{status:"conflict"});
     assert.equal(raced,true); assert.deepEqual(accounts.findById(account.id),{...account,version:account.version+1});
   } finally { db.close(); }
 });

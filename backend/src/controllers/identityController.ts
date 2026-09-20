@@ -8,7 +8,8 @@ import { AuthenticationConflict, AuthenticationFailure, type AuthenticationServi
 import { PasswordPolicyError } from "../identity/domain/authentication.js";
 import type { RequestOriginPolicy } from "../identity/infrastructure/requestOriginPolicy.js";
 import { EffectiveRequestAuthorityResolver } from "../identity/infrastructure/requestOriginPolicy.js";
-import { PlatformBootstrapConflict, PlatformBootstrapError, type PlatformBootstrapService } from "../identity/services/platformBootstrapService.js";
+import { PlatformBootstrapConflict, PlatformBootstrapError } from "../identity/services/platformBootstrapService.js";
+import type { AsyncPlatformBootstrapService } from "../identity/services/asyncPlatformBootstrapService.js";
 import { PasswordResetError, type PasswordResetService } from "../identity/services/passwordResetService.js";
 import { AbuseLimitExceededError, credentialEnrollmentRequestLimit, passwordResetRequestLimit, registrationLimit, resendVerificationLimit, type RateLimitService } from "../abuse/rateLimitService.js";
 import { normalizedIdentityScope } from "../abuse/sharedRateLimitRepository.js";
@@ -34,16 +35,16 @@ function clearCookie(service:AuthenticationService):string{return `${service.coo
 function safe(handler:RequestHandler):RequestHandler{return async(req,res,next)=>{try{await handler(req,res,next);}catch(error:unknown){if(error instanceof PasswordPolicyError){res.status(400).json({error:"Password does not meet policy."});return;}if(error instanceof AuthenticationConflict){res.status(409).json({error:"Authentication state changed. Try again."});return;}if(error instanceof AuthenticationFailure){res.status(401).json({error:"Authentication failed."});return;}res.status(503).json({error:"Authentication is temporarily unavailable."});}};}
 
 export function createAuthenticationControllers(service:AuthenticationService,originPolicy:RequestOriginPolicy,limiter?:RateLimitService):Record<"requestEnrollment"|"completeEnrollment"|"login"|"bootstrap"|"refresh"|"current"|"replacePassword"|"logout",RequestHandler>{
-  const stateChange=(request:Parameters<RequestHandler>[0]):string=>{if(!originAllowed(request,originPolicy))throw new AuthenticationFailure();const raw=cookie(request,service.cookieName());if(!raw||typeof request.headers["x-csrf-token"]!=="string"||!service.validateCsrf(raw,request.headers["x-csrf-token"]))throw new AuthenticationFailure();return raw;};
+  const stateChange=async(request:Parameters<RequestHandler>[0]):Promise<string>=>{if(!originAllowed(request,originPolicy))throw new AuthenticationFailure();const raw=cookie(request,service.cookieName());if(!raw||typeof request.headers["x-csrf-token"]!=="string"||!await service.validateCsrf(raw,request.headers["x-csrf-token"]))throw new AuthenticationFailure();return raw;};
   return {
-    requestEnrollment:async(req,res)=>{try{const b=record(req.body),email=stringField(b,"email");limiter?.enforce(normalizedIdentityScope(email),"identity",credentialEnrollmentRequestLimit);await service.requestEnrollment(email);}catch(error){if(error instanceof AbuseLimitExceededError){res.setHeader("Retry-After",String(error.retryAfterSeconds));res.status(429).json({error:{code:"rate_limited",message:"Request is temporarily unavailable."}});return;}}res.status(202).json({status:"credential_enrollment_requested"});},
+    requestEnrollment:async(req,res)=>{try{const b=record(req.body),email=stringField(b,"email");await limiter?.enforce(normalizedIdentityScope(email),"identity",credentialEnrollmentRequestLimit);await service.requestEnrollment(email);}catch(error){if(error instanceof AbuseLimitExceededError){res.setHeader("Retry-After",String(error.retryAfterSeconds));res.status(429).json({error:{code:"rate_limited",message:"Request is temporarily unavailable."}});return;}}res.status(202).json({status:"credential_enrollment_requested"});},
     completeEnrollment:safe(async(req,res)=>{const b=record(req.body);await service.completeEnrollment(stringField(b,"proof"),stringField(b,"password"),stringField(b,"confirmation"));res.status(204).end();}),
     login:safe(async(req,res)=>{const b=record(req.body);const grant=await service.login(stringField(b,"email"),stringField(b,"password"),req.ip??"unknown");res.setHeader("set-cookie",cookieValue(service,grant));res.status(200).json({status:"authenticated",csrfToken:grant.csrfToken,csrfGeneration:grant.csrfGeneration});}),
-    bootstrap:async(req,res)=>{res.setHeader("Cache-Control","no-store, private");res.setHeader("Pragma","no-cache");if(!originAllowed(req,originPolicy)){res.status(403).json({error:"Request not allowed."});return;}let body:Record<string,unknown>;try{body=record(req.body);}catch{res.status(400).json({error:"Invalid request."});return;}if(Object.keys(body).length!==0){res.status(400).json({error:"Invalid request."});return;}const raw=cookie(req,service.cookieName());if(!raw){res.status(401).json({status:"unauthenticated"});return;}try{const result=service.bootstrapSession(raw);res.status(200).json({status:"authenticated",identity:result.identity,csrfToken:result.csrfToken,csrfGeneration:result.csrfGeneration});}catch(error:unknown){if(error instanceof AuthenticationConflict){res.status(409).json({error:"Authentication state changed. Try again."});return;}if(error instanceof AuthenticationFailure){res.setHeader("set-cookie",clearCookie(service));res.status(401).json({status:"unauthenticated"});return;}res.status(503).json({error:"Authentication is temporarily unavailable."});}},
-    refresh:safe((req,res)=>{const raw=stateChange(req);const grant=service.refresh(raw);res.setHeader("set-cookie",cookieValue(service,grant));res.json({status:"refreshed",csrfToken:grant.csrfToken});}),
-    current:safe((req,res)=>{const raw=cookie(req,service.cookieName());const current=raw?service.current(raw):null;if(!current){res.status(401).json({status:"unauthenticated"});return;}const {authenticationIdentityId:_authenticationIdentityId,...safeCurrent}=current;res.json({...safeCurrent,workspaceAccess:"none"});}),
-    replacePassword:safe(async(req,res)=>{const raw=stateChange(req);const b=record(req.body);await service.replacePassword(raw,stringField(b,"currentPassword"),stringField(b,"newPassword"),stringField(b,"confirmation"));res.setHeader("set-cookie",clearCookie(service));res.status(204).end();}),
-    logout:async(req,res)=>{const raw=cookie(req,service.cookieName());if(!raw){res.setHeader("set-cookie",clearCookie(service));res.status(204).end();return;}if(!originAllowed(req,originPolicy)){res.status(403).json({error:"Request not allowed."});return;}if(typeof req.headers["x-csrf-token"]!=="string"||!service.validateCsrf(raw,req.headers["x-csrf-token"])){res.status(401).json({error:"Authentication failed."});return;}try{service.logout(raw);res.setHeader("set-cookie",clearCookie(service));res.status(204).end();}catch{res.status(503).json({error:"Authentication is temporarily unavailable."});}},
+    bootstrap:async(req,res)=>{res.setHeader("Cache-Control","no-store, private");res.setHeader("Pragma","no-cache");if(!originAllowed(req,originPolicy)){res.status(403).json({error:"Request not allowed."});return;}let body:Record<string,unknown>;try{body=record(req.body);}catch{res.status(400).json({error:"Invalid request."});return;}if(Object.keys(body).length!==0){res.status(400).json({error:"Invalid request."});return;}const raw=cookie(req,service.cookieName());if(!raw){res.status(401).json({status:"unauthenticated"});return;}try{const result=await service.bootstrapSession(raw);res.status(200).json({status:"authenticated",identity:result.identity,csrfToken:result.csrfToken,csrfGeneration:result.csrfGeneration});}catch(error:unknown){if(error instanceof AuthenticationConflict){res.status(409).json({error:"Authentication state changed. Try again."});return;}if(error instanceof AuthenticationFailure){res.setHeader("set-cookie",clearCookie(service));res.status(401).json({status:"unauthenticated"});return;}res.status(503).json({error:"Authentication is temporarily unavailable."});}},
+    refresh:safe(async(req,res)=>{const raw=await stateChange(req),grant=await service.refresh(raw);res.setHeader("set-cookie",cookieValue(service,grant));res.json({status:"refreshed",csrfToken:grant.csrfToken});}),
+    current:safe(async(req,res)=>{const raw=cookie(req,service.cookieName()),current=raw?await service.current(raw):null;if(!current){res.status(401).json({status:"unauthenticated"});return;}const {authenticationIdentityId:_authenticationIdentityId,...safeCurrent}=current;res.json({...safeCurrent,workspaceAccess:"none"});}),
+    replacePassword:safe(async(req,res)=>{const raw=await stateChange(req);const b=record(req.body);await service.replacePassword(raw,stringField(b,"currentPassword"),stringField(b,"newPassword"),stringField(b,"confirmation"));res.setHeader("set-cookie",clearCookie(service));res.status(204).end();}),
+    logout:async(req,res)=>{const raw=cookie(req,service.cookieName());if(!raw){res.setHeader("set-cookie",clearCookie(service));res.status(204).end();return;}if(!originAllowed(req,originPolicy)){res.status(403).json({error:"Request not allowed."});return;}if(typeof req.headers["x-csrf-token"]!=="string"||!await service.validateCsrf(raw,req.headers["x-csrf-token"])){res.status(401).json({error:"Authentication failed."});return;}try{await service.logout(raw);res.setHeader("set-cookie",clearCookie(service));res.status(204).end();}catch{res.status(503).json({error:"Authentication is temporarily unavailable."});}},
   };
 }
 
@@ -51,7 +52,7 @@ export function createRegistrationController(service: RegistrationService, limit
   return async (request, response) => {
     try {
       const input = registrationInput(request.body);
-      limiter?.enforce(normalizedIdentityScope(input.email), "identity", registrationLimit);
+      await limiter?.enforce(normalizedIdentityScope(input.email), "identity", registrationLimit);
       await service.register(input.email, input.locale, input.fullName, input.password, input.confirmation);
       response.status(202).json({ status: "verification_requested" });
     } catch (error: unknown) {
@@ -66,7 +67,7 @@ export function createResendVerificationController(service: ResendEmailVerificat
   return async (request, response) => {
     try {
       const input = verificationRequestInput(request.body);
-      limiter?.enforce(normalizedIdentityScope(input.email), "identity", resendVerificationLimit);
+      await limiter?.enforce(normalizedIdentityScope(input.email), "identity", resendVerificationLimit);
       await service.resend(input.email, input.locale);
       response.status(202).json({ status: "verification_requested" });
     } catch (error: unknown) {
@@ -78,14 +79,14 @@ export function createResendVerificationController(service: ResendEmailVerificat
 }
 
 export function createVerifyEmailController(service: VerifyEmailService): RequestHandler {
-  return (request, response) => {
+  return async (request, response) => {
     const proof = request.query.proof;
     if (typeof proof !== "string" || Object.keys(request.query).some((key) => key !== "proof")) {
       response.status(400).json({ status: "invalid_or_expired" });
       return;
     }
     try {
-      const result = service.verify(proof);
+      const result = await service.verify(proof);
       response.status(result === "verified" ? 200 : 400).json(result === "verified" ? { status: result, nextStep: "login" } : { status: result });
     } catch {
       response.status(503).json({ error: "Verification is temporarily unavailable." });
@@ -96,7 +97,7 @@ export function createVerifyEmailController(service: VerifyEmailService): Reques
 export function createPasswordResetControllers(service: PasswordResetService, limiter?: RateLimitService): Record<"requestPasswordReset" | "completePasswordReset", RequestHandler> {
   return {
     requestPasswordReset: async (request, response) => {
-      try { const input = verificationRequestInput(request.body); limiter?.enforce(normalizedIdentityScope(input.email), "identity", passwordResetRequestLimit); await service.request(input.email, input.locale); } catch (error) { if (error instanceof AbuseLimitExceededError) { response.setHeader("Retry-After", String(error.retryAfterSeconds)); response.status(429).json({ error: { code: "rate_limited", message: "Request is temporarily unavailable." } }); return; } /* Enumeration-safe response. */ }
+      try { const input = verificationRequestInput(request.body); await limiter?.enforce(normalizedIdentityScope(input.email), "identity", passwordResetRequestLimit); await service.request(input.email, input.locale); } catch (error) { if (error instanceof AbuseLimitExceededError) { response.setHeader("Retry-After", String(error.retryAfterSeconds)); response.status(429).json({ error: { code: "rate_limited", message: "Request is temporarily unavailable." } }); return; } /* Enumeration-safe response. */ }
       response.status(202).json({ status: "password_reset_requested" });
     },
     completePasswordReset: async (request, response) => {
@@ -123,13 +124,13 @@ function bootstrapInput(body: unknown, setupSecret: unknown): { email: string; l
   return { email: input.email, locale: input.locale, password: input.password, confirmation: input.confirmation, setupSecret };
 }
 
-export function createPlatformBootstrapControllers(service: PlatformBootstrapService, authentication: AuthenticationService): Record<"status" | "bootstrap", RequestHandler> {
+export function createPlatformBootstrapControllers(service: AsyncPlatformBootstrapService, authentication: AuthenticationService): Record<"status" | "bootstrap", RequestHandler> {
   return {
-    status: (request, response) => {
+    status: async (request, response) => {
       if (Object.keys(request.query).length !== 0) { response.status(400).json({ error: "Invalid request." }); return; }
       try {
         response.setHeader("Cache-Control", "no-store, private");
-        response.json({ initialized: service.initialized() });
+        response.json({ initialized: await service.initialized() });
       } catch {
         response.status(503).json({ error: "Bootstrap status is temporarily unavailable." });
       }

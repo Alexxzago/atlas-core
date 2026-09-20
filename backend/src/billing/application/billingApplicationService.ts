@@ -1,103 +1,25 @@
 import { createHash } from "node:crypto";
-import { BillingAccountRepository, BillingCatalogRepository, BillingEntitlementSnapshotRepository, BillingSubscriptionRepository } from "../../repositories/billingRepository.js";
-import { BillingOperationService, type BillingOperationOutcome, type BillingPortalOutcome } from "./billingOperationService.js";
-import { BillingPayerIdentityService } from "./billingPayerIdentityService.js";
-
-export type BillingCapabilitiesDto = Readonly<{ canOpenBillingPortal:boolean; canCancel:boolean; canReactivate:boolean; canStartNewCheckout:boolean; canSwitchProvider:false }>;
-export type BillingSummaryDto = Readonly<{ rolloutMode:"unmanaged"|"managed"; subscription:Readonly<{ state:string; plan:Readonly<{ key:string; name:string; interval:"month"|"year"; currency:string; amountMinor:number }>|null }>; }>;
-export type CustomerBillingSummaryDto = Readonly<{ rolloutMode:"unmanaged"|"managed"; subscription:Readonly<{ state:string; plan:Readonly<{ key:string; name:string; interval:"month"|"year"; currency:string; amountMinor:number }>|null }>; entitlement:BillingEntitlementsDto|null; capabilities:BillingCapabilitiesDto; }>;
-export type BillingEntitlementsDto = Readonly<{ state:string; maxCompanies:number|null; maxAssistantProfiles:number|null; maxActiveChannels:number|null; mutationEligible:boolean; effectiveAt:string; expiresAt:string|null; }>;
-export type BillingApplicationOutcome = "succeeded"|"failed"|"uncertain"|"in_progress"|"conflict"|"invalid"|"unavailable"|"unsupported";
-export type BillingCatalogDto = Readonly<{ entries:readonly Readonly<{ id:string; providerCommercialOfferId:string; key:string; version:number; name:string; interval:"month"|"year"; currency:string; amountMinor:number; }>[] }>;
-export type BillingPayerIdentityOptionsDto = Readonly<{ options:readonly Readonly<{ identityId:string; email:string }>[] }>;
-export type BillingOfferDto = Readonly<{ offerId:string; provider:"stripe"|"mercadopago"; key:string; version:number; name:string; description:string; inclusions:readonly Readonly<{ code:string; title:string; description:string }> []; interval:"month"|"year"; currency:string; amountMinor:number; checkoutAvailable:boolean }>;
-export type BillingOffersDto = Readonly<{ offers:readonly BillingOfferDto[] }>;
-export type BillingManagementActionsDto = Readonly<{ actions:readonly ("portal"|"cancel"|"reactivate")[]; capabilities:BillingCapabilitiesDto }>;
-
+import type { AsyncBillingCustomerReadRepository, AsyncBillingPayerIdentityRepository } from "../infrastructure/asyncBillingCustomerPersistence.js";
+import { BillingOperationService, type BillingOperationOutcome } from "./billingOperationService.js";
+export type BillingCapabilitiesDto=Readonly<{canOpenBillingPortal:boolean;canCancel:boolean;canReactivate:boolean;canStartNewCheckout:boolean;canSwitchProvider:false}>;
+export type BillingEntitlementsDto=Readonly<{state:string;maxCompanies:number|null;maxAssistantProfiles:number|null;maxActiveChannels:number|null;mutationEligible:boolean;effectiveAt:string;expiresAt:string|null}>;
 export class BillingApplicationService {
-  private readonly accounts: BillingAccountRepository;
-  private readonly catalog: BillingCatalogRepository;
-  private readonly subscriptions: BillingSubscriptionRepository;
-  private readonly entitlements: BillingEntitlementSnapshotRepository;
-  private readonly payerIdentities: BillingPayerIdentityService;
-
-  public constructor(database: import("../../config/synchronousDatabase.js").SynchronousDatabase, private readonly operations: BillingOperationService, private readonly targets: Readonly<{ checkoutSuccess:string; checkoutCancel:string; portalReturn:string; }>, now:()=>string=()=>new Date().toISOString()) {
-    this.accounts = new BillingAccountRepository(database);
-    this.catalog = new BillingCatalogRepository(database);
-    this.subscriptions = new BillingSubscriptionRepository(database);
-    this.entitlements = new BillingEntitlementSnapshotRepository(database);
-    this.payerIdentities = new BillingPayerIdentityService(database, now);
-  }
-
-  public summary(workspaceId:number): BillingSummaryDto | null {
-    const account = this.accounts.findByWorkspace(workspaceId);
-    if (!account) return null;
-    const subscription = this.subscriptions.current(account.id), entry = subscription?.catalogEntryId ? this.catalog.find(subscription.catalogEntryId) : null, offer=subscription?.providerCommercialOfferId?this.catalog.offer(subscription.providerCommercialOfferId):null;
-    return Object.freeze({ rolloutMode:account.rolloutMode, subscription:Object.freeze({ state:subscription?.effectiveState ?? "unmanaged", plan:entry&&offer ? Object.freeze({ key:entry.planKey, name:entry.displayName, interval:offer.interval, currency:offer.currency, amountMinor:offer.amountMinor }) : null }) });
-  }
-
-  public customerSummary(workspaceId:number):CustomerBillingSummaryDto|null { const summary=this.summary(workspaceId),account=this.accounts.findByWorkspace(workspaceId); return summary&&account?Object.freeze({...summary,entitlement:entitlement(this.entitlements.current(account.id)),capabilities:this.operations.managementCapabilities(workspaceId,sellableOffers(this.catalog))}):null; }
-
-  public entitlementsFor(workspaceId:number): BillingEntitlementsDto | null {
-    const account = this.accounts.findByWorkspace(workspaceId), snapshot = account ? this.entitlements.current(account.id) : null;
-    return snapshot ? Object.freeze({ state:snapshot.state, maxCompanies:snapshot.maxCompanies, maxAssistantProfiles:snapshot.maxAssistantProfiles, maxActiveChannels:snapshot.maxActiveChannels, mutationEligible:snapshot.mutationEligible, effectiveAt:snapshot.effectiveAt, expiresAt:snapshot.expiresAt }) : null;
-  }
-
-  public catalogForWorkspace(workspaceId:number):BillingCatalogDto|null {
-    if (!this.accounts.findByWorkspace(workspaceId)) return null;
-    return Object.freeze({ entries:Object.freeze(this.catalog.active().flatMap(entry=>this.catalog.sellableOffers(entry.id).map(offer=>Object.freeze({ id:entry.id, providerCommercialOfferId:offer.id, key:entry.planKey, version:entry.catalogVersion, name:entry.displayName, interval:offer.interval, currency:offer.currency, amountMinor:offer.amountMinor })))) });
-  }
-
-  public offersForWorkspace(workspaceId:number):BillingOffersDto|null {
-    if (!this.accounts.findByWorkspace(workspaceId)) return null;
-    return Object.freeze({offers:Object.freeze(this.catalog.published().flatMap(entry=>{const inclusions=Object.freeze(this.catalog.inclusions(entry.id).map(value=>Object.freeze({code:value.code,title:value.displayTitle,description:value.displayDescription})));return this.catalog.sellableOffers(entry.id).map(offer=>Object.freeze({offerId:offer.id,provider:offer.providerKind,key:entry.planKey,version:entry.catalogVersion,name:entry.displayName,description:entry.description,inclusions,interval:offer.interval,currency:offer.currency,amountMinor:offer.amountMinor,checkoutAvailable:this.operations.managementCapabilities(workspaceId,[offer]).canStartNewCheckout}));}))});
-  }
-
-  public managementActionsFor(workspaceId:number):BillingManagementActionsDto|null { return this.accounts.findByWorkspace(workspaceId)?Object.freeze({actions:this.operations.supportedManagementActions(workspaceId),capabilities:this.operations.managementCapabilities(workspaceId,sellableOffers(this.catalog))}):null; }
-
-  public payerIdentityOptionsFor(workspaceId:number, callerIdentityId:string):BillingPayerIdentityOptionsDto|null {
-    const account=this.accounts.findByWorkspace(workspaceId), options=this.payerIdentities.optionsForWorkspace({workspaceId,callerIdentityId});
-    return account&&options?Object.freeze({options}):null;
-  }
-
-  public setPayerIdentity(workspaceId:number, callerIdentityId:string, identityId:string):Readonly<{status:"succeeded"|"conflict"|"invalid"}> {
-    const account=this.accounts.findByWorkspace(workspaceId);
-    if(!account)return Object.freeze({status:"invalid"});
-    const result=this.payerIdentities.setOwnedForWorkspace({workspaceId,callerIdentityId,identityId,expectedVersion:account.version});
-    return Object.freeze({status:result.kind==="succeeded"?"succeeded":result.kind==="conflict"?"conflict":"invalid"});
-  }
-
-  public clearPayerIdentity(workspaceId:number, callerIdentityId:string, identityId:string):Readonly<{status:"succeeded"|"conflict"|"invalid"}> {
-    const account=this.accounts.findByWorkspace(workspaceId);
-    if(!account)return Object.freeze({status:"invalid"});
-    const result=this.payerIdentities.clearOwnedForWorkspace({workspaceId,callerIdentityId,identityId,expectedVersion:account.version});
-    return Object.freeze({status:result.kind==="succeeded"?"succeeded":result.kind==="conflict"?"conflict":"invalid"});
-  }
-
-  public async checkout(workspaceId:number, catalogEntryId:string, providerCommercialOfferId:string, idempotencyKey:string):Promise<Readonly<{ status:BillingApplicationOutcome; redirectUrl?:string }>> {
-    const result = await this.operations.checkout({ workspaceId, catalogEntryId, providerCommercialOfferId, operationId:operationId("checkout", idempotencyKey), successTarget:this.targets.checkoutSuccess, cancelTarget:this.targets.checkoutCancel });
-    return operationDto(result);
-  }
-
-  public async checkoutOffer(workspaceId:number, offerId:string, idempotencyKey:string):Promise<Readonly<{ status:BillingApplicationOutcome; redirectUrl?:string }>> { const offer=this.catalog.offer(offerId); if(!offer)return Object.freeze({status:"invalid"}); return this.checkout(workspaceId,offer.catalogEntryId,offer.id,idempotencyKey); }
-
-  public async portal(workspaceId:number):Promise<Readonly<{ status:"succeeded"|"failed"|"uncertain"|"invalid"|"unavailable"|"unsupported"; redirectUrl?:string }>> {
-    const result = await this.operations.portal({ workspaceId, returnTarget:this.targets.portalReturn });
-    return result.kind === "succeeded" ? Object.freeze({ status:"succeeded", ...(result.result.kind === "success" && result.result.redirectUrl ? { redirectUrl:result.result.redirectUrl } : {}) }) : Object.freeze({ status:result.kind });
-  }
-
-  public async cancel(workspaceId:number, idempotencyKey:string):Promise<Readonly<{ status:BillingApplicationOutcome }>> { return this.subscriptionMutation(workspaceId, idempotencyKey, "cancel"); }
-  public async reactivate(workspaceId:number, idempotencyKey:string):Promise<Readonly<{ status:BillingApplicationOutcome }>> { return this.subscriptionMutation(workspaceId, idempotencyKey, "reactivate"); }
-
-  private async subscriptionMutation(workspaceId:number, idempotencyKey:string, kind:"cancel"|"reactivate"):Promise<Readonly<{ status:BillingApplicationOutcome }>> {
-    const account = this.accounts.findByWorkspace(workspaceId), subscription = account ? this.subscriptions.current(account.id) : null;
-    if (!subscription) return Object.freeze({ status:"invalid" });
-    const result = kind === "cancel" ? await this.operations.cancelAtPeriodEnd({ workspaceId, subscriptionId:subscription.id, operationId:operationId(kind, idempotencyKey) }) : await this.operations.reactivate({ workspaceId, subscriptionId:subscription.id, operationId:operationId(kind, idempotencyKey) });
-    return Object.freeze({ status:result.kind });
-  }
+  public constructor(private readonly customer:AsyncBillingCustomerReadRepository,private readonly payers:AsyncBillingPayerIdentityRepository,private readonly operations:BillingOperationService,private readonly targets:Readonly<{checkoutSuccess:string;checkoutCancel:string;portalReturn:string}>,private readonly now:()=>string=()=>new Date().toISOString()){}
+  public async summary(workspaceId:number):Promise<unknown|null>{const account=await this.customer.account(workspaceId);if(!account)return null;const sub=await this.customer.subscription(account.id),entry=sub?.catalogEntryId?await this.customer.entry(sub.catalogEntryId):null,offer=sub?.providerCommercialOfferId?await this.customer.offer(sub.providerCommercialOfferId):null;return Object.freeze({rolloutMode:account.rolloutMode,subscription:Object.freeze({state:sub?.effectiveState??"unmanaged",plan:entry&&offer?Object.freeze({key:entry.planKey,name:entry.displayName,interval:offer.interval,currency:offer.currency,amountMinor:offer.amountMinor}):null})});}
+  public async customerSummary(workspaceId:number):Promise<unknown|null>{const account=await this.customer.account(workspaceId),summary=await this.summary(workspaceId);if(!account||!summary)return null;const [value,offers]=await Promise.all([this.customer.entitlement(account.id),this.allOffers()]);return Object.freeze({...summary,entitlement:value?Object.freeze({state:value.state,maxCompanies:value.maxCompanies,maxAssistantProfiles:value.maxAssistantProfiles,maxActiveChannels:value.maxActiveChannels,mutationEligible:value.mutationEligible,effectiveAt:value.effectiveAt,expiresAt:value.expiresAt}):null,capabilities:await this.operations.managementCapabilities(workspaceId,offers)});}
+  public async entitlementsFor(workspaceId:number):Promise<BillingEntitlementsDto|null>{const account=await this.customer.account(workspaceId),value=account?await this.customer.entitlement(account.id):null;return value?Object.freeze({state:value.state,maxCompanies:value.maxCompanies,maxAssistantProfiles:value.maxAssistantProfiles,maxActiveChannels:value.maxActiveChannels,mutationEligible:value.mutationEligible,effectiveAt:value.effectiveAt,expiresAt:value.expiresAt}):null;}
+  public async catalogForWorkspace(workspaceId:number):Promise<unknown|null>{if(!await this.customer.account(workspaceId))return null;const entries=await this.customer.published(),values=await Promise.all(entries.map(async entry=>(await this.customer.sellableOffers(entry.id)).map(offer=>Object.freeze({id:entry.id,providerCommercialOfferId:offer.id,key:entry.planKey,version:entry.catalogVersion,name:entry.displayName,interval:offer.interval,currency:offer.currency,amountMinor:offer.amountMinor}))));return Object.freeze({entries:Object.freeze(values.flat())});}
+  public async offersForWorkspace(workspaceId:number):Promise<unknown|null>{if(!await this.customer.account(workspaceId))return null;const entries=await this.customer.published(),groups=await Promise.all(entries.map(async entry=>{const [inclusions,offers]=await Promise.all([this.customer.inclusions(entry.id),this.customer.sellableOffers(entry.id)]);return Promise.all(offers.map(async offer=>Object.freeze({offerId:offer.id,provider:offer.providerKind,key:entry.planKey,version:entry.catalogVersion,name:entry.displayName,description:entry.description,inclusions,interval:offer.interval,currency:offer.currency,amountMinor:offer.amountMinor,checkoutAvailable:(await this.operations.managementCapabilities(workspaceId,[offer])).canStartNewCheckout})));}));return Object.freeze({offers:Object.freeze(groups.flat())});}
+  public async managementActionsFor(workspaceId:number):Promise<unknown|null>{if(!await this.customer.account(workspaceId))return null;const offers=await this.allOffers();return Object.freeze({actions:await this.operations.supportedManagementActions(workspaceId),capabilities:await this.operations.managementCapabilities(workspaceId,offers)});}
+  public async payerIdentityOptionsFor(workspaceId:number,callerId:string):Promise<unknown|null>{return await this.customer.account(workspaceId)?Object.freeze({options:await this.payers.options(workspaceId,callerId)}):null;}
+  public async setPayerIdentity(workspaceId:number,callerId:string,identityId:string):Promise<Readonly<{status:"succeeded"|"conflict"|"invalid"}>>{const account=await this.customer.account(workspaceId);if(!account)return{status:"invalid"};const result=await this.payers.setOwned(workspaceId,callerId,identityId,account.version,this.now());return Object.freeze({status:result==="succeeded"?"succeeded":result==="conflict"?"conflict":"invalid"});}
+  public async clearPayerIdentity(workspaceId:number,callerId:string,identityId:string):Promise<Readonly<{status:"succeeded"|"conflict"|"invalid"}>>{const account=await this.customer.account(workspaceId);if(!account)return{status:"invalid"};const result=await this.payers.clearOwned(workspaceId,callerId,identityId,account.version,this.now());return Object.freeze({status:result==="succeeded"?"succeeded":result==="conflict"?"conflict":"invalid"});}
+  public async checkout(workspaceId:number,entryId:string,offerId:string,key:string):Promise<Readonly<{status:string;redirectUrl?:string}>>{return dto(await this.operations.checkout({workspaceId,catalogEntryId:entryId,providerCommercialOfferId:offerId,operationId:id("checkout",key),successTarget:this.targets.checkoutSuccess,cancelTarget:this.targets.checkoutCancel}));}
+  public async checkoutOffer(workspaceId:number,offerId:string,key:string):Promise<Readonly<{status:string;redirectUrl?:string}>>{const offer=await this.customer.offer(offerId);return offer?this.checkout(workspaceId,offer.catalogEntryId,offer.id,key):{status:"invalid"};}
+  public async portal(workspaceId:number):Promise<Readonly<{status:string;redirectUrl?:string}>>{const result=await this.operations.portal({workspaceId,returnTarget:this.targets.portalReturn});return result.kind==="succeeded"?Object.freeze({status:"succeeded",...(result.result.kind==="success"&&result.result.redirectUrl?{redirectUrl:result.result.redirectUrl}:{})}):Object.freeze({status:result.kind});}
+  public async cancel(workspaceId:number,key:string):Promise<Readonly<{status:string}>>{return this.subscriptionMutation(workspaceId,key,"cancel");} public async reactivate(workspaceId:number,key:string):Promise<Readonly<{status:string}>>{return this.subscriptionMutation(workspaceId,key,"reactivate");}
+  private async subscriptionMutation(workspaceId:number,key:string,kind:"cancel"|"reactivate"):Promise<Readonly<{status:string}>>{const account=await this.customer.account(workspaceId),sub=account?await this.customer.subscription(account.id):null;if(!sub)return{status:"invalid"};const result=kind==="cancel"?await this.operations.cancelAtPeriodEnd({workspaceId,subscriptionId:sub.id,operationId:id(kind,key)}):await this.operations.reactivate({workspaceId,subscriptionId:sub.id,operationId:id(kind,key)});return{status:result.kind};}
+  private async allOffers(){return (await Promise.all((await this.customer.published()).map(entry=>this.customer.sellableOffers(entry.id)))).flat();}
 }
-
-function entitlement(snapshot:import("../../repositories/billingRepository.js").BillingEntitlementSnapshot|null):BillingEntitlementsDto|null{return snapshot?Object.freeze({state:snapshot.state,maxCompanies:snapshot.maxCompanies,maxAssistantProfiles:snapshot.maxAssistantProfiles,maxActiveChannels:snapshot.maxActiveChannels,mutationEligible:snapshot.mutationEligible,effectiveAt:snapshot.effectiveAt,expiresAt:snapshot.expiresAt}):null;}
-function sellableOffers(catalog:BillingCatalogRepository):readonly import("../../repositories/billingRepository.js").BillingProviderCommercialOffer[]{return Object.freeze(catalog.published().flatMap(entry=>catalog.sellableOffers(entry.id)));}
-function operationId(kind:string, key:string):string { return `http_${kind}_${createHash("sha256").update(key).digest("hex")}`; }
-function operationDto(result:BillingOperationOutcome):Readonly<{ status:BillingApplicationOutcome; redirectUrl?:string }> { if (result.kind !== "succeeded") return Object.freeze({ status:result.kind }); try { const value = result.operation?.safeResultJson ? JSON.parse(result.operation.safeResultJson) as { redirectUrl?:unknown } : {}; return Object.freeze({ status:"succeeded", ...(typeof value.redirectUrl === "string" ? { redirectUrl:value.redirectUrl } : {}) }); } catch { return Object.freeze({ status:"succeeded" }); } }
+const id=(kind:string,key:string):string=>`http_${kind}_${createHash("sha256").update(key).digest("hex")}`;
+const dto=(result:BillingOperationOutcome):Readonly<{status:string;redirectUrl?:string}>=>{if(result.kind!=="succeeded")return{status:result.kind};try{const value=JSON.parse(result.operation?.safeResultJson??"{}") as {redirectUrl?:unknown};return Object.freeze({status:"succeeded",...(typeof value.redirectUrl==="string"?{redirectUrl:value.redirectUrl}:{})});}catch{return{status:"succeeded"};}};

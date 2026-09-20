@@ -1,7 +1,7 @@
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import { integrationConnectionId } from "../../integrations/domain/integrationConnection.js";
 import { IntegrationConnectionService } from "../../integrations/services/integrationConnectionService.js";
-import type { WhatsAppLinkedIntegrationCredentialRepositoryPort, WhatsAppCredentialResolverPort } from "./ports.js";
+import type { AsyncWhatsAppCredentialResolverPort, AsyncWhatsAppLinkedIntegrationCredentialRepositoryPort } from "./ports.js";
 import { whatsAppConnectionId } from "../domain/whatsappConnection.js";
 import { WhatsAppConnectionService } from "../services/WhatsAppConnectionService.js";
 import type { MetaEmbeddedSignupProvider, MetaEmbeddedSignupProviderFailure } from "../providers/MetaEmbeddedSignupProvider.js";
@@ -13,12 +13,12 @@ export type MetaWhatsAppReadinessOutcome =
   | { readonly kind: "unready" | "reconnect_required" | "conflict" | "not_found" | "rate_limited" | "unavailable" | "timeout" | "invalid_response" | "validation_error" };
 
 export class MetaWhatsAppReadinessService {
-  public constructor(private readonly links: WhatsAppLinkedIntegrationCredentialRepositoryPort, private readonly credentials: WhatsAppCredentialResolverPort, private readonly integrations: IntegrationConnectionService, private readonly whatsApp: WhatsAppConnectionService, private readonly provider: MetaEmbeddedSignupProvider, private readonly audit?: MetaEmbeddedSignupOperationalAuditPort, private readonly clock: { now(): string } = { now: () => new Date().toISOString() }) {}
+  public constructor(private readonly links: AsyncWhatsAppLinkedIntegrationCredentialRepositoryPort, private readonly credentials: AsyncWhatsAppCredentialResolverPort, private readonly integrations: IntegrationConnectionService, private readonly whatsApp: WhatsAppConnectionService, private readonly provider: MetaEmbeddedSignupProvider, private readonly audit?: MetaEmbeddedSignupOperationalAuditPort, private readonly clock: { now(): string } = { now: () => new Date().toISOString() }) {}
   public async ensureReady(input: { readonly workspaceId: number; readonly companyId: number; readonly whatsAppConnectionId: string; readonly setupSubscription: boolean }): Promise<MetaWhatsAppReadinessOutcome> {
     const context: WorkspaceContext = Object.freeze({ workspaceId: input.workspaceId, workspaceKey: "meta-whatsapp-readiness" });
     let connection;
-    try { connection = this.whatsApp.get(context, input.companyId, whatsAppConnectionId(input.whatsAppConnectionId)); } catch { return { kind: "not_found" }; }
-    const linkedId = this.links.findIntegrationConnectionId(context, input.companyId, connection.id);
+    try { connection = await this.whatsApp.get(context, input.companyId, whatsAppConnectionId(input.whatsAppConnectionId)); } catch { return { kind: "not_found" }; }
+    const linkedId = await this.links.findIntegrationConnectionId(context, input.companyId, connection.id);
     if (!linkedId) return { kind: "unready" };
     const inspected = await this.integrations.inspect(context, input.companyId, integrationConnectionId(linkedId));
     if (!inspected || !inspected.hasCurrentSecret || inspected.connection.provider !== "meta_whatsapp" || inspected.connection.kind !== "cloud_api" || inspected.state?.validationState !== "valid" || inspected.state.healthState !== "healthy") return { kind: "unready" };
@@ -26,7 +26,7 @@ export class MetaWhatsAppReadinessService {
     try { config = reconstructMetaWhatsAppIntegrationConfiguration(inspected.connection.configuration); } catch { return { kind: "unready" }; }
     if (config.wabaId !== connection.whatsappBusinessAccountId || config.phoneNumberId !== connection.phoneNumberId) return { kind: "conflict" };
     try { if (inspected.connection.status !== "active") await this.integrations.activate(context, input.companyId, inspected.connection.id); } catch { return { kind: "unready" }; }
-    const accessToken = this.credentials.resolve(context, input.companyId, connection.id);
+    const accessToken = await this.credentials.resolve(context, input.companyId, connection.id);
     if (!accessToken) return { kind: "reconnect_required" };
     try {
       const validation = await this.whatsApp.validate(context, input.companyId, connection.id);

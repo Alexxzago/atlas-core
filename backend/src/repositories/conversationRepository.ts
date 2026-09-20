@@ -1,5 +1,5 @@
 import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
-import type { AssistantResponseFinalizationResult, ConversationEventFeedEntry, ConversationRepositoryPort, OperatorMessagePersistenceResult } from "../conversation/application/ports.js";
+import type { AssistantResponseFinalizationResult, ConversationEventFeedEntry, OperatorMessagePersistenceResult, SynchronousConversationRepositoryPort } from "../conversation/application/ports.js";
 import { randomUUID } from "node:crypto";
 import { whatsappContactLabel } from "../conversation/domain/conversationContactLabel.js";
 import {
@@ -30,7 +30,7 @@ function deliveryCategory(direction: "inbound" | "outbound"): "received" | "sent
 function safeActorId(value: string | null): string | null { return value === null ? null : "masked"; }
 function delivery(value: { state: WhatsAppOutboundDeliveryProjection["state"]; updated_at: string; safe_error_category: string | null } | undefined): WhatsAppOutboundDeliveryProjection | null { return value ? Object.freeze({ state: value.state, updatedAt: value.updated_at, safeErrorCategory: value.safe_error_category }) : null; }
 
-export class ConversationRepository implements ConversationRepositoryPort {
+export class ConversationRepository implements SynchronousConversationRepositoryPort {
   public hasCompany(context: WorkspaceContext, companyId: number): boolean { return this.db.prepare("SELECT 1 FROM companies WHERE workspace_id=? AND id=?").get(context.workspaceId, companyId) !== undefined; }
   public constructor(private readonly db: SynchronousDatabase) {}
 

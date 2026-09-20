@@ -1,5 +1,5 @@
 import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
-import type { AssistantProfileRepositoryPort, CreateAssistantProfileResult, ListActiveAssistantProfilesResult, UpdateAssistantProfileResult } from "../assistant/application/ports.js";
+import type { CreateAssistantProfileResult, ListActiveAssistantProfilesResult, UpdateAssistantProfileResult } from "../assistant/application/ports.js";
 import { reconstructAssistantProfile, type AssistantProfile, type AssistantProfileId, type AssistantLanguage, type AssistantProfileStatus, type AssistantTone } from "../assistant/domain/assistantProfile.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 
@@ -56,7 +56,7 @@ function isNameConflict(error: unknown): boolean {
   return sqlite.errcode === 2067 && error.message.includes("assistant_profiles.company_id, assistant_profiles.normalized_name");
 }
 
-export class AssistantProfileRepository implements AssistantProfileRepositoryPort {
+export class AssistantProfileRepository {
   public constructor(private readonly db: SynchronousDatabase) {}
 
   public listActive(context: WorkspaceContext, companyId: number): ListActiveAssistantProfilesResult {

@@ -41,21 +41,21 @@ export class AssistantProfileService {
 
   public constructor(private readonly profiles: AssistantProfileRepositoryPort, private readonly clock: Clock, private readonly entitlements?: BillingEntitlementPort) {}
 
-  public list(context: WorkspaceContext, companyIdValue: unknown): AssistantProfile[] {
-    const result = this.profiles.listActive(context, parseCompanyId(companyIdValue));
+  public async list(context: WorkspaceContext, companyIdValue: unknown): Promise<AssistantProfile[]> {
+    const result = await this.profiles.listActive(context, parseCompanyId(companyIdValue));
     if (result.status === "company_not_found") throw new AssistantProfileNotFoundError("Company was not found.");
     return [...result.profiles];
   }
 
-  public get(context: WorkspaceContext, companyIdValue: unknown, profileIdValue: unknown): AssistantProfile {
+  public async get(context: WorkspaceContext, companyIdValue: unknown, profileIdValue: unknown): Promise<AssistantProfile> {
     const companyId = parseCompanyId(companyIdValue);
     const profileId = parseProfileId(profileIdValue);
-    const profile = this.profiles.findById(context, companyId, profileId);
+    const profile = await this.profiles.findById(context, companyId, profileId);
     if (!profile) throw new AssistantProfileNotFoundError("Assistant Profile was not found.");
     return profile;
   }
 
-  public create(context: WorkspaceContext, companyIdValue: unknown, value: unknown): AssistantProfile {
+  public async create(context: WorkspaceContext, companyIdValue: unknown, value: unknown): Promise<AssistantProfile> {
     const companyId = parseCompanyId(companyIdValue);
     const input = createInput(value);
     const now = this.clock.now();
@@ -77,15 +77,15 @@ export class AssistantProfileService {
       updatedAt: now,
       archivedAt: null,
     });
-    this.assertCapacity(context);
-    const result = this.profiles.create(context, companyId, profile);
+    await this.assertCapacity(context);
+    const result = await this.profiles.create(context, companyId, profile);
     if (result.status === "company_not_found") throw new AssistantProfileNotFoundError("Company was not found.");
     if (result.status === "name_conflict") throw new AssistantProfileConflictError("An Assistant Profile already uses this name.");
     return result.profile;
   }
 
-  public update(context: WorkspaceContext, companyIdValue: unknown, profileIdValue: unknown, value: unknown): AssistantProfile {
-    const current = this.get(context, companyIdValue, profileIdValue);
+  public async update(context: WorkspaceContext, companyIdValue: unknown, profileIdValue: unknown, value: unknown): Promise<AssistantProfile> {
+    const current = await this.get(context, companyIdValue, profileIdValue);
     if (current.status === "archived") throw new AssistantProfileConflictError("Archived Assistant Profiles cannot be edited.");
     const changes = updateInput(value);
     const updated = reconstructAssistantProfile({
@@ -98,33 +98,33 @@ export class AssistantProfileService {
       try { this.readyPolicy.assert(updated); }
       catch (error: unknown) { if (error instanceof AssistantProfilePolicyError) throw new AssistantProfileConflictError(error.message); throw error; }
     }
-    return this.persist(context, current.companyId, updated);
+    return await this.persist(context, current.companyId, updated);
   }
 
-  public transition(context: WorkspaceContext, companyIdValue: unknown, profileIdValue: unknown, targetValue: unknown): AssistantProfile {
-    const current = this.get(context, companyIdValue, profileIdValue);
+  public async transition(context: WorkspaceContext, companyIdValue: unknown, profileIdValue: unknown, targetValue: unknown): Promise<AssistantProfile> {
+    const current = await this.get(context, companyIdValue, profileIdValue);
     let target: AssistantProfileStatus;
     try { target = assistantProfileStatus(requiredString(targetValue, "Target status")); }
     catch { throw new AssistantProfileValidationError("Target status is invalid."); }
     try {
       const updated = this.lifecyclePolicy.transition(current, target, this.clock.now());
-      if (current.status === "archived" && updated.status !== "archived") this.assertCapacity(context);
-      return this.persist(context, current.companyId, updated);
+      if (current.status === "archived" && updated.status !== "archived") await this.assertCapacity(context);
+      return await this.persist(context, current.companyId, updated);
     } catch (error: unknown) {
       if (error instanceof AssistantProfilePolicyError) throw new AssistantProfileConflictError(error.message);
       throw error;
     }
   }
 
-  private persist(context: WorkspaceContext, companyId: number, profile: AssistantProfile): AssistantProfile {
-    const result = this.profiles.update(context, companyId, profile);
+  private async persist(context: WorkspaceContext, companyId: number, profile: AssistantProfile): Promise<AssistantProfile> {
+    const result = await this.profiles.update(context, companyId, profile);
     if (result.status === "not_found") throw new AssistantProfileNotFoundError("Assistant Profile was not found.");
     if (result.status === "name_conflict") throw new AssistantProfileConflictError("An Assistant Profile already uses this name.");
     return result.profile;
   }
 
-  private assertCapacity(context: WorkspaceContext): void {
-    try { if (this.entitlements) assertBillingEntitlement(this.entitlements.mayCreateAssistantProfile(context.workspaceId)); }
+  private async assertCapacity(context: WorkspaceContext): Promise<void> {
+    try { if (this.entitlements) assertBillingEntitlement(await this.entitlements.mayCreateAssistantProfile(context.workspaceId)); }
     catch (error: unknown) { if (error instanceof BillingEntitlementDeniedError) throw new AssistantProfileConflictError(error.message); throw error; }
   }
 }

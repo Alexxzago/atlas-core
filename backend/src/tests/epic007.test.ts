@@ -10,6 +10,7 @@ import { AtlasAgent } from "../agents/atlas.js";
 import { createCompanyController, createDeleteCompanyController, createGetCompanyController, createListCompaniesController, createUpdateCompanyController } from "../controllers/companyController.js";
 import { createOnboardingController } from "../controllers/onboarding.js";
 import { createDatabase } from "../config/database.js";
+import { LocalSqlDatabase } from "../config/sqlDatabase.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
 import { KnowledgeRepository } from "../repositories/knowledgeRepository.js";
 import { publishKnowledgeFixture } from "./knowledgeTestFixture.js";
@@ -40,19 +41,22 @@ class FakeDebugStore implements MarkdownDebugStore {
 
 function createWorkspacePair(): {
   database: DatabaseSync;
+  sql: LocalSqlDatabase;
   companies: CompanyRepository;
   knowledge: KnowledgeRepository;
   workspaceA: WorkspaceContext;
   workspaceB: WorkspaceContext;
 } {
   const database = createDatabase(":memory:");
+  const sql = new LocalSqlDatabase(database);
   const workspaces = new WorkspaceRepository(database);
   const workspaceA = createWorkspaceContext(workspaces.resolveDefault());
   const workspaceB = createWorkspaceContext(workspaces.createForSystemUse({ key: "workspace-b", name: "Workspace B" }));
   return {
     database,
     companies: new CompanyRepository(database),
-    knowledge: new KnowledgeRepository(database),
+    knowledge: new KnowledgeRepository(sql),
+    sql,
     workspaceA,
     workspaceB,
   };
@@ -113,9 +117,10 @@ test("fresh database receives all migrations and the default workspace", () => {
   database.close();
 });
 
-test("legacy companies and knowledge are backfilled without changing identifiers", () => {
+test("legacy companies and knowledge are backfilled without changing identifiers", async () => {
   const directory = mkdtempSync(join(tmpdir(), "atlas-legacy-"));
   const path = join(directory, "legacy.sqlite");
+  let sql: LocalSqlDatabase | null = null;
   try {
     const legacy = new DatabaseSync(path);
     legacy.exec(`
@@ -149,9 +154,10 @@ test("legacy companies and knowledge are backfilled without changing identifiers
     legacy.close();
 
     const migrated = createDatabase(path);
+    sql = new LocalSqlDatabase(migrated);
     const context = createWorkspaceContext(new WorkspaceRepository(migrated).resolveDefault());
     const company = new CompanyRepository(migrated).findById(context, 42);
-    const knowledge = new KnowledgeRepository(migrated).load(context, 42);
+    const knowledge = await new KnowledgeRepository(sql).load(context, 42);
 
     assert.equal(company?.id, 42);
     assert.equal(company?.workspaceId, context.workspaceId);
@@ -161,8 +167,8 @@ test("legacy companies and knowledge are backfilled without changing identifiers
     assert.equal((migrated.prepare("SELECT COUNT(*) AS count FROM company_knowledge_legacy").get() as { count: number }).count, 1);
     assert.equal(migrated.prepare("SELECT 1 FROM sqlite_master WHERE name='company_knowledge' AND type='view'").get(),undefined);
     assert.deepEqual(migrated.prepare("PRAGMA foreign_key_check").all(), []);
-    migrated.close();
   } finally {
+    await sql?.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -184,8 +190,9 @@ test("an already migrated database restarts idempotently", () => {
   }
 });
 
-test("company reads, updates, deletes, knowledge and listing are workspace isolated", () => {
-  const { database, companies, knowledge, workspaceA, workspaceB } = createWorkspacePair();
+test("company reads, updates, deletes, knowledge and listing are workspace isolated", async (t) => {
+  const { database, companies, knowledge, workspaceA, workspaceB, sql } = createWorkspacePair();
+  t.after(() => sql.close());
   const companyA = companies.create(workspaceA, { name: "Tenant A", website: "https://shared.test", status: "ready" });
   const companyB = companies.create(workspaceB, { name: "Tenant B", website: "https://shared.test", status: "ready" });
   publishKnowledgeFixture(database,workspaceA,companyA.id,knowledgeFixture);
@@ -193,16 +200,16 @@ test("company reads, updates, deletes, knowledge and listing are workspace isola
   assert.equal(companies.findById(workspaceB, companyA.id), null);
   assert.equal(companies.update(workspaceB, companyA.id, { name: "Intrusion", website: companyA.website, phone: "", email: "", status: "ready" }), null);
   assert.equal(companies.delete(workspaceB, companyA.id), false);
-  assert.equal(knowledge.load(workspaceB, companyA.id), null);
+  assert.equal(await knowledge.load(workspaceB, companyA.id), null);
   assert.equal(companies.findById(workspaceA, companyA.id)?.name, "Tenant A");
-  assert.ok(knowledge.load(workspaceA, companyA.id));
+  assert.ok(await knowledge.load(workspaceA, companyA.id));
   assert.deepEqual(companies.list(workspaceA).map((company) => company.id), [companyA.id]);
   assert.deepEqual(companies.list(workspaceB).map((company) => company.id), [companyB.id]);
-  database.close();
 });
 
-test("chat cannot answer with a company from another workspace", async () => {
-  const { database, companies, knowledge, workspaceA, workspaceB } = createWorkspacePair();
+test("chat cannot answer with a company from another workspace", async (t) => {
+  const { database, companies, knowledge, workspaceA, workspaceB, sql } = createWorkspacePair();
+  t.after(() => sql.close());
   const company = companies.create(workspaceA, { name: "Tenant A", website: "https://a.test", status: "ready" });
   publishKnowledgeFixture(database,workspaceA,company.id,knowledgeFixture);
   const generator = new TrackingGenerator();
@@ -211,11 +218,11 @@ test("chat cannot answer with a company from another workspace", async () => {
 
   assert.equal(result.kind, "company_not_found");
   assert.equal(generator.calls, 0);
-  database.close();
 });
 
-test("onboarding cannot target or mutate a company from another workspace", async () => {
-  const { database, companies, knowledge, workspaceA, workspaceB } = createWorkspacePair();
+test("onboarding cannot target or mutate a company from another workspace", async (t) => {
+  const { database, companies, knowledge, workspaceA, workspaceB, sql } = createWorkspacePair();
+  t.after(() => sql.close());
   const company = companies.create(workspaceA, { name: "Tenant A", website: "https://a.test", status: "ready" });
   publishKnowledgeFixture(database,workspaceA,company.id,knowledgeFixture);
   let scrapeCalls = 0;
@@ -227,12 +234,12 @@ test("onboarding cannot target or mutate a company from another workspace", asyn
 
   assert.equal(scrapeCalls, 0);
   assert.equal(companies.findById(workspaceA, company.id)?.status, "ready");
-  assert.ok(knowledge.load(workspaceA, company.id));
-  database.close();
+  assert.ok(await knowledge.load(workspaceA, company.id));
 });
 
 test("existing HTTP company contracts work without workspace identifiers", async () => {
   const database = createDatabase(":memory:");
+  const sql = new LocalSqlDatabase(database);
   const context = createWorkspaceContext(new WorkspaceRepository(database).resolveDefault());
   const companies = new CompanyRepository(database);
   const service = new CompanyService(companies);
@@ -240,7 +247,7 @@ test("existing HTTP company contracts work without workspace identifiers", async
   app.use(express.json());
   const unavailableOnboarding: WebsiteScraper = { async scrape(): Promise<never> { throw new Error("not used"); } };
   const extractor: KnowledgeExtractor = { async extract(): Promise<unknown> { return knowledgeFixture; } };
-  const onboarding = new OnboardingService(companies, new KnowledgeRepository(database), unavailableOnboarding, extractor, (markdown) => markdown, new FakeDebugStore());
+  const onboarding = new OnboardingService(companies, new KnowledgeRepository(sql), unavailableOnboarding, extractor, (markdown) => markdown, new FakeDebugStore());
   app.use("/companies", createCompaniesRouter({
     list: createListCompaniesController(service, context),
     create: createCompanyController(service, context),
@@ -272,6 +279,6 @@ test("existing HTTP company contracts work without workspace identifiers", async
     assert.deepEqual((await (await fetch(`http://127.0.0.1:${address.port}/companies`)).json() as unknown[]).length, 1);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-    database.close();
+    await sql.close();
   }
 });

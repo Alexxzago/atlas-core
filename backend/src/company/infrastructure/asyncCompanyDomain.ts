@@ -3,6 +3,10 @@ import type { CompanyEvent, CompanyEventType, CreateCompanyPersistenceResult, Sa
 import { reconstructCompany, type Company, type CompanyConfigurationInput, type CompanyId, type CompanySlug, type CompanyState } from "../domain/company.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import { CompanyDomainRepositoryContractError } from "../../repositories/companyDomainRepository.js";
+import type { AsyncCompanyRepositoryPort } from "../../application/ports/repositories.js";
+import type { Company as LegacyCompany, CompanyCreateInput, CompanyPersistenceInput, CompanyStatus } from "../../types/company.js";
+import { normalizeCompanyName } from "../domain/company.js";
+import { randomUUID } from "node:crypto";
 
 type Row = Record<string, unknown>;
 const columns = "id,workspace_id,name,name_normalized,slug,description,website,public_name,logo_asset_ref,brand_colors_json,lifecycle_state,timezone,locale,country_code,currency_code,date_format,phone_format,business_hours_json,version,created_at,updated_at,lifecycle_changed_at,suspended_at,archived_at";
@@ -30,3 +34,30 @@ export class AsyncCompanyDomainRepository {
   private async events(database: SqlDatabase, context: WorkspaceContext, value: Company, events: readonly CompanyEvent[]): Promise<void> { for(const event of events)await database.execute("INSERT INTO company_events (id,company_id,workspace_id,event_type,aggregate_version,event_sequence,occurred_at,actor_id,payload_json) VALUES (?,?,?,?,?,?,?,?,?)",[event.id,value.id,context.workspaceId,event.type,event.aggregateVersion,event.sequence,event.occurredAt,event.actorId,JSON.stringify(event.payload)]); }
   private async findOn(database: SqlDatabase, context: WorkspaceContext, id: CompanyId): Promise<Company|null> { const rows=await database.query<Row>(`SELECT ${columns} FROM companies WHERE workspace_id=? AND id=?`,[context.workspaceId,id]);return rows[0]?company(rows[0]):null; }
 }
+
+/** Async bridge for legacy Company callers during the production persistence migration. */
+export class AsyncCompanyRepository implements AsyncCompanyRepositoryPort {
+  public constructor(private readonly database: SqlDatabase) {}
+  public async findById(context: WorkspaceContext, companyId: number): Promise<LegacyCompany | null> { return this.find(context, "id=?", [companyId]); }
+  public async findByWebsite(context: WorkspaceContext, website: string): Promise<LegacyCompany | null> { return this.find(context, "website=?", [website]); }
+  public async list(context: WorkspaceContext): Promise<LegacyCompany[]> { return (await this.database.query<LegacyRow>("SELECT id,workspace_id,name,website,phone,email,status,created_at FROM companies WHERE workspace_id=? ORDER BY id DESC", [context.workspaceId])).map(legacyCompany); }
+  public async create(context: WorkspaceContext, input: CompanyCreateInput): Promise<LegacyCompany> {
+    const timestamp = new Date().toISOString();
+    return this.database.transaction(async database => {
+      const result = await database.execute("INSERT INTO companies (workspace_id,name,name_normalized,slug,website,phone,email,status,lifecycle_state,version,created_at,updated_at,lifecycle_changed_at) VALUES (?,?,?,?,?,?,?,?, 'draft',1,?,?,?)", [context.workspaceId,input.name,normalizeCompanyName(input.name),`legacy-${randomUUID().replaceAll("-","")}`,input.website ?? null,input.phone ?? "",input.email ?? "",input.status ?? "processing",timestamp,timestamp,timestamp]);
+      const company = await this.findOn(database, context, Number(result.lastInsertRowid));
+      if (!company) throw new Error("Company could not be created.");
+      await database.execute("INSERT INTO company_events (id,company_id,workspace_id,event_type,aggregate_version,event_sequence,occurred_at,actor_id,payload_json) VALUES (?,?,?,?,?,1,?,NULL,?)", [`legacy-${randomUUID()}`,company.id,context.workspaceId,"CompanyCreated",1,timestamp,JSON.stringify({ status: input.status ?? "processing" })]);
+      return company;
+    });
+  }
+  public async update(context: WorkspaceContext, companyId: number, input: CompanyPersistenceInput): Promise<LegacyCompany | null> { return this.write(context, companyId, "name=?,name_normalized=?,website=?,phone=?,email=?,status=?", [input.name,normalizeCompanyName(input.name),input.website,input.phone,input.email,input.status], "CompanyUpdated", { area: "legacy_update" }); }
+  public async delete(context: WorkspaceContext, companyId: number): Promise<boolean> { return Number((await this.database.execute("DELETE FROM companies WHERE workspace_id=? AND id=?", [context.workspaceId,companyId])).rowsAffected) > 0; }
+  public async updateStatus(context: WorkspaceContext, companyId: number, status: CompanyStatus): Promise<LegacyCompany | null> { return this.write(context, companyId, "status=?", [status], "CompanyUpdated", { area: "legacy_status" }); }
+  private async find(context: WorkspaceContext, condition: string, values: readonly (string | number)[]): Promise<LegacyCompany | null> { const rows=await this.database.query<LegacyRow>(`SELECT id,workspace_id,name,website,phone,email,status,created_at FROM companies WHERE workspace_id=? AND ${condition}`,[context.workspaceId,...values]);return rows[0] ? legacyCompany(rows[0]) : null; }
+  private async findOn(database: SqlDatabase, context: WorkspaceContext, companyId: number): Promise<LegacyCompany | null> { const rows=await database.query<LegacyRow>("SELECT id,workspace_id,name,website,phone,email,status,created_at FROM companies WHERE workspace_id=? AND id=?",[context.workspaceId,companyId]);return rows[0] ? legacyCompany(rows[0]) : null; }
+  private async write(context: WorkspaceContext, companyId: number, set: string, values: readonly (string | null)[], eventType: "CompanyUpdated", payload: Readonly<Record<string,string>>): Promise<LegacyCompany | null> { return this.database.transaction(async database => { const rows=await database.query<{version:unknown}>("SELECT version FROM companies WHERE workspace_id=? AND id=?",[context.workspaceId,companyId]);if(!rows[0])return null;const version=Number(rows[0].version)+1,timestamp=new Date().toISOString(),result=await database.execute(`UPDATE companies SET ${set},version=?,updated_at=? WHERE workspace_id=? AND id=? AND version=?`,[...values,version,timestamp,context.workspaceId,companyId,version-1]);if(Number(result.rowsAffected)!==1)return null;await database.execute("INSERT INTO company_events (id,company_id,workspace_id,event_type,aggregate_version,event_sequence,occurred_at,actor_id,payload_json) VALUES (?,?,?,?,?,1,?,NULL,?)",[`legacy-${randomUUID()}`,companyId,context.workspaceId,eventType,version,timestamp,JSON.stringify(payload)]);return this.findOn(database,context,companyId); }); }
+}
+
+interface LegacyRow extends Record<string, unknown> { readonly id: number; readonly workspace_id: number; readonly name: string; readonly website: string | null; readonly phone: string; readonly email: string; readonly status: CompanyStatus; readonly created_at: string; }
+function legacyCompany(row: LegacyRow): LegacyCompany { return { id:row.id,workspaceId:row.workspace_id,name:row.name,website:row.website,phone:row.phone,email:row.email,status:row.status,createdAt:row.created_at }; }

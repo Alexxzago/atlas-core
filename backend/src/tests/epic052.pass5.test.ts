@@ -20,13 +20,14 @@ import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
 import { createBillingRouter } from "../routes/billing.js";
 import { PlatformAdministrationService } from "../platformAdmin/services/platformAdministrationService.js";
 import { PlatformAdministrationRepository } from "../repositories/platformAdministrationRepository.js";
+import { asyncBillingApplication } from "./helpers/asyncBillingTestComposition.js";
 
 const at = "2026-09-14T00:00:00.000Z";
 const actor = "usr_pass5_admin";
 function open(head = Number.POSITIVE_INFINITY): DatabaseSync { const db = new DatabaseSync(":memory:"); db.exec("PRAGMA foreign_keys=ON"); runMigrations(db, head); return db; }
 function workspace(db: DatabaseSync, key = "default"): number { return (db.prepare("SELECT id FROM workspaces WHERE key=?").get(key) as { id: number }).id; }
 function providers(stripe = new DeterministicFakeBillingProvider({ kind: "success", providerObjectId: "cs_pass5" }), mp = new DeterministicFakeBillingProvider({ kind: "success", providerObjectId: "mp_pass5" }, { ...mercadoPagoBillingProviderCapabilities, requiresPayerEmailForCheckout: false })): BillingProviderRegistry { return new BillingProviderRegistry([{ kind: "stripe", provider: stripe }, { kind: "mercadopago", provider: mp }]); }
-function application(db: DatabaseSync, registry: BillingProviderRegistry): BillingApplicationService { return new BillingApplicationService(db, new BillingOperationService(new BillingAccountRepository(db), new BillingCatalogRepository(db), new BillingSubscriptionRepository(db), new BillingOperationRepository(db), registry, () => at), { checkoutSuccess: "https://atlas.test/success", checkoutCancel: "https://atlas.test/cancel", portalReturn: "https://atlas.test/portal" }); }
+function application(db: DatabaseSync, registry: BillingProviderRegistry): BillingApplicationService { return asyncBillingApplication(db, registry, { checkoutSuccess: "https://atlas.test/success", checkoutCancel: "https://atlas.test/cancel", portalReturn: "https://atlas.test/portal" }, () => at); }
 
 test("EPIC052 PASS5 migrates a fresh database and a genuine 0073 billing fixture to the 0074 head", () => {
   const fresh = open();
@@ -59,7 +60,7 @@ test("EPIC052 PASS5 keeps unconfigured providers and customer projections safe",
     const mp = admin.addBillingOffer(actor, plan.id, { operationId: "mp", expectedVersion: plan.version, providerKind: "mercadopago", amountMinor: 2000, interval: "month", providerPlanReference: "mp_secret_reference", readinessState: "not_configured" });
     const checked = await admin.validateBillingOffer(actor, plan.id, mp.id, { operationId: "validate", expectedVersion: catalog.find(plan.id)!.version, expectedOfferVersion: mp.version });
     assert.equal(checked.readinessState, "not_configured");
-    assert.equal(application(db, new BillingProviderRegistry()).offersForWorkspace(workspace(db))!.offers.length, 0);
+    assert.equal((await application(db, new BillingProviderRegistry()).offersForWorkspace(workspace(db))).offers.length, 0);
   } finally { db.close(); }
 });
 
@@ -89,7 +90,7 @@ test("EPIC052 PASS5 activates exact Stripe and Mercado Pago offers, projects ent
     await admin.validateBillingOffer(actor, draft.id, mpOffer.id, { operationId: "mp-valid", expectedVersion: catalog.find(draft.id)!.version, expectedOfferVersion: mpOffer.version });
     const published = admin.publishBillingPlan(actor, draft.id, { operationId: "publish", expectedVersion: catalog.find(draft.id)!.version });
     const currentStripe = catalog.offers(published.id).find(value => value.id === stripeReady.id)!;
-    const offers = service.offersForWorkspace(workspace(db))!.offers;
+    const offers = (await service.offersForWorkspace(workspace(db))).offers;
     assert.deepEqual(offers.map(value => [value.offerId, value.currency]), [[mpOffer.id, "ARS"], [stripeOffer.id, "USD"]]);
     assert.equal(JSON.stringify(offers).includes("price_pass5_old"), false);
     assert.equal((await service.checkoutOffer(workspace(db), currentStripe.id, "stripe-checkout")).status, "succeeded");
@@ -100,13 +101,13 @@ test("EPIC052 PASS5 activates exact Stripe and Mercado Pago offers, projects ent
     stripe.readSubscription = async () => ({ kind: "success", evidence: { providerSubscriptionId: "sub_pass5", providerCommercialReference: "price_pass5_old", providerEvidenceState: "active", currentPeriodStart: null, currentPeriodEnd: null, trialEndsAt: null, cancelAtPeriodEnd: false } });
     const worker = new BillingReconciliationWorker(new BillingReconciliationRepository(db), registry, () => at);
     assert.equal(await worker.runNext(), "applied");
-    assert.deepEqual(service.customerSummary(workspace(db))!.subscription, { state: "active", plan: { key: "atlas-pass5", name: "Atlas", interval: "month", currency: "USD", amountMinor: 1200 } });
-    assert.deepEqual(service.customerSummary(workspace(db))!.entitlement, { state: "enabled", maxCompanies: 2, maxAssistantProfiles: 3, maxActiveChannels: 4, mutationEligible: true, effectiveAt: at, expiresAt: null });
+    assert.deepEqual((await service.customerSummary(workspace(db))).subscription, { state: "active", plan: { key: "atlas-pass5", name: "Atlas", interval: "month", currency: "USD", amountMinor: 1200 } });
+    assert.deepEqual((await service.customerSummary(workspace(db))).entitlement, { state: "enabled", maxCompanies: 2, maxAssistantProfiles: 3, maxActiveChannels: 4, mutationEligible: true, effectiveAt: at, expiresAt: null });
     const repriced = admin.nextBillingPlanVersion(actor, published.id, { operationId: "reprice", expectedVersion: catalog.find(published.id)!.version });
     const newStripe = admin.nextBillingOfferVersion(actor, repriced.id, { operationId: "new-stripe", expectedVersion: repriced.version, providerKind: "stripe", amountMinor: 1800, interval: "month", providerPlanReference: "price_pass5_new", readinessState: "ready" });
     admin.publishBillingPlan(actor, repriced.id, { operationId: "publish-reprice", expectedVersion: catalog.find(repriced.id)!.version });
     assert.equal(catalog.offers(repriced.id).find(value => value.id === newStripe.id)!.lifecycle, "sellable");
-    assert.equal(service.customerSummary(workspace(db))!.subscription.plan!.amountMinor, 1200);
+    assert.equal((await service.customerSummary(workspace(db))).subscription.plan!.amountMinor, 1200);
     assert.equal(catalog.offers(published.id).find(value => value.id === mpOffer.id)!.amountMinor, 2000);
     const other = new WorkspaceRepository(db).create({ publicId: "wsp_pass5_mp", key: "pass5-mp", name: "PASS5 MP", timezone: null, defaultLocale: null });
     assert.equal((await service.checkoutOffer(other.id, mpOffer.id, "mp-checkout")).status, "succeeded");
@@ -114,6 +115,6 @@ test("EPIC052 PASS5 activates exact Stripe and Mercado Pago offers, projects ent
     assert.equal(await worker.runNext(), "applied");
     assert.equal(await worker.runNext(), "no_work");
     assert.equal((db.prepare("SELECT COUNT(*) count FROM billing_subscriptions WHERE billing_account_id=? AND is_current=1").get(new BillingAccountRepository(db).findByWorkspace(other.id)!.id) as { count: number }).count, 1);
-    assert.equal(service.customerSummary(other.id)!.subscription.plan!.currency, "ARS");
+    assert.equal((await service.customerSummary(other.id)).subscription.plan!.currency, "ARS");
   } finally { db.close(); }
 });

@@ -1,6 +1,6 @@
 import { MEDIA_LIMITS } from "../../media/domain/media.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
-import type { WhatsAppConnectionRepositoryPort, WhatsAppCredentialResolverPort } from "../application/ports.js";
+import type { AsyncWhatsAppConnectionRepositoryPort, AsyncWhatsAppCredentialResolverPort, WhatsAppConnectionRepositoryPort, WhatsAppCredentialResolverPort } from "../application/ports.js";
 import { WhatsAppInboundMediaDownloadStreamError, type WhatsAppInboundMediaDownloadResult, type WhatsAppInboundMediaProviderPort } from "../application/mediaPorts.js";
 import type { WhatsAppInboundMediaDescriptor } from "../domain/whatsappInboundMedia.js";
 
@@ -10,17 +10,17 @@ export class MetaInboundMediaProvider implements WhatsAppInboundMediaProviderPor
   private readonly metadataTimeoutMs: number;
   private readonly downloadTimeoutMs: number;
   private readonly maximumBytes: number;
-  public constructor(private readonly connections: WhatsAppConnectionRepositoryPort, private readonly credentials: WhatsAppCredentialResolverPort, private readonly options: MetaInboundMediaProviderOptions, private readonly fetcher: typeof fetch = fetch) {
+  public constructor(private readonly connections: WhatsAppConnectionRepositoryPort|AsyncWhatsAppConnectionRepositoryPort, private readonly credentials: WhatsAppCredentialResolverPort|AsyncWhatsAppCredentialResolverPort, private readonly options: MetaInboundMediaProviderOptions, private readonly fetcher: typeof fetch = fetch) {
     this.metadataTimeoutMs = options.metadataTimeoutMs ?? 10_000;
     this.downloadTimeoutMs = options.downloadTimeoutMs ?? 30_000;
     this.maximumBytes = options.maximumBytes ?? MEDIA_LIMITS.maximumBytes;
   }
 
   public async download(context: WorkspaceContext, companyId: number, connectionId: string, descriptor: WhatsAppInboundMediaDescriptor): Promise<WhatsAppInboundMediaDownloadResult> {
-    const connection = this.connections.findById(context, companyId, connectionId as never);
+    const connection = await this.connections.findById(context, companyId, connectionId as never);
     if (!connection || connection.status !== "active") return { kind: "unauthorized" };
     let token: string | null;
-    try { token = this.credentials.resolve(context, companyId, connection.id); } catch { return { kind: "unauthorized" }; }
+    try { token = await this.credentials.resolve(context, companyId, connection.id); } catch { return { kind: "unauthorized" }; }
     if (!token) return { kind: "unauthorized" };
     const metadata = await this.request(`https://graph.facebook.com/${this.options.graphVersion}/${encodeURIComponent(descriptor.providerMediaId)}`, token, this.metadataTimeoutMs);
     if (metadata.kind !== "response") return metadata;

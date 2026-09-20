@@ -164,7 +164,7 @@ test("EPIC-042 readiness subscribes then confirms observationally before canonic
     assert.equal(ready.resolver.resolve(value.context, value.companyId, completed.whatsAppConnectionId as never), "transient-meta-token");
     assert.equal((value.database.prepare("SELECT count(*) count FROM whatsapp_connection_credentials").get() as { count: number }).count, 0);
     assert.equal((await ready.service.ensureReady({ workspaceId: value.context.workspaceId, companyId: value.companyId, whatsAppConnectionId: completed.whatsAppConnectionId, setupSubscription: true })).kind, "replayed");
-    ready.whatsApp.deactivate(value.context, value.companyId, completed.whatsAppConnectionId);
+    await ready.whatsApp.deactivate(value.context, value.companyId, completed.whatsAppConnectionId);
     assert.equal((value.database.prepare("SELECT count(*) count FROM integration_connection_secrets").get() as { count: number }).count, 1); assert.equal(value.provider.unsubscriptions, 0);
   } finally { value.database.close(); }
 });

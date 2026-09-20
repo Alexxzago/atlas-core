@@ -33,8 +33,8 @@ export class RegistrationService {
     const protection = name === null ? null : await this.passwords!.protect(password!);
     let created: { user: User; workflow: ReturnType<typeof issueEmailVerification>["workflow"]; proof: ReturnType<typeof issueEmailVerification>["proof"] } | null = null;
     try {
-      created = this.transaction.execute(({ users, verifications, credentials }) => {
-        if (users.findByNormalizedEmail(normalized)) return null;
+      created = await this.transaction.execute(async ({ users, verifications, credentials }) => {
+        if (await users.findByNormalizedEmail(normalized)) return null;
         const now = this.clock.now();
         const user = createPendingUser({
           userId: identityIdentifier("usr", this.random),
@@ -47,9 +47,9 @@ export class RegistrationService {
         const identity = user.authenticationIdentities[0];
         if (!identity) throw new Error("Pending User has no authentication identity.");
         const issued = issueEmailVerification(user.id, identity.id, this.random, this.hash, this.clock, this.lifetimeMilliseconds);
-        users.create(user);
-        if (protection) credentials.create(this.credential(identity.id, protection, now));
-        verifications.create(issued.workflow);
+        await users.create(user);
+        if (protection) await credentials.create(this.credential(identity.id, protection, now));
+        await verifications.create(issued.workflow);
         return { user, workflow: issued.workflow, proof: issued.proof };
       });
     } catch (error: unknown) {

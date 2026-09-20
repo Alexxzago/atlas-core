@@ -10,13 +10,13 @@ import {
 } from "../services/companyValidation.js";
 
 export function createListCompaniesController(service: CompanyService, context: WorkspaceContext): RequestHandler {
-  return (_req, res): void => { res.json(service.list(context).map(toCompanyResponse)); };
+  return async (_req, res): Promise<void> => { res.json((await service.list(context)).map(toCompanyResponse)); };
 }
 
 export function createGetCompanyController(service: CompanyService, context: WorkspaceContext): RequestHandler {
-  return (req, res): void => {
+  return async (req, res): Promise<void> => {
     try {
-      res.json(toCompanyResponse(service.get(context, req.params.companyId)));
+      res.json(toCompanyResponse(await service.get(context, req.params.companyId)));
     } catch (error: unknown) {
       respondToCompanyError(res, error);
     }
@@ -24,9 +24,9 @@ export function createGetCompanyController(service: CompanyService, context: Wor
 }
 
 export function createCompanyController(service: CompanyService, context: WorkspaceContext): RequestHandler {
-  return (req, res): void => {
+  return async (req, res): Promise<void> => {
     try {
-      res.status(201).json(toCompanyResponse(service.create(context, req.body)));
+      res.status(201).json(toCompanyResponse(await service.create(context, req.body)));
     } catch (error: unknown) {
       respondToCompanyError(res, error);
     }
@@ -34,9 +34,9 @@ export function createCompanyController(service: CompanyService, context: Worksp
 }
 
 export function createUpdateCompanyController(service: CompanyService, context: WorkspaceContext): RequestHandler {
-  return (req, res): void => {
+  return async (req, res): Promise<void> => {
     try {
-      res.json(toCompanyResponse(service.update(context, req.params.companyId, req.body)));
+      res.json(toCompanyResponse(await service.update(context, req.params.companyId, req.body)));
     } catch (error: unknown) {
       respondToCompanyError(res, error);
     }
@@ -44,9 +44,9 @@ export function createUpdateCompanyController(service: CompanyService, context: 
 }
 
 export function createDeleteCompanyController(service: CompanyService, context: WorkspaceContext): RequestHandler {
-  return (req, res): void => {
+  return async (req, res): Promise<void> => {
     try {
-      service.delete(context, req.params.companyId);
+      await service.delete(context, req.params.companyId);
       res.status(204).send();
     } catch (error: unknown) {
       respondToCompanyError(res, error);

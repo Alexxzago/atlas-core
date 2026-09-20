@@ -16,8 +16,10 @@ import type { WhatsAppConversationRepositoryPort, WhatsAppCredentialResolverPort
 import type { WhatsAppConnectionService } from "./WhatsAppConnectionService.js";
 import type { WhatsAppOutboundDeliveryService } from "./WhatsAppOutboundDeliveryService.js";
 import type { WhatsAppDeliveryStatusService } from "./WhatsAppDeliveryStatusService.js";
+import type { AsyncWhatsAppDeliveryStatusService } from "./AsyncWhatsAppDeliveryStatusService.js";
 import { neutralAttachmentMessage, type WhatsAppInboundMediaKind } from "../domain/whatsappInboundMedia.js";
 import { VoiceSemanticContentUnavailableError } from "./voiceSemanticContentResolver.js";
+import { AsyncWhatsAppInboundPersistence } from "../infrastructure/asyncWhatsAppInboundPersistence.js";
 
 export interface WhatsAppWebhookConfiguration { readonly appSecret: string; readonly verifyToken: string; }
 export interface WhatsAppInboundTextMessage { readonly phoneNumberId: string; readonly waId: string; readonly wamid: string; readonly text: string; }
@@ -30,7 +32,7 @@ export type WhatsAppWebhookEvent = WhatsAppInboundTextEvent | WhatsAppInboundMed
 
 export class WhatsAppWebhookService {
   private readonly executionOwner = `whatsapp-execution-${randomUUID()}`;
-  public constructor(private readonly configuration: WhatsAppWebhookConfiguration, private readonly connections?: WhatsAppConnectionService, private readonly bindings?: WhatsAppConversationRepositoryPort, private readonly events?: ChannelProviderEventRepositoryPort, private readonly conversations?: ConversationService, private readonly turns?: OperationalConversationTurnService, private readonly clock: { now(): string } = { now: () => new Date().toISOString() }, private readonly messages?: ProviderMessageRecordRepositoryPort, private readonly deliveries?: OutboundDeliveryRepositoryPort, private readonly api?: WhatsAppCloudApiPort, private readonly credentials?: WhatsAppCredentialResolverPort, private readonly apiFactory?: (accessToken: string) => WhatsAppCloudApiPort, private readonly controls?: ConversationRepositoryPort, private readonly outbound?: WhatsAppOutboundDeliveryService, private readonly statuses?: WhatsAppDeliveryStatusService) {}
+  public constructor(private readonly configuration: WhatsAppWebhookConfiguration, private readonly connections?: WhatsAppConnectionService, private readonly bindings?: WhatsAppConversationRepositoryPort, private readonly events?: ChannelProviderEventRepositoryPort, private readonly conversations?: ConversationService, private readonly turns?: OperationalConversationTurnService, private readonly clock: { now(): string } = { now: () => new Date().toISOString() }, private readonly messages?: ProviderMessageRecordRepositoryPort, private readonly deliveries?: OutboundDeliveryRepositoryPort, private readonly api?: WhatsAppCloudApiPort, private readonly credentials?: WhatsAppCredentialResolverPort, private readonly apiFactory?: (accessToken: string) => WhatsAppCloudApiPort, private readonly controls?: ConversationRepositoryPort, private readonly outbound?: WhatsAppOutboundDeliveryService, private readonly statuses?: Pick<WhatsAppDeliveryStatusService | AsyncWhatsAppDeliveryStatusService, "process">, private readonly inboundPersistence?: AsyncWhatsAppInboundPersistence) {}
   public verify(mode: unknown, token: unknown, challenge: unknown): string | null { return this.configuration.verifyToken.length > 0 && mode === "subscribe" && typeof token === "string" && token === this.configuration.verifyToken && typeof challenge === "string" ? challenge : null; }
   public signatureValid(raw: Buffer, header: unknown): boolean {
     if (!this.configuration.appSecret || typeof header !== "string" || !/^sha256=[0-9a-f]{64}$/i.test(header)) return false;
@@ -67,11 +69,11 @@ export class WhatsAppWebhookService {
     }
     return messages;
   }
-  public async receive(raw: Buffer): Promise<void> { for (const event of this.parseEvents(raw)) { if (this.connections && "recordWebhookActivity" in this.connections) this.connections.recordWebhookActivity(event.phoneNumberId); if (event.kind === "inbound_text") await this.process(event); else if (event.kind === "inbound_media") await this.capture(event); else if (event.kind === "inbound_unsupported") await this.captureUnsupported(event); else if (event.kind === "message_status") this.statuses?.process(event); } }
+  public async receive(raw: Buffer): Promise<void> { for (const event of this.parseEvents(raw)) { if (this.connections) await this.connections.recordWebhookActivity(event.phoneNumberId); if (event.kind === "inbound_text" || event.kind === "inbound_media") { if (this.inboundPersistence) await this.captureAsync(event); else if (event.kind === "inbound_text") await this.process(event); else await this.capture(event); } else if (event.kind === "inbound_unsupported") await this.captureUnsupported(event); else if (event.kind === "message_status") await this.statuses?.process(event); } }
   public async acknowledge(raw: Buffer): Promise<void> {
     for (const event of this.parseEvents(raw)) {
-      if (this.connections && "recordWebhookActivity" in this.connections) this.connections.recordWebhookActivity(event.phoneNumberId);
-      if (event.kind === "inbound_text" || event.kind === "inbound_media") await this.capture(event); else if (event.kind === "inbound_unsupported") await this.captureUnsupported(event); else if (event.kind === "message_status") this.statuses?.process(event);
+      if (this.connections) await this.connections.recordWebhookActivity(event.phoneNumberId);
+        if (event.kind === "inbound_text" || event.kind === "inbound_media") { if (this.inboundPersistence) await this.captureAsync(event); else if (event.kind === "inbound_text") await this.capture(event); else await this.capture(event); } else if (event.kind === "inbound_unsupported") await this.captureUnsupported(event); else if (event.kind === "message_status") await this.statuses?.process(event);
     }
   }
   public async resumeIncomplete(limit = 25): Promise<void> {
@@ -80,7 +82,7 @@ export class WhatsAppWebhookService {
       const now = this.clock.now(), leased = this.events.leaseExecutionRequests(this.executionOwner, now, new Date(Date.parse(now) + 60_000).toISOString(), limit);
       for (const request of leased) {
         const snapshot = request.snapshot;
-        const connection = typeof snapshot.whatsAppConnectionId === "string" ? this.connections.resolveForRecovery(snapshot.whatsAppConnectionId as import("../domain/whatsappConnection.js").WhatsAppConnectionId) : null;
+        const connection = typeof snapshot.whatsAppConnectionId === "string" ? await this.connections.resolveForRecovery(snapshot.whatsAppConnectionId as import("../domain/whatsappConnection.js").WhatsAppConnectionId) : null;
         const conversationId = typeof snapshot.conversationId === "string" ? snapshot.conversationId : null;
         const externalEventId = typeof snapshot.externalEventId === "string" ? snapshot.externalEventId : null;
         const assistantParticipantId = typeof snapshot.assistantParticipantId === "string" ? snapshot.assistantParticipantId : null;
@@ -90,27 +92,42 @@ export class WhatsAppWebhookService {
         if (!connection) { this.events.releaseExecutionRequest(request.id, this.executionOwner, this.clock.now()); continue; }
         if (!conversationId || !externalEventId || !assistantParticipantId || !recipientWaId || !replyIdempotencyKey || !assistantProfileId || assistantProfileId !== connection.assistantProfileId) { this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "unsupported", this.clock.now()); continue; }
         const context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, event = this.events.findByTransportProviderAndExternalEventId("meta_whatsapp_cloud", externalEventId), binding = this.bindings.findBindingByConversation(context, connection.companyId, conversationId as import("../../conversation/domain/conversation.js").ConversationId);
-        const inbound = event?.conversationMessageId ? this.conversations.listMessages(context, connection.companyId, conversationId as import("../../conversation/domain/conversation.js").ConversationId).find((value) => value.id === event.conversationMessageId) : null;
+        const inbound = event?.conversationMessageId ? (await this.conversations.listMessages(context, connection.companyId, conversationId as import("../../conversation/domain/conversation.js").ConversationId)).find((value) => value.id === event.conversationMessageId) : null;
         if (!event || !binding || !inbound) { this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "unsupported", this.clock.now()); continue; }
         try {
-          const current = this.controls?.ensureConversationControl(context, connection.companyId, binding.conversationId);
-          this.reopenForInbound(context, connection.companyId, binding.conversationId);
+          const current = await this.controls?.ensureConversationControl(context, connection.companyId, binding.conversationId);
+          await this.reopenForInbound(context, connection.companyId, binding.conversationId);
           if (!allowsAutomation(current)) { const completedAt = this.clock.now(); this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", "unsupported", completedAt); this.events.updateState(event.id, "claimed", "completed", completedAt); continue; }
           const turn = await this.turns.executePersistedInbound(context, connection.companyId, binding.conversationId, { assistantProfileId, outboundParticipantId: assistantParticipantId, replyIdempotencyKey, whatsAppConnectionId: connection.id, whatsAppPhoneNumberId: connection.phoneNumberId }, inbound, { beforeRuntime: () => this.allowsAutomation(context, connection.companyId, binding.conversationId) });
-          if (turn.response.outcome === "safe_fallback") this.markHumanRequired(context, connection.companyId, binding.conversationId);
+          if (turn.response.outcome === "safe_fallback") await this.markHumanRequired(context, connection.companyId, binding.conversationId);
           if (this.outbound) await this.outbound.deliverWhatsAppText(context, connection.companyId, { conversationId: binding.conversationId, conversationMessageId: turn.outbound.id, whatsAppConnectionId: connection.id, recipientWaId });
           const completedAt = this.clock.now(); this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", turn.response.outcome, completedAt); this.events.updateState(event.id, "claimed", "completed", completedAt);
-        } catch (error: unknown) { const failedAt = this.clock.now(); if (error instanceof OperationalConversationTurnSuppressedError || error instanceof VoiceSemanticContentUnavailableError) { this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", "suppressed", failedAt); this.events.updateState(event.id, "claimed", "completed", failedAt); } else { this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "provider_unavailable", failedAt); this.events.updateState(event.id, "claimed", "failed", failedAt); } }
+        } catch (error: unknown) { const failedAt = this.clock.now(); if (error instanceof OperationalConversationTurnSuppressedError || error instanceof VoiceSemanticContentUnavailableError) { this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", "suppressed", failedAt); this.events.updateState(event.id, "claimed", "completed", failedAt); } else { await this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "provider_unavailable", failedAt); this.events.updateState(event.id, "claimed", "failed", failedAt); } }
       }
       return;
     }
   }
+  public async leaseInboundExecutionRequests(owner: string, now: string, expiresAt: string, limit = 25): Promise<readonly import("../../transport/domain/providerDelivery.js").ChannelExecutionRequest[]> { return this.inboundPersistence ? this.inboundPersistence.leaseExecutionRequests(owner, now, expiresAt, limit) : []; }
+  public async settleInboundExecutionRequest(id: import("../../transport/domain/providerDelivery.js").ChannelExecutionRequestId, owner: string, state: "completed" | "failed", outcome: string | null, updatedAt: string): Promise<import("../../transport/domain/providerDelivery.js").ChannelExecutionRequest | null> { return this.inboundPersistence ? this.inboundPersistence.settleExecutionRequest(id, owner, state, outcome, updatedAt) : null; }
+  private async captureAsync(message: WhatsAppInboundTextMessage | WhatsAppInboundMediaEvent): Promise<void> {
+    if (!this.inboundPersistence) return;
+    const now = this.clock.now(), conversation = `cnv_${randomUUID().replaceAll("-", "")}`, customer = `cpt_${randomUUID().replaceAll("-", "")}`, assistant = `cpt_${randomUUID().replaceAll("-", "")}`, inboundId = conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`), eventId = channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`);
+    await this.inboundPersistence.capture({
+      phoneNumberId: message.phoneNumberId, waId: message.waId, wamid: message.wamid, text: message.text,
+      event: reconstructChannelProviderEvent({ id: eventId, communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: "pending", externalEventId: message.wamid, state: "claimed", conversationId: null, conversationMessageId: null, createdAt: now, updatedAt: now }),
+      inbound: reconstructConversationMessage({ id: inboundId, conversationId: conversation as import("../../conversation/domain/conversation.js").ConversationId, senderParticipantId: customer as import("../../conversation/domain/conversation.js").ConversationParticipantId, direction: "inbound", content: message.text, idempotencyKey: key("inbound", message.wamid), executionRecordId: null, createdAt: now }),
+      providerMessage: reconstructProviderMessageRecord({ id: providerMessageRecordId(`pmr_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", direction: "inbound", transportConnectionId: "pending", conversationMessageId: inboundId, externalMessageId: message.wamid, createdAt: now, updatedAt: now }),
+      request: reconstructChannelExecutionRequest({ id: channelExecutionRequestId(`cex_${randomUUID().replaceAll("-", "")}`), channelProviderEventId: eventId, state: "pending", snapshot: { version: "whatsapp-execution-request-v1", externalEventId: message.wamid, assistantParticipantId: assistant, recipientWaId: message.waId, replyIdempotencyKey: key("reply", message.wamid) }, leaseOwner: null, leaseExpiresAt: null, outcome: null, createdAt: now, updatedAt: now }),
+      binding: reconstructWhatsAppConversationBinding({ id: whatsAppConversationBindingId(`wcb_${randomUUID().replaceAll("-", "")}`), whatsAppConnectionId: "wac_00000000000000000000000000000000" as import("../domain/whatsappConnection.js").WhatsAppConnectionId, waId: message.waId, conversationId: conversation as import("../../conversation/domain/conversation.js").ConversationId, customerParticipantId: customer as import("../../conversation/domain/conversation.js").ConversationParticipantId, assistantParticipantId: assistant as import("../../conversation/domain/conversation.js").ConversationParticipantId, createdAt: now, updatedAt: now }),
+      ...("kind" in message && message.kind === "inbound_media" ? { attachments: [{ id: `wim_${randomUUID().replaceAll("-", "")}`, descriptor: { wamid: message.wamid, providerMediaId: message.media.providerMediaId, kind: message.media.kind, declaredMime: message.media.declaredMime, filename: message.media.filename, caption: null, ordinal: 0 }, createdAt: now, updatedAt: now }] } : {}),
+    });
+  }
   private async capture(message: WhatsAppInboundTextMessage | WhatsAppInboundMediaEvent): Promise<void> {
     if (!this.connections || !this.bindings || !this.events || !this.conversations) return;
-    const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) { this.diagnostic("whatsapp_webhook_connection_unmatched", { phoneNumberId: message.phoneNumberId, messageId: message.wamid }); return; }
+    const connection = await this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) { this.diagnostic("whatsapp_webhook_connection_unmatched", { phoneNumberId: message.phoneNumberId, messageId: message.wamid }); return; }
     const now = this.clock.now(), context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, existing = this.bindings.findBinding(connection.id, message.waId);
     let binding = existing;
-    if (!binding) { this.diagnostic("whatsapp_webhook_conversation_creating", { phoneNumberId: message.phoneNumberId, messageId: message.wamid, connectionId: connection.id }); const conversation = this.conversations.open(context, connection.companyId, "whatsapp"), customer = this.conversations.addParticipant(context, connection.companyId, conversation.id, { type: "whatsapp_contact", reference: message.waId }), assistant = this.conversations.addParticipant(context, connection.companyId, conversation.id, { type: "assistant", reference: connection.assistantProfileId }); binding = this.bindings.createBinding(reconstructWhatsAppConversationBinding({ id: whatsAppConversationBindingId(`wcb_${randomUUID().replaceAll("-", "")}`), whatsAppConnectionId: connection.id, waId: message.waId, conversationId: conversation.id, customerParticipantId: customer.id, assistantParticipantId: assistant.id, createdAt: now, updatedAt: now })); }
+    if (!binding) { this.diagnostic("whatsapp_webhook_conversation_creating", { phoneNumberId: message.phoneNumberId, messageId: message.wamid, connectionId: connection.id }); const conversation = await this.conversations.open(context, connection.companyId, "whatsapp"), customer = await this.conversations.addParticipant(context, connection.companyId, conversation.id, { type: "whatsapp_contact", reference: message.waId }), assistant = await this.conversations.addParticipant(context, connection.companyId, conversation.id, { type: "assistant", reference: connection.assistantProfileId }); binding = this.bindings.createBinding(reconstructWhatsAppConversationBinding({ id: whatsAppConversationBindingId(`wcb_${randomUUID().replaceAll("-", "")}`), whatsAppConnectionId: connection.id, waId: message.waId, conversationId: conversation.id, customerParticipantId: customer.id, assistantParticipantId: assistant.id, createdAt: now, updatedAt: now })); }
     if (!binding) return;
     const externalEventId = message.wamid;
     this.diagnostic("whatsapp_webhook_inbound_enqueuing", { phoneNumberId: message.phoneNumberId, messageId: message.wamid, connectionId: connection.id });
@@ -125,7 +142,7 @@ export class WhatsAppWebhookService {
   }
   private async captureUnsupported(message: WhatsAppUnsupportedInboundEvent): Promise<void> {
     if (!this.connections || !this.events) return;
-    const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) { this.diagnostic("whatsapp_webhook_connection_unmatched", { phoneNumberId: message.phoneNumberId, messageId: message.wamid }); return; }
+    const connection = await this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) { this.diagnostic("whatsapp_webhook_connection_unmatched", { phoneNumberId: message.phoneNumberId, messageId: message.wamid }); return; }
     const now = this.clock.now();
     this.events.captureUnsupportedExecution(
       reconstructChannelProviderEvent({ id: channelProviderEventId(`cpe_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: connection.id, externalEventId: message.wamid, state: "completed", conversationId: null, conversationMessageId: null, createdAt: now, updatedAt: now }),
@@ -134,11 +151,12 @@ export class WhatsAppWebhookService {
   }
   private async process(message: WhatsAppInboundTextMessage): Promise<void> {
     if (!this.connections || !this.bindings || !this.events || !this.conversations || !this.turns) return;
-    const connection = this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) return;
+    const connection = await this.connections.resolveActiveByPhoneNumberId(message.phoneNumberId); if (!connection) return;
     const now = this.clock.now(), context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, existing = this.bindings.findBinding(connection.id, message.waId);
-    const binding = existing ?? (() => { const conversation = this.conversations!.open(context, connection.companyId, "whatsapp"), customer = this.conversations!.addParticipant(context, connection.companyId, conversation.id, { type: "whatsapp_contact", reference: message.waId }), assistant = this.conversations!.addParticipant(context, connection.companyId, conversation.id, { type: "assistant", reference: connection.assistantProfileId }); return this.bindings!.createBinding(reconstructWhatsAppConversationBinding({ id: whatsAppConversationBindingId(`wcb_${randomUUID().replaceAll("-", "")}`), whatsAppConnectionId: connection.id, waId: message.waId, conversationId: conversation.id, customerParticipantId: customer.id, assistantParticipantId: assistant.id, createdAt: now, updatedAt: now })); })();
+    let binding = existing;
+    if (!binding) { const conversation = await this.conversations.open(context, connection.companyId, "whatsapp"), customer = await this.conversations.addParticipant(context, connection.companyId, conversation.id, { type: "whatsapp_contact", reference: message.waId }), assistant = await this.conversations.addParticipant(context, connection.companyId, conversation.id, { type: "assistant", reference: connection.assistantProfileId }); binding = this.bindings.createBinding(reconstructWhatsAppConversationBinding({ id: whatsAppConversationBindingId(`wcb_${randomUUID().replaceAll("-", "")}`), whatsAppConnectionId: connection.id, waId: message.waId, conversationId: conversation.id, customerParticipantId: customer.id, assistantParticipantId: assistant.id, createdAt: now, updatedAt: now })); }
     if (!binding) return;
-    const initialControl = this.controls?.ensureConversationControl(context, connection.companyId, binding.conversationId);
+    const initialControl = await this.controls?.ensureConversationControl(context, connection.companyId, binding.conversationId);
     if (!("captureInbound" in this.events) || !("executePersistedInbound" in this.turns)) {
       await this.processLegacy(context, connection, binding, message, initialControl);
       return;
@@ -156,9 +174,9 @@ export class WhatsAppWebhookService {
     let turn: Awaited<ReturnType<OperationalConversationTurnService["executePersistedInbound"]>> | undefined;
     try {
       if (!allowsAutomation(initialControl)) {
-        this.reopenForInbound(context, connection.companyId, binding.conversationId);
+        await this.reopenForInbound(context, connection.companyId, binding.conversationId);
       } else {
-        this.reopenForInbound(context, connection.companyId, binding.conversationId);
+        await this.reopenForInbound(context, connection.companyId, binding.conversationId);
         turn = await this.turns.executePersistedInbound(context, connection.companyId, binding.conversationId, { assistantProfileId: connection.assistantProfileId, outboundParticipantId: binding.assistantParticipantId, replyIdempotencyKey: replyKey, whatsAppConnectionId: connection.id, whatsAppPhoneNumberId: connection.phoneNumberId }, inbound, {
           beforeRuntime: () => this.allowsAutomation(context, connection.companyId, binding.conversationId),
         });
@@ -167,13 +185,13 @@ export class WhatsAppWebhookService {
       if (error instanceof OperationalConversationTurnSuppressedError) {
         // The inbound row is already durable and linked to the provider event.
       } else {
-        this.markHumanRequired(context, connection.companyId, binding.conversationId);
+        await this.markHumanRequired(context, connection.companyId, binding.conversationId);
         this.events.updateState(claimed.id, "processing", "failed", this.clock.now());
         throw error;
       }
     }
     if (turn) {
-      if (turn.response?.outcome === "safe_fallback") this.markHumanRequired(context, connection.companyId, binding.conversationId);
+      if (turn.response?.outcome === "safe_fallback") await this.markHumanRequired(context, connection.companyId, binding.conversationId);
       if (this.outbound) await this.outbound.deliverWhatsAppText(context, connection.companyId, { conversationId: binding.conversationId, conversationMessageId: turn.outbound.id, whatsAppConnectionId: connection.id, recipientWaId: message.waId });
       else await this.deliverAutomatedResponse(context, connection, message, turn.outbound.id, turn.outbound.content, now);
     }
@@ -185,33 +203,33 @@ export class WhatsAppWebhookService {
     let inbound: import("../../conversation/domain/conversation.js").ConversationMessage | undefined;
     let turn: Awaited<ReturnType<OperationalConversationTurnService["execute"]>> | undefined;
     try {
-      if (!allowsAutomation(initialControl)) { inbound = this.conversations!.addMessage(context, connection.companyId, binding.conversationId, { senderParticipantId: binding.customerParticipantId, direction: "inbound", content: message.text }); this.reopenForInbound(context, connection.companyId, binding.conversationId); }
-      else { turn = await this.turns!.execute(context, connection.companyId, binding.conversationId, { assistantProfileId: connection.assistantProfileId, inboundParticipantId: binding.customerParticipantId, outboundParticipantId: binding.assistantParticipantId, content: message.text }, { afterInbound: (created) => { inbound = created; this.reopenForInbound(context, connection.companyId, binding.conversationId); }, beforeRuntime: () => this.allowsAutomation(context, connection.companyId, binding.conversationId) }); inbound = turn.inbound; }
-    } catch (error: unknown) { if (error instanceof OperationalConversationTurnSuppressedError) inbound = error.inbound; else { this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events!.updateState(claimed.event.id, "claimed", "failed", this.clock.now()); throw error; } }
+      if (!allowsAutomation(initialControl)) { inbound = await this.conversations!.addMessage(context, connection.companyId, binding.conversationId, { senderParticipantId: binding.customerParticipantId, direction: "inbound", content: message.text }); await this.reopenForInbound(context, connection.companyId, binding.conversationId); }
+      else { turn = await this.turns!.execute(context, connection.companyId, binding.conversationId, { assistantProfileId: connection.assistantProfileId, inboundParticipantId: binding.customerParticipantId, outboundParticipantId: binding.assistantParticipantId, content: message.text }, { afterInbound: async (created) => { inbound = created; await this.reopenForInbound(context, connection.companyId, binding.conversationId); }, beforeRuntime: () => this.allowsAutomation(context, connection.companyId, binding.conversationId) }); inbound = turn.inbound; }
+    } catch (error: unknown) { if (error instanceof OperationalConversationTurnSuppressedError) inbound = error.inbound; else { await this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events!.updateState(claimed.event.id, "claimed", "failed", this.clock.now()); throw error; } }
     if (!inbound) { this.events!.updateState(claimed.event.id, "claimed", "failed", this.clock.now()); return; }
-    if (turn) { if (turn.response?.outcome === "safe_fallback") this.markHumanRequired(context, connection.companyId, binding.conversationId); if (this.outbound) await this.outbound.deliverWhatsAppText(context, connection.companyId, { conversationId: binding.conversationId, conversationMessageId: turn.outbound.id, whatsAppConnectionId: connection.id, recipientWaId: message.waId }); else await this.deliverAutomatedResponse(context, connection, message, turn.outbound.id, turn.outbound.content, now); }
+    if (turn) { if (turn.response?.outcome === "safe_fallback") await this.markHumanRequired(context, connection.companyId, binding.conversationId); if (this.outbound) await this.outbound.deliverWhatsAppText(context, connection.companyId, { conversationId: binding.conversationId, conversationMessageId: turn.outbound.id, whatsAppConnectionId: connection.id, recipientWaId: message.waId }); else await this.deliverAutomatedResponse(context, connection, message, turn.outbound.id, turn.outbound.content, now); }
     this.events!.updateState(claimed.event.id, "claimed", "completed", this.clock.now());
   }
 
-  private reopenForInbound(context: { workspaceId: number; workspaceKey: string }, companyId: number, conversationId: import("../../conversation/domain/conversation.js").ConversationId): void {
+  private async reopenForInbound(context: { workspaceId: number; workspaceKey: string }, companyId: number, conversationId: import("../../conversation/domain/conversation.js").ConversationId): Promise<void> {
     if (!this.controls) return;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const current = this.controls.ensureConversationControl(context, companyId, conversationId);
+      const current = await this.controls.ensureConversationControl(context, companyId, conversationId);
       if (!current) return;
-      if (this.controls.clearConversationResolution(context, companyId, conversationId, current.version, this.clock.now())) return;
+      if (await this.controls.clearConversationResolution(context, companyId, conversationId, current.version, this.clock.now())) return;
     }
   }
 
-  private markHumanRequired(context: { workspaceId: number; workspaceKey: string }, companyId: number, conversationId: import("../../conversation/domain/conversation.js").ConversationId): void {
+  private async markHumanRequired(context: { workspaceId: number; workspaceKey: string }, companyId: number, conversationId: import("../../conversation/domain/conversation.js").ConversationId): Promise<void> {
     if (!this.controls) return;
-    const current = this.controls.findConversationControl(context, companyId, conversationId);
+    const current = await this.controls.findConversationControl(context, companyId, conversationId);
     if (!current || current.state !== "automated") return;
     const updated = reconstructConversationControl({ ...current, state: "human_required", attentionReason: "automation_failure", version: current.version + 1, authorityGeneration: current.authorityGeneration, updatedAt: this.clock.now() });
-    this.controls.updateConversationControl(context, companyId, updated, current.version);
+    await this.controls.updateConversationControl(context, companyId, updated, current.version);
   }
 
-  private allowsAutomation(context: { workspaceId: number; workspaceKey: string }, companyId: number, conversationId: import("../../conversation/domain/conversation.js").ConversationId): boolean {
-    const current = this.controls?.findConversationControl(context, companyId, conversationId);
+  private async allowsAutomation(context: { workspaceId: number; workspaceKey: string }, companyId: number, conversationId: import("../../conversation/domain/conversation.js").ConversationId): Promise<boolean> {
+    const current = await this.controls?.findConversationControl(context, companyId, conversationId);
     return allowsAutomation(current);
   }
 

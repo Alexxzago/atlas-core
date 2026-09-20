@@ -17,19 +17,19 @@ export interface PublicWebChatHistoryResult { readonly messages: readonly { read
 export class PublicWebChatConversationService {
   public constructor(private readonly sessions: PublicWebChatSessionService, private readonly turns: OperationalConversationTurnService, private readonly conversations: ConversationService, private readonly limits?: RateLimitService, private readonly activation?: ActivationService) {}
 
-  public history(connectionPublicId: unknown, rawSessionToken: string | null): PublicWebChatHistoryResult {
-    const session = this.sessions.resolveSessionForConnection(connectionPublicId, rawSessionToken);
+  public async history(connectionPublicId: unknown, rawSessionToken: string | null): Promise<PublicWebChatHistoryResult> {
+    const session = await this.sessions.resolveSessionForConnection(connectionPublicId, rawSessionToken);
     if (!session) throw new PublicWebChatConversationUnavailableError();
     const context: WorkspaceContext = { workspaceId: session.workspaceId, workspaceKey: "public" };
-    this.limits?.enforce(abuseScope("workspace", session.workspaceId, "company", session.companyId, "conversation", session.conversationId), "actor", publicWebChatSessionLimit);
-    this.limits?.enforce(abuseScope("workspace", session.workspaceId, "company", session.companyId), "company", publicWebChatCompanyLimit);
-    return Object.freeze({ messages: Object.freeze(this.conversations.listMessages(context, session.companyId, session.conversationId)
+    await this.limits?.enforce(abuseScope("workspace", session.workspaceId, "company", session.companyId, "conversation", session.conversationId), "actor", publicWebChatSessionLimit);
+    await this.limits?.enforce(abuseScope("workspace", session.workspaceId, "company", session.companyId), "company", publicWebChatCompanyLimit);
+    return Object.freeze({ messages: Object.freeze((await this.conversations.listMessages(context, session.companyId, session.conversationId))
       .map(({ direction, content, createdAt }) => Object.freeze({ direction, content, createdAt }))) });
   }
 
   public async sendMessage(connectionPublicId: unknown, rawSessionToken: string | null, contentValue: unknown): Promise<PublicWebChatConversationResult> {
     const content = messageContent(contentValue);
-    const session = this.sessions.resolveSessionForConnection(connectionPublicId, rawSessionToken);
+    const session = await this.sessions.resolveSessionForConnection(connectionPublicId, rawSessionToken);
     if (!session) throw new PublicWebChatConversationUnavailableError();
     const context: WorkspaceContext = { workspaceId: session.workspaceId, workspaceKey: "public" };
     try {
@@ -39,11 +39,11 @@ export class PublicWebChatConversationService {
         outboundParticipantId: session.responderParticipantId,
         content,
       });
-      this.activation?.succeedForTurn(session,result.inbound.id,result.executionRecordId,result.response.outcome);
+      await this.activation?.succeedForTurn(session,result.inbound.id,result.executionRecordId,result.response.outcome);
       return Object.freeze({ message: result.outbound.content });
     } catch (error: unknown) {
       if (error instanceof OperationalConversationTurnInProgressError) throw new PublicWebChatConversationInProgressError();
-      this.activation?.failForSession(session);
+      await this.activation?.failForSession(session);
       throw new PublicWebChatConversationRuntimeError();
     }
   }

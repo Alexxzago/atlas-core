@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { BillingReconciliationWorker } from "./billingReconciliationWorker.js";
-import type { BillingOperationRecoveryWorker } from "./billingOperationRecoveryWorker.js";
 import { createRunId, operationalLogger, withRunContext } from "../../observability/operationalLogger.js";
 
 const defaultIntervalMilliseconds = 5_000;
@@ -20,6 +18,8 @@ export interface BillingReconciliationRuntimeDependencies {
 }
 
 type Timer = { unref(): void };
+type ReconciliationWorker = Readonly<{ runBatch(limit?: number, ownerPrefix?: string): Promise<readonly unknown[]> }>;
+type OperationRecoveryWorker = Readonly<{ runBatch(limit?: number, ownerPrefix?: string): Promise<readonly unknown[]> }>;
 
 export function billingReconciliationRuntimeConfiguration(environment: NodeJS.ProcessEnv = process.env): BillingReconciliationRuntimeConfiguration {
   return Object.freeze({
@@ -38,7 +38,7 @@ export class BillingReconciliationRuntime {
   private readonly clear: (timer: Timer) => void;
   private readonly reportError: (message: string) => void;
 
-  public constructor(private readonly worker: BillingReconciliationWorker, private readonly configuration: BillingReconciliationRuntimeConfiguration, dependencies: BillingReconciliationRuntimeDependencies = {}, private readonly operationRecovery:BillingOperationRecoveryWorker|null=null) {
+  public constructor(private readonly worker: ReconciliationWorker, private readonly configuration: BillingReconciliationRuntimeConfiguration, dependencies: BillingReconciliationRuntimeDependencies = {}, private readonly operationRecovery:OperationRecoveryWorker|null=null) {
     this.schedule = dependencies.schedule ?? ((callback, milliseconds) => setInterval(callback, milliseconds));
     this.clear = dependencies.clear ?? ((timer) => clearInterval(timer as ReturnType<typeof setInterval>));
     this.reportError = dependencies.reportError ?? (() => operationalLogger.error("worker_cycle_failed", { worker: "billing_reconciliation", safeErrorCategory: "internal_failure" }));

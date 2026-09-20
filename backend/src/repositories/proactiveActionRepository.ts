@@ -18,7 +18,7 @@ export type ProactiveActionCancelResult = { readonly kind: "cancelled" | "replay
 
 const maximumAttempts = 5;
 
-export class ProactiveActionRepository implements ProactiveActionRepositoryPort {
+export class ProactiveActionRepository {
   public constructor(private readonly db: SynchronousDatabase) {}
 
   public findPolicy(context: WorkspaceContext, companyId: number): ProactiveActionPolicy | null {

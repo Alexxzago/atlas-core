@@ -10,7 +10,7 @@ const context = { workspaceId: 1, workspaceKey: "default" }, id = conversationId
 function setup() {
   let control = reconstructConversationControl({ conversationId: id, state: "human_required", controllingActorId: null, lastControllingActorId: null, takenAt: null, releasedAt: null, lastOperatorActivityAt: null, attentionReason: "customer_request", resolvedAt: null, resolvedBy: null, version: 1, authorityGeneration: 1, createdAt: at, updatedAt: at });
   const controls = {
-    applyConversationControlOperation: (_context: unknown, _companyId: unknown, _id: unknown, command: { operation: "takeover" | "release" | "resolve" | "resume"; actorId: string; expectedVersion: number }) => {
+    applyConversationControlOperation: async (_context: unknown, _companyId: unknown, _id: unknown, command: { operation: "takeover" | "release" | "resolve" | "resume"; actorId: string; expectedVersion: number }) => {
       if (command.expectedVersion !== control.version) return { kind: "rejected", outcome: "stale_version", control };
       if (command.operation === "takeover" && control.state === "human_controlled" && control.controllingActorId !== command.actorId) return { kind: "rejected", outcome: "controlled_by_other", control };
       if (command.operation === "resume" && control.state !== "human_required") return { kind: "rejected", outcome: "not_controller", control };
@@ -20,33 +20,33 @@ function setup() {
       return { kind: "applied", outcome: "applied", control };
     },
   };
-  const service = new ConversationControlService({ get: () => ({ id }) } as never, controls as never, { now: () => at });
+  const service = new ConversationControlService({ get: async () => ({ id }) } as never, controls as never, { now: () => at });
   return { service, control: () => control };
 }
 
-test("EPIC-027 operator control records takeover, safe release, and classified resolution", () => {
+test("EPIC-027 operator control records takeover, safe release, and classified resolution", async () => {
   const value = setup();
-  const taken = value.service.takeOver(context, "operator-1" as never, 1, id, { expectedVersion: 1, operationId: "take-1" });
+  const taken = await value.service.takeOver(context, "operator-1" as never, 1, id, { expectedVersion: 1, operationId: "take-1" });
   assert.deepEqual([taken.state, taken.controllingActorId, taken.lastControllingActorId, taken.takenAt, taken.attentionReason, taken.version], ["human_controlled", "operator-1", "operator-1", at, "operator_follow_up", 2]);
-  const released = value.service.release(context, "operator-1" as never, 1, id, { expectedVersion: 2, operationId: "release-1" });
+  const released = await value.service.release(context, "operator-1" as never, 1, id, { expectedVersion: 2, operationId: "release-1" });
   assert.deepEqual([released.state, released.controllingActorId, released.releasedAt, released.attentionReason, released.version], ["human_required", null, at, "operator_follow_up", 3]);
-  const retaken = value.service.takeOver(context, "operator-1" as never, 1, id, { expectedVersion: 3, operationId: "take-2" });
-  const resolved = value.service.resolve(context, "operator-1" as never, 1, id, { expectedVersion: retaken.version, operationId: "resolve-1" });
+  const retaken = await value.service.takeOver(context, "operator-1" as never, 1, id, { expectedVersion: 3, operationId: "take-2" });
+  const resolved = await value.service.resolve(context, "operator-1" as never, 1, id, { expectedVersion: retaken.version, operationId: "resolve-1" });
   assert.deepEqual([resolved.state, resolved.controllingActorId, resolved.resolvedAt, resolved.resolvedBy, resolved.version], ["automated", null, at, "operator-1", 5]);
 });
 
-test("EPIC-027 control rejects stale versions and a different operator without exposing control", () => {
+test("EPIC-027 control rejects stale versions and a different operator without exposing control", async () => {
   const value = setup();
-  assert.throws(() => value.service.takeOver(context, "operator-1" as never, 1, id, { expectedVersion: 2, operationId: "stale" }), ConversationControlConflictError);
-  value.service.takeOver(context, "operator-1" as never, 1, id, { expectedVersion: 1, operationId: "take" });
-  assert.throws(() => value.service.release(context, "operator-2" as never, 1, id, { expectedVersion: 2, operationId: "foreign-release" }), ConversationControlForbiddenError);
+  await assert.rejects(() => value.service.takeOver(context, "operator-1" as never, 1, id, { expectedVersion: 2, operationId: "stale" }), ConversationControlConflictError);
+  await value.service.takeOver(context, "operator-1" as never, 1, id, { expectedVersion: 1, operationId: "take" });
+  await assert.rejects(() => value.service.release(context, "operator-2" as never, 1, id, { expectedVersion: 2, operationId: "foreign-release" }), ConversationControlForbiddenError);
   assert.equal(value.control().controllingActorId, "operator-1");
 });
 
-test("EPIC-027 resumes automation directly only from human-required", () => {
+test("EPIC-027 resumes automation directly only from human-required", async () => {
   const value = setup();
-  const resumed = value.service.resume(context, "operator-1" as never, 1, id, { expectedVersion: 1, operationId: "resume-1" });
+  const resumed = await value.service.resume(context, "operator-1" as never, 1, id, { expectedVersion: 1, operationId: "resume-1" });
   assert.deepEqual([resumed.state, resumed.attentionReason, resumed.version, resumed.authorityGeneration], ["automated", null, 2, 2]);
-  value.service.takeOver(context, "operator-1" as never, 1, id, { expectedVersion: 2, operationId: "take-1" });
-  assert.throws(() => value.service.resume(context, "operator-1" as never, 1, id, { expectedVersion: 3, operationId: "resume-controlled" }), ConversationControlForbiddenError);
+  await value.service.takeOver(context, "operator-1" as never, 1, id, { expectedVersion: 2, operationId: "take-1" });
+  await assert.rejects(() => value.service.resume(context, "operator-1" as never, 1, id, { expectedVersion: 3, operationId: "resume-controlled" }), ConversationControlForbiddenError);
 });

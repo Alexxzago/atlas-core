@@ -6,9 +6,9 @@ export interface PdfWorkerLifecycleEvidence { readonly pagesLoaded:number;readon
 export const productionPdfWorkerCode = `
 const { parentPort, workerData } = require('node:worker_threads');
 (async()=>{const bytes=workerData;let task,doc,outcome,pagesLoaded=0,pagesCleaned=0,loadingTaskDestroyed=false,networkAttempts=0;try{
-  const pdfjs=await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjs=await import('pdfjs-dist/legacy/build/pdf.mjs'),path=require('node:path'),standardFontDataUrl=path.join(path.dirname(require.resolve('pdfjs-dist/package.json')),'standard_fonts').split(path.sep).join('/')+'/';
    const deny=()=>{networkAttempts++;throw Error('pdf_network_forbidden');};globalThis.fetch=deny;try{require('node:http').request=deny;require('node:https').request=deny;require('node:net').connect=deny;require('node:net').createConnection=deny;require('node:dns').lookup=deny;require('node:dns').resolve=deny;}catch{}
-   task=pdfjs.getDocument({data:new Uint8Array(bytes),useSystemFonts:false,isEvalSupported:false,useWorkerFetch:false,disableAutoFetch:true,disableStream:true});
+   task=pdfjs.getDocument({data:new Uint8Array(bytes),standardFontDataUrl,useSystemFonts:false,isEvalSupported:false,useWorkerFetch:false,disableAutoFetch:true,disableStream:true});
     doc=await task.promise;if(doc.numPages>100)throw new Error('pdf_page_limit');
   const [javascript,attachments]=await Promise.all([doc.getJSActions(),doc.getAttachments()]);if(javascript||attachments)throw new Error('pdf_active_content');const pages=[];let characters=0;
   for(let i=1;i<=doc.numPages;i++){const page=await doc.getPage(i);pagesLoaded++;try{const content=await page.getTextContent();const text=content.items.map(item=>'str' in item?item.str:'').join(' ');characters+=Array.from(text).length;if(characters>100000)throw new Error('pdf_text_limit');pages.push(text);}finally{page.cleanup();pagesCleaned++;}}

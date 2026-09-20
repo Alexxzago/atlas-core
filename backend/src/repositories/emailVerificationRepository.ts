@@ -1,5 +1,4 @@
 import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
-import type { EmailVerificationRepositoryPort } from "../identity/application/ports.js";
 import { reconstructEmailVerification, type DigestAlgorithmVersion, type EmailVerificationWorkflow, type TokenDigest, type VerificationDeliveryStatus, type VerificationPurpose } from "../identity/domain/emailVerification.js";
 import type { AuthenticationIdentityId, UserId } from "../identity/domain/user.js";
 
@@ -33,7 +32,7 @@ function mapWorkflow(row: VerificationRow): EmailVerificationWorkflow {
 const columns = `id, user_id, authentication_identity_id, purpose, digest_version, token_digest,
   status, delivery_status, issued_at, expires_at, consumed_at, superseded_at, invalidated_at, created_at, updated_at`;
 
-export class EmailVerificationRepository implements EmailVerificationRepositoryPort {
+export class EmailVerificationRepository {
   public constructor(private readonly db: SynchronousDatabase) {}
 
   public findByDigest(purpose: VerificationPurpose, version: DigestAlgorithmVersion, digest: TokenDigest): EmailVerificationWorkflow | null {

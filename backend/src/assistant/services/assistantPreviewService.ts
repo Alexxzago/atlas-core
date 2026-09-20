@@ -1,4 +1,4 @@
-import type { CompanyRepositoryPort, KnowledgeRepositoryPort } from "../../application/ports/repositories.js";
+import type { CompanyPersistencePort, KnowledgeRepositoryPort } from "../../application/ports/repositories.js";
 import type { CompanyKnowledgeVersion } from "../../knowledge/domain/knowledge.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import { assistantProfileId } from "../domain/assistantProfile.js";
@@ -20,8 +20,8 @@ export class AssistantPreviewService {
   private readonly executionPolicy = new AssistantProfileExecutionPolicy();
 
   public constructor(
-    private readonly companies: CompanyRepositoryPort,
-    private readonly knowledge: KnowledgeRepositoryPort & { loadCurrentVersion(context: WorkspaceContext, companyId: number): CompanyKnowledgeVersion | null },
+    private readonly companies: CompanyPersistencePort,
+    private readonly knowledge: KnowledgeRepositoryPort & { loadCurrentVersion(context: WorkspaceContext, companyId: number): Promise<CompanyKnowledgeVersion | null> },
     private readonly profiles: AssistantProfileRepositoryPort,
     private readonly runtime: OperationalAssistantRuntime,
     private readonly provider: string,
@@ -38,9 +38,9 @@ export class AssistantPreviewService {
     const companyId = parseCompanyId(companyIdValue);
     const profileId = parseProfileId(profileIdValue);
     const message = parseInput(input);
-    const company = this.companies.findById(context, companyId);
+    const company = await this.companies.findById(context, companyId);
     if (!company) throw new AssistantPreviewNotFoundError();
-    const profile = this.profiles.findById(context, companyId, profileId);
+    const profile = await this.profiles.findById(context, companyId, profileId);
     if (!profile) throw new AssistantPreviewNotFoundError();
     try { this.executionPolicy.assert(profile); }
     catch (error: unknown) {
@@ -48,12 +48,12 @@ export class AssistantPreviewService {
       throw error;
     }
     if (company.status !== "ready") throw new AssistantPreviewCompanyNotReadyError();
-    const knowledge = this.knowledge.loadCurrentVersion(context, companyId);
+    const knowledge = await this.knowledge.loadCurrentVersion(context, companyId);
     if (!knowledge) throw new AssistantPreviewKnowledgeUnavailableError();
-    if (actorId) { this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actorId), "actor", assistantPreviewActorLimit); this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", assistantPreviewCompanyLimit); }
+    if (actorId) { await this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actorId), "actor", assistantPreviewActorLimit); await this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", assistantPreviewCompanyLimit); }
     return (await this.runtime.execute(company, profile, knowledge, message, [], {
       purpose: "preview", provider: this.provider, fallbackOnUnavailable: false, allowTools: false,
-      ...(this.retrieval ? { retrieval: this.retrieval.context(context, companyId, knowledge.sourceRevisionIds, message) } : {}),
+      ...(this.retrieval ? { retrieval: await this.retrieval.context(context, companyId, knowledge.sourceRevisionIds, message) } : {}),
     })).response;
   }
 }

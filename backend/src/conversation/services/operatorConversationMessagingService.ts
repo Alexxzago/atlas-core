@@ -1,6 +1,6 @@
 import type { UserId } from "../../identity/domain/user.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
-import type { WhatsAppConversationRepositoryPort } from "../../whatsapp/application/ports.js";
+import type { AsyncWhatsAppConversationRepositoryPort } from "../../whatsapp/application/ports.js";
 import { WhatsAppOutboundDeliveryService } from "../../whatsapp/services/WhatsAppOutboundDeliveryService.js";
 import type { ConversationRepositoryPort } from "../application/ports.js";
 import type { ConversationId } from "../domain/conversation.js";
@@ -20,16 +20,16 @@ export interface OperatorConversationMessageResult {
 }
 
 export class OperatorConversationMessagingService {
-  public constructor(private readonly conversations: ConversationService, private readonly repository: ConversationRepositoryPort, private readonly controls: ConversationRepositoryPort, private readonly bindings: WhatsAppConversationRepositoryPort, private readonly outbound: WhatsAppOutboundDeliveryService, private readonly clock: { now(): string }, private readonly intelligence?: ConversationIntelligenceService, private readonly limits?: RateLimitService) {}
+  public constructor(private readonly conversations: ConversationService, private readonly repository: ConversationRepositoryPort, private readonly controls: ConversationRepositoryPort, private readonly bindings: AsyncWhatsAppConversationRepositoryPort, private readonly outbound: WhatsAppOutboundDeliveryService, private readonly clock: { now(): string }, private readonly intelligence?: ConversationIntelligenceService, private readonly limits?: RateLimitService) {}
 
   public async send(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown): Promise<OperatorConversationMessageResult> {
     const companyId = parseCompanyId(companyIdValue), parsed = parseInput(input);
-    const conversation = this.conversations.validateOpen(context, companyId, conversationIdValue);
-    const binding = this.bindings.findBindingByConversation(context, companyId, conversation.id);
+    const conversation = await this.conversations.validateOpen(context, companyId, conversationIdValue);
+    const binding = await this.bindings.findBindingByConversation(context, companyId, conversation.id);
     if (!binding) throw new OperatorConversationMessageNotFoundError("WhatsApp conversation binding was not found.");
-    this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actorId), "actor", operatorMessageActorLimit);
-    this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", operatorMessageCompanyLimit);
-    const persisted = this.repository.persistOperatorMessage(context, companyId, conversation.id, actorId, parsed.content, parsed.idempotencyKey, binding.whatsAppConnectionId, this.clock.now());
+    await this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actorId), "actor", operatorMessageActorLimit);
+    await this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", operatorMessageCompanyLimit);
+    const persisted = await this.repository.persistOperatorMessage(context, companyId, conversation.id, actorId, parsed.content, parsed.idempotencyKey, binding.whatsAppConnectionId, this.clock.now());
     if (persisted.kind === "forbidden") throw new OperatorConversationMessageForbiddenError("Conversation is not controlled by this operator.");
     if (persisted.kind === "not_found") throw new OperatorConversationMessageNotFoundError("Conversation was not found.");
     if (persisted.kind === "idempotency_mismatch") throw new OperatorConversationMessageValidationError("Message idempotency key is invalid.");

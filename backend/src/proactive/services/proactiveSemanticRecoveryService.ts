@@ -8,13 +8,13 @@ export class ProactiveSemanticRecoveryService {
 
   public async recover(context: WorkspaceContext, companyId: number, limit = 25): Promise<number> {
     let applied = 0;
-    for (const message of this.actions.findVisibleAssistantMessages(context, companyId, limit)) if ((await this.intelligence.apply(context, companyId, message)).kind === "applied") applied += 1;
+    for (const message of await this.actions.findVisibleAssistantMessages(context, companyId, limit)) if ((await this.intelligence.apply(context, companyId, message)).kind === "applied") applied += 1;
     return applied;
   }
 
   public async recoverAvailable(limit = 25): Promise<number> {
     let applied = 0;
-    for (const scope of this.actions.recoverableSemanticScopes(limit)) applied += await this.recover({ workspaceId: scope.workspaceId, workspaceKey: "proactive" }, scope.companyId, limit);
+    for (const scope of await this.actions.recoverableSemanticScopes(limit)) applied += await this.recover({ workspaceId: scope.workspaceId, workspaceKey: "proactive" }, scope.companyId, limit);
     return applied;
   }
 }

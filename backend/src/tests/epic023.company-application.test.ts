@@ -27,26 +27,26 @@ function create(serviceUnderTest: CompanyApplicationService, context: ReturnType
   return serviceUnderTest.createCompany(context, { id, actorId: "operator-1", identity: { name: "Atlas Realty", slug: "atlas-realty", website: "https://atlas.example" } });
 }
 
-test("Company application commands execute domain operations and persist complete event sets", () => {
+test("Company application commands execute domain operations and persist complete event sets", async () => {
   const db = createDatabase(":memory:"), workspace = new WorkspaceRepository(db).resolveDefault(), context = createWorkspaceContext(workspace);
   const repository = new CompanyDomainRepository(db), companies = service(repository);
-  const created = create(companies, context);
+  const created = await create(companies, context);
   assert.equal(created.status, "success");
   if (created.status !== "success") throw new Error("Expected Company creation.");
-  const branded = companies.updateCompanyBranding(context, { companyId: created.company.id, expectedVersion: 1, actorId: "operator-1", branding: { publicName: "Atlas" } });
+  const branded = await companies.updateCompanyBranding(context, { companyId: created.company.id, expectedVersion: 1, actorId: "operator-1", branding: { publicName: "Atlas" } });
   assert.equal(branded.status, "success");
   if (branded.status !== "success") throw new Error("Expected Company branding update.");
-  const configured = companies.updateCompanyConfiguration(context, { companyId: branded.company.id, expectedVersion: 2, actorId: "operator-1", configuration });
+  const configured = await companies.updateCompanyConfiguration(context, { companyId: branded.company.id, expectedVersion: 2, actorId: "operator-1", configuration });
   assert.equal(configured.status, "success");
   if (configured.status !== "success") throw new Error("Expected Company configuration update.");
   assert.equal(configured.company.lifecycle, "configured");
-  const suspended = companies.suspendCompany(context, { companyId: configured.company.id, expectedVersion: 3 });
+  const suspended = await companies.suspendCompany(context, { companyId: configured.company.id, expectedVersion: 3 });
   assert.equal(suspended.status, "success");
   if (suspended.status !== "success") throw new Error("Expected Company suspension.");
-  const restored = companies.restoreCompany(context, { companyId: suspended.company.id, expectedVersion: 4 });
+  const restored = await companies.restoreCompany(context, { companyId: suspended.company.id, expectedVersion: 4 });
   assert.equal(restored.status, "success");
   if (restored.status !== "success") throw new Error("Expected Company restoration.");
-  const archived = companies.archiveCompany(context, { companyId: restored.company.id, expectedVersion: 5 });
+  const archived = await companies.archiveCompany(context, { companyId: restored.company.id, expectedVersion: 5 });
   assert.equal(archived.status, "success");
   assert.deepEqual(
     (db.prepare("SELECT event_type FROM company_events WHERE company_id=? ORDER BY aggregate_version,event_sequence").all(created.company.id) as Array<{ event_type: string }>).map((row) => row.event_type),
@@ -55,15 +55,15 @@ test("Company application commands execute domain operations and persist complet
   db.close();
 });
 
-test("Company application translates domain, repository, and optimistic concurrency failures", () => {
+test("Company application translates domain, repository, and optimistic concurrency failures", async () => {
   const db = createDatabase(":memory:"), workspace = new WorkspaceRepository(db).resolveDefault(), context = createWorkspaceContext(workspace);
   const repository = new CompanyDomainRepository(db), companies = service(repository);
-  const invalid = companies.createCompany(context, { id: 902, identity: { name: "", slug: "atlas", website: "https://atlas.example" } });
+  const invalid = await companies.createCompany(context, { id: 902, identity: { name: "", slug: "atlas", website: "https://atlas.example" } });
   assert.equal(invalid.status, "validation_failed");
-  const created = create(companies, context, 903);
+  const created = await create(companies, context, 903);
   assert.equal(created.status, "success");
   if (created.status !== "success") throw new Error("Expected Company creation.");
-  const stale = companies.updateCompanyBranding(context, { companyId: created.company.id, expectedVersion: 0, branding: { publicName: "Atlas" } });
+  const stale = await companies.updateCompanyBranding(context, { companyId: created.company.id, expectedVersion: 0, branding: { publicName: "Atlas" } });
   assert.equal(stale.status, "version_conflict");
   const failingRepository: CompanyDomainRepositoryPort = {
     findById: () => { throw new Error("sqlite unavailable"); },
@@ -74,20 +74,20 @@ test("Company application translates domain, repository, and optimistic concurre
     createWithEvents: () => { throw new Error("sqlite unavailable"); },
     saveWithEvents: () => { throw new Error("sqlite unavailable"); },
   };
-  assert.equal(service(failingRepository).getCompanyById(context, { companyId: created.company.id }).status, "persistence_failure");
+  assert.equal((await service(failingRepository).getCompanyById(context, { companyId: created.company.id })).status, "persistence_failure");
   db.close();
 });
 
-test("Company application queries are workspace-scoped and perform no writes", () => {
+test("Company application queries are workspace-scoped and perform no writes", async () => {
   const db = createDatabase(":memory:"), workspaces = new WorkspaceRepository(db), first = workspaces.resolveDefault(), second = workspaces.createForSystemUse({ key: "second", name: "Second" });
   const repository = new CompanyDomainRepository(db), companies = service(repository), firstContext = createWorkspaceContext(first), secondContext = createWorkspaceContext(second);
-  const created = create(companies, firstContext, 904);
+  const created = await create(companies, firstContext, 904);
   assert.equal(created.status, "success");
   if (created.status !== "success") throw new Error("Expected Company creation.");
   const eventsBeforeQueries = (db.prepare("SELECT COUNT(*) AS count FROM company_events").get() as { count: number }).count;
-  assert.equal(companies.getCompanyById(secondContext, { companyId: created.company.id }).status, "not_found");
-  assert.equal(companies.getCompanyBySlug(secondContext, { slug: created.company.slug }).status, "not_found");
-  const listed = companies.listCompanies(secondContext);
+  assert.equal((await companies.getCompanyById(secondContext, { companyId: created.company.id })).status, "not_found");
+  assert.equal((await companies.getCompanyBySlug(secondContext, { slug: created.company.slug })).status, "not_found");
+  const listed = await companies.listCompanies(secondContext);
   assert.equal(listed.status, "success");
   if (listed.status !== "success") throw new Error("Expected Company list.");
   assert.deepEqual(listed.companies, []);
@@ -95,21 +95,21 @@ test("Company application queries are workspace-scoped and perform no writes", (
   db.close();
 });
 
-test("Company readiness evaluation is ephemeral and applying an assessment persists its lifecycle event", () => {
+test("Company readiness evaluation is ephemeral and applying an assessment persists its lifecycle event", async () => {
   const db = createDatabase(":memory:"), workspace = new WorkspaceRepository(db).resolveDefault(), context = createWorkspaceContext(workspace);
-  const repository = new CompanyDomainRepository(db), companies = service(repository), created = create(companies, context, 905);
+  const repository = new CompanyDomainRepository(db), companies = service(repository), created = await create(companies, context, 905);
   assert.equal(created.status, "success");
   if (created.status !== "success") throw new Error("Expected Company creation.");
-  const configured = companies.updateCompanyConfiguration(context, { companyId: created.company.id, expectedVersion: 1, configuration });
+  const configured = await companies.updateCompanyConfiguration(context, { companyId: created.company.id, expectedVersion: 1, configuration });
   assert.equal(configured.status, "success");
   if (configured.status !== "success") throw new Error("Expected Company configuration update.");
   const eventsBeforeEvaluation = (db.prepare("SELECT COUNT(*) AS count FROM company_events").get() as { count: number }).count;
-  const evaluated = companies.evaluateCompanyReadiness(context, { companyId: configured.company.id });
+  const evaluated = await companies.evaluateCompanyReadiness(context, { companyId: configured.company.id });
   assert.equal(evaluated.status, "success");
   if (evaluated.status !== "success") throw new Error("Expected readiness evaluation.");
   assert.equal(evaluated.assessment.outcome, "indeterminate");
   assert.equal((db.prepare("SELECT COUNT(*) AS count FROM company_events").get() as { count: number }).count, eventsBeforeEvaluation);
-  const applied = companies.applyReadinessAssessment(context, {
+  const applied = await companies.applyReadinessAssessment(context, {
     companyId: configured.company.id,
     expectedVersion: 2,
     assessment: { companyId: configured.company.id, aggregateVersion: 2, policy: { id: "test-policy", version: "1", productCapabilities: [], dependencyCategories: [] }, outcome: "eligible", action: "promote_to_operational", reasonCodes: [], evidence: [], evaluatedAt: "2026-07-30T12:00:00.000Z" },

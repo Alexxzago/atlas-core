@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { assistantProfileId, reconstructAssistantProfile, type AssistantProfile } from "../assistant/domain/assistantProfile.js";
 import { createDatabase } from "../config/database.js";
-import { ConversationService } from "../conversation/services/conversationService.js";
+import { reconstructConversation, reconstructConversationMessage, reconstructConversationParticipant } from "../conversation/domain/conversation.js";
 import { MediaRepository } from "../repositories/mediaRepository.js";
 import { createMediaCore } from "../media/composition.js";
 import { ConversationMessageMediaAssociationOwnerResolver } from "../repositories/mediaAssociationOwnerResolvers.js";
@@ -57,14 +57,17 @@ export function createEpic040MediaFixture() {
     phoneNumberId: "phone-epic040", whatsappBusinessAccountId: "waba-epic040", status: "active", createdAt: fixtureNow, updatedAt: fixtureNow,
   });
   if (!new WhatsAppConnectionRepository(db).create(context, connection)) throw new Error("EPIC040 fixture connection was not created.");
-  const conversations = new ConversationService(new ConversationRepository(db), new FixtureClock());
-  const conversation = conversations.open(context, company.id, "whatsapp");
-  const participant = conversations.addParticipant(context, company.id, conversation.id, { type: "whatsapp_contact", reference: "customer-epic040" });
+  const conversations = new ConversationRepository(db);
+  const conversation = conversations.createConversation(context, reconstructConversation({ id: "cnv_04000000000000000000000000000000", companyId: company.id, channel: "whatsapp", state: "open", createdAt: fixtureNow, updatedAt: fixtureNow, closedAt: null }));
+  if (!conversation) throw new Error("EPIC040 fixture conversation was not created.");
+  const participant = conversations.createParticipant(context, company.id, reconstructConversationParticipant({ id: "cpt_04000000000000000000000000000000", conversationId: conversation.id, type: "whatsapp_contact", reference: "customer-epic040", createdAt: fixtureNow }));
+  if (!participant) throw new Error("EPIC040 fixture participant was not created.");
   const event = reconstructChannelProviderEvent({
     id: "cpe_04000000000000000000000000000000" as never, communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", transportConnectionId: connection.id,
     externalEventId: "wamid-epic040", state: "claimed", conversationId: null, conversationMessageId: null, createdAt: fixtureNow, updatedAt: fixtureNow,
   });
-  const inbound = conversations.addMessage(context, company.id, conversation.id, { senderParticipantId: participant.id, direction: "inbound", content: "[attachment received]", idempotencyKey: "whatsapp-inbound:epic040", executionRecordId: null });
+  const inbound = conversations.createMessage(context, company.id, reconstructConversationMessage({ id: "cmsg_04000000000000000000000000000000", conversationId: conversation.id, senderParticipantId: participant.id, direction: "inbound", content: "[attachment received]", idempotencyKey: "whatsapp-inbound:epic040", executionRecordId: null, createdAt: fixtureNow }));
+  if (!inbound) throw new Error("EPIC040 fixture inbound message was not created.");
   const providerMessage = reconstructProviderMessageRecord({
     id: "pmr_04000000000000000000000000000000" as never, communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", direction: "inbound",
     transportConnectionId: connection.id, conversationMessageId: inbound.id, externalMessageId: "wamid-epic040", createdAt: fixtureNow, updatedAt: fixtureNow,
@@ -669,7 +672,12 @@ test("EPIC040 Media Core associates only ready same-tenant conversation message 
     assert.equal(reserved.kind, "reserved");
     assert.throws(() => core.service.attach(context, fixture.companyId, pendingAssetId, "conversation_message", fixture.messageId), (error: unknown) => error instanceof MediaDomainError && error.code === "media_not_associable");
     const otherCompany = new CompanyRepository(fixture.db).create(context, { name: "EPIC040 Other", website: "https://epic040-other.test", status: "ready" });
-    const conversations = new ConversationService(new ConversationRepository(fixture.db), new FixtureClock()), otherConversation = conversations.open(context, otherCompany.id, "whatsapp"), otherParticipant = conversations.addParticipant(context, otherCompany.id, otherConversation.id, { type: "whatsapp_contact", reference: "other-customer" }), otherMessage = conversations.addMessage(context, otherCompany.id, otherConversation.id, { senderParticipantId: otherParticipant.id, direction: "inbound", content: "Other", idempotencyKey: "epic040-other", executionRecordId: null });
+    const conversations = new ConversationRepository(fixture.db), otherConversation = conversations.createConversation(context, reconstructConversation({ id: "cnv_04000000000000000000000000000001", companyId: otherCompany.id, channel: "whatsapp", state: "open", createdAt: fixtureNow, updatedAt: fixtureNow, closedAt: null }));
+    if (!otherConversation) throw new Error("EPIC040 fixture other conversation was not created.");
+    const otherParticipant = conversations.createParticipant(context, otherCompany.id, reconstructConversationParticipant({ id: "cpt_04000000000000000000000000000001", conversationId: otherConversation.id, type: "whatsapp_contact", reference: "other-customer", createdAt: fixtureNow }));
+    if (!otherParticipant) throw new Error("EPIC040 fixture other participant was not created.");
+    const otherMessage = conversations.createMessage(context, otherCompany.id, reconstructConversationMessage({ id: "cmsg_04000000000000000000000000000001", conversationId: otherConversation.id, senderParticipantId: otherParticipant.id, direction: "inbound", content: "Other", idempotencyKey: "epic040-other", executionRecordId: null, createdAt: fixtureNow }));
+    if (!otherMessage) throw new Error("EPIC040 fixture other message was not created.");
     for (const assetId of [fixture.mediaAssetId, "mas_missing"]) assert.throws(() => core.service.attach(context, otherCompany.id, assetId, "conversation_message", otherMessage.id), (error: unknown) => error instanceof MediaDomainError && error.code === "media_not_associable");
     assert.equal((fixture.db.prepare("SELECT COUNT(*) AS count FROM media_asset_associations WHERE asset_id=?").get(fixture.mediaAssetId) as { count: number }).count, 1);
   } finally {

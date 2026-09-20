@@ -2,6 +2,16 @@ import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import type { WebChatConnection, WebChatConnectionId, WebChatConnectionPublicId, WebChatConnectionStatus } from "../domain/webChatConnection.js";
 
 export interface WebChatConnectionRepositoryPort {
+  create(context: WorkspaceContext, connection: WebChatConnection): Promise<WebChatConnection | null>;
+  findById(context: WorkspaceContext, companyId: number, connectionId: WebChatConnectionId): Promise<WebChatConnection | null>;
+  listByCompany(context: WorkspaceContext, companyId: number): Promise<WebChatConnection[]>;
+  updateStatus(context: WorkspaceContext, companyId: number, connectionId: WebChatConnectionId, status: WebChatConnectionStatus, updatedAt: string): Promise<WebChatConnection | null>;
+  findActiveByPublicId(publicId: WebChatConnectionPublicId): Promise<WebChatConnection | null>;
+  findActiveById(connectionId: WebChatConnectionId): Promise<WebChatConnection | null>;
+}
+
+/** Temporary contract for the synchronous runtime until its composition migrates to SqlDatabase. */
+export interface SynchronousWebChatConnectionRepositoryPort {
   create(context: WorkspaceContext, connection: WebChatConnection): WebChatConnection | null;
   findById(context: WorkspaceContext, companyId: number, connectionId: WebChatConnectionId): WebChatConnection | null;
   listByCompany(context: WorkspaceContext, companyId: number): WebChatConnection[];

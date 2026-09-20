@@ -5,10 +5,7 @@ import { ConversationControlConflictError, ConversationControlForbiddenError, Co
 
 export function createConversationControlController(service: ConversationControlService, context: WorkspaceContext, actor: ActorContext, action: "takeover" | "release" | "resolve" | "resume"): RequestHandler {
   return (req, res): void => {
-    try {
-      const control = action === "takeover" ? service.takeOver(context, actor.userId, req.params.companyId, req.params.conversationId, req.body) : action === "release" ? service.release(context, actor.userId, req.params.companyId, req.params.conversationId, req.body) : action === "resolve" ? service.resolve(context, actor.userId, req.params.companyId, req.params.conversationId, req.body) : service.resume(context, actor.userId, req.params.companyId, req.params.conversationId, req.body);
-      res.json({ control: safe(control, actor.userId), ...(action === "resolve" ? { outcome: "resolved" } : {}) });
-    } catch (error: unknown) { respond(res, error); }
+    void (action === "takeover" ? service.takeOver(context, actor.userId, req.params.companyId, req.params.conversationId, req.body) : action === "release" ? service.release(context, actor.userId, req.params.companyId, req.params.conversationId, req.body) : action === "resolve" ? service.resolve(context, actor.userId, req.params.companyId, req.params.conversationId, req.body) : service.resume(context, actor.userId, req.params.companyId, req.params.conversationId, req.body)).then(control => res.json({ control: safe(control, actor.userId), ...(action === "resolve" ? { outcome: "resolved" } : {}) })).catch(respond.bind(undefined, res));
   };
 }
 

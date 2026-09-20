@@ -16,6 +16,28 @@ export interface SqlDatabase {
   close(): Promise<void>;
 }
 
+/** Concrete async database facade that defers connection readiness without exposing its promise to consumers. */
+export class DeferredSqlDatabase implements SqlDatabase {
+  private database: Promise<SqlDatabase> | null = null;
+
+  public constructor(private readonly connect: () => Promise<SqlDatabase>) {}
+
+  private current(): Promise<SqlDatabase> {
+    if (!this.database) {
+      this.database = this.connect();
+      void this.database.catch(() => undefined);
+    }
+    return this.database;
+  }
+
+  public async initialize(): Promise<void> { await this.current(); }
+  public async execute(statement: string, args: readonly SqlValue[] = []): Promise<SqlResult> { return (await this.current()).execute(statement, args); }
+  public async executeScript(script: string): Promise<void> { await (await this.current()).executeScript(script); }
+  public async query<Row extends Record<string, unknown>>(statement: string, args: readonly SqlValue[] = []): Promise<Row[]> { return (await this.current()).query<Row>(statement, args); }
+  public async transaction<T>(operation: (database: SqlDatabase) => Promise<T>): Promise<T> { return (await this.current()).transaction(operation); }
+  public async close(): Promise<void> { if (this.database) await (await this.database).close(); }
+}
+
 function statement(sql: string, args: readonly SqlValue[] = []): InStatement {
   return { sql, args: args as InArgs };
 }
@@ -86,9 +108,22 @@ export class SynchronousSqlDatabaseAdapter implements SqlDatabase {
   public async execute(sql: string, args: readonly SqlValue[] = []): Promise<SqlResult> { const result=this.database.prepare(sql).run(...args); return { rowsAffected:result.changes,lastInsertRowid:result.lastInsertRowid }; }
   public async executeScript(script: string): Promise<void> { this.database.exec(script); }
   public async query<Row extends Record<string, unknown>>(sql: string, args: readonly SqlValue[] = []): Promise<Row[]> { return (this.database.prepare(sql).all(...args) as Row[]).map(row=>({...row})); }
-  public async transaction<T>(operation: (database: SqlDatabase) => Promise<T>): Promise<T> { if(this.database.isTransaction)return operation(this);this.database.exec("BEGIN IMMEDIATE;");try{const value=await operation(this);this.database.exec("COMMIT;");return value;}catch(error:unknown){this.database.exec("ROLLBACK;");throw error;} }
+  public async transaction<T>(operation: (database: SqlDatabase) => Promise<T>): Promise<T> {
+    if (this.database.isTransaction) return operation(this);
+    for (let attempt = 0; ; attempt += 1) {
+      try { this.database.exec("BEGIN IMMEDIATE;"); break; }
+      catch (error: unknown) {
+        if (!isBusy(error) || attempt === 2) throw error;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    }
+    try { const value=await operation(this);this.database.exec("COMMIT;");return value; }
+    catch(error:unknown){this.database.exec("ROLLBACK;");throw error;}
+  }
   public async close(): Promise<void> { this.database.close(); }
 }
+
+function isBusy(error: unknown): boolean { return error instanceof Error && /database is locked|SQLITE_BUSY/i.test(error.message); }
 
 export class LibsqlDatabase implements SqlDatabase {
   public constructor(private readonly client: Client) {}

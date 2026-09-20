@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { CompanyRepositoryPort } from "../../application/ports/repositories.js";
+import type { CompanyPersistencePort } from "../../application/ports/repositories.js";
 import type { AssistantProfileRepositoryPort } from "../../assistant/application/ports.js";
 import { assistantProfileId } from "../../assistant/domain/assistantProfile.js";
 import { AssistantProfileExecutionPolicy, AssistantProfilePolicyError } from "../../assistant/domain/assistantProfilePolicies.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
-import type { WhatsAppConnectionRepositoryPort } from "../application/ports.js";
-import type { WhatsAppConnectionCredentialRepositoryPort, WhatsAppConnectionOperationalStateRepositoryPort, WhatsAppConnectionProviderValidationPort, WhatsAppCredentialCipherPort, WhatsAppCredentialResolverPort, WhatsAppLinkedIntegrationCredentialRepositoryPort } from "../application/ports.js";
+import type { AsyncWhatsAppConnectionCredentialRepositoryPort, AsyncWhatsAppConnectionOperationalStateRepositoryPort, AsyncWhatsAppConnectionRepositoryPort, AsyncWhatsAppLinkedIntegrationCredentialRepositoryPort, WhatsAppConnectionRepositoryPort } from "../application/ports.js";
+import type { AsyncWhatsAppCredentialResolverPort, WhatsAppConnectionCredentialRepositoryPort, WhatsAppConnectionOperationalStateRepositoryPort, WhatsAppConnectionProviderValidationPort, WhatsAppCredentialCipherPort, WhatsAppCredentialResolverPort, WhatsAppLinkedIntegrationCredentialRepositoryPort } from "../application/ports.js";
 import type { KnowledgeRepositoryPort } from "../../knowledge/application/ports.js";
 import { reconstructWhatsAppConnection, whatsAppConnectionId, whatsAppConnectionStatus, type WhatsAppConnection, type WhatsAppConnectionId, type WhatsAppConnectionStatus } from "../domain/whatsappConnection.js";
 import { reconstructEncryptedWhatsAppConnectionCredentials, reconstructWhatsAppConnectionOperationalState, type WhatsAppConnectionOperationalState } from "../domain/whatsappConnectionOnboarding.js";
@@ -23,34 +23,38 @@ export class WhatsAppConnectionNotValidatedError extends Error {}
 export class WhatsAppConnectionKnowledgeUnavailableError extends Error {}
 export class WhatsAppConnectionMetaReconnectRequiredError extends Error { public constructor() { super("Reconnect this WhatsApp Connection with Meta."); this.name = "WhatsAppConnectionMetaReconnectRequiredError"; } }
 export interface WhatsAppConnectionClock { now(): string; }
+type ConnectionPersistence = AsyncWhatsAppConnectionRepositoryPort | WhatsAppConnectionRepositoryPort;
+type CredentialPersistence = AsyncWhatsAppConnectionCredentialRepositoryPort | WhatsAppConnectionCredentialRepositoryPort;
+type OperationalStatePersistence = AsyncWhatsAppConnectionOperationalStateRepositoryPort | WhatsAppConnectionOperationalStateRepositoryPort;
+type LinkedIntegrationPersistence = AsyncWhatsAppLinkedIntegrationCredentialRepositoryPort | WhatsAppLinkedIntegrationCredentialRepositoryPort;
 
 export class WhatsAppConnectionService {
   private readonly executionPolicy = new AssistantProfileExecutionPolicy();
   private limits: RateLimitService | null = null;
-  public constructor(private readonly companies: CompanyRepositoryPort, private readonly profiles: AssistantProfileRepositoryPort, private readonly connections: WhatsAppConnectionRepositoryPort, private readonly clock: WhatsAppConnectionClock, private readonly onboarding?: { credentials: WhatsAppConnectionCredentialRepositoryPort; states: WhatsAppConnectionOperationalStateRepositoryPort; cipher: WhatsAppCredentialCipherPort; resolver: WhatsAppCredentialResolverPort; validator: WhatsAppConnectionProviderValidationPort; knowledge: KnowledgeRepositoryPort; linked?: WhatsAppLinkedIntegrationCredentialRepositoryPort }, private readonly readiness?: AssistantReadinessService, private readonly entitlements?: BillingEntitlementPort) {}
-  public create(context: WorkspaceContext, companyIdValue: unknown, value: unknown): WhatsAppConnection {
-    const companyId = parseCompanyId(companyIdValue), input = createInput(value); this.company(context, companyId);
-    const profile = this.profiles.findById(context, companyId, input.assistantProfileId);
+  public constructor(private readonly companies: CompanyPersistencePort, private readonly profiles: AssistantProfileRepositoryPort, private readonly connections: ConnectionPersistence, private readonly clock: WhatsAppConnectionClock, private readonly onboarding?: { credentials: CredentialPersistence; states: OperationalStatePersistence; cipher: WhatsAppCredentialCipherPort; resolver: WhatsAppCredentialResolverPort | AsyncWhatsAppCredentialResolverPort; validator: WhatsAppConnectionProviderValidationPort; knowledge: KnowledgeRepositoryPort; linked?: LinkedIntegrationPersistence }, private readonly readiness?: AssistantReadinessService, private readonly entitlements?: BillingEntitlementPort) {}
+  public async create(context: WorkspaceContext, companyIdValue: unknown, value: unknown): Promise<WhatsAppConnection> {
+    const companyId = parseCompanyId(companyIdValue), input = createInput(value); await this.company(context, companyId);
+    const profile = await this.profiles.findById(context, companyId, input.assistantProfileId);
     if (!profile || profile.status === "archived") throw new WhatsAppConnectionNotFoundError("Assistant Profile was not found.");
     const now = this.clock.now();
     try {
-      const created = this.connections.create(context, reconstructWhatsAppConnection({ id: whatsAppConnectionId(`wac_${randomUUID().replaceAll("-", "")}`), workspaceId: context.workspaceId, companyId, assistantProfileId: profile.id, phoneNumberId: input.phoneNumberId, whatsappBusinessAccountId: input.whatsappBusinessAccountId, status: "inactive", createdAt: now, updatedAt: now }));
+      const created = await this.connections.create(context, reconstructWhatsAppConnection({ id: whatsAppConnectionId(`wac_${randomUUID().replaceAll("-", "")}`), workspaceId: context.workspaceId, companyId, assistantProfileId: profile.id, phoneNumberId: input.phoneNumberId, whatsappBusinessAccountId: input.whatsappBusinessAccountId, status: "inactive", createdAt: now, updatedAt: now }));
       if (!created) throw new WhatsAppConnectionNotFoundError("WhatsApp Connection could not be created."); return created;
     } catch (error: unknown) { if (unique(error)) throw new WhatsAppConnectionConflictError("WhatsApp Connection configuration conflicts with an existing connection."); throw error; }
   }
-  public list(context: WorkspaceContext, companyIdValue: unknown): WhatsAppConnection[] { const id = parseCompanyId(companyIdValue); this.company(context, id); return this.connections.listByCompany(context, id); }
-  public resolveActiveByPhoneNumberId(phoneNumberId: unknown): WhatsAppConnection | null { if (typeof phoneNumberId !== "string") return null; const connection = this.connections.findByPhoneNumberId(phoneNumberId); return connection?.status === "active" ? connection : null; }
-  public resolveForRecovery(connectionId: WhatsAppConnectionId): WhatsAppConnection | null { const connection = this.connections.findByIdForRecovery(connectionId); return connection?.status === "active" ? connection : null; }
-  public get(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): WhatsAppConnection { const id = parseCompanyId(companyIdValue), connection = this.connections.findById(context, id, connectionId(connectionIdValue)); if (!connection) throw new WhatsAppConnectionNotFoundError("WhatsApp Connection was not found."); return connection; }
-  public update(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown, value: unknown): WhatsAppConnection {
-    const current = this.get(context, companyIdValue, connectionIdValue), input = updateInput(value);
+  public async list(context: WorkspaceContext, companyIdValue: unknown): Promise<WhatsAppConnection[]> { const id = parseCompanyId(companyIdValue); await this.company(context, id); return this.connections.listByCompany(context, id); }
+  public async resolveActiveByPhoneNumberId(phoneNumberId: unknown): Promise<WhatsAppConnection | null> { if (typeof phoneNumberId !== "string") return null; const connection = await this.connections.findByPhoneNumberId(phoneNumberId); return connection?.status === "active" ? connection : null; }
+  public async resolveForRecovery(connectionId: WhatsAppConnectionId): Promise<WhatsAppConnection | null> { const connection = await this.connections.findByIdForRecovery(connectionId); return connection?.status === "active" ? connection : null; }
+  public async get(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): Promise<WhatsAppConnection> { const id = parseCompanyId(companyIdValue), connection = await this.connections.findById(context, id, connectionId(connectionIdValue)); if (!connection) throw new WhatsAppConnectionNotFoundError("WhatsApp Connection was not found."); return connection; }
+  public async update(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown, value: unknown): Promise<WhatsAppConnection> {
+    const current = await this.get(context, companyIdValue, connectionIdValue), input = updateInput(value);
 
     if (input.kind === "status") {
       if (input.status === "active") {
-        const profile = this.profiles.findById(context, current.companyId, current.assistantProfileId);
+        const profile = await this.profiles.findById(context, current.companyId, current.assistantProfileId);
         try { if (!profile) throw new AssistantProfilePolicyError(); this.executionPolicy.assert(profile); } catch { throw new WhatsAppConnectionProfileNotExecutableError("Assistant Profile is not executable."); }
 
-        if (!this.onboarding) { if (current.status !== "active") this.assertCapacity(context); return this.updateStoredStatus(context, current, input.status); }
+        if (!this.onboarding) { if (current.status !== "active") await this.assertCapacity(context); return this.updateStoredStatus(context, current, input.status); }
         throw new WhatsAppConnectionConflictError("Use the activation endpoint to activate a WhatsApp Connection.");
       }
 
@@ -64,7 +68,7 @@ export class WhatsAppConnectionService {
     let nextProfileId = current.assistantProfileId;
 
     if (input.assistantProfileId !== undefined) {
-      const profile = this.profiles.findById(context, current.companyId, input.assistantProfileId);
+       const profile = await this.profiles.findById(context, current.companyId, input.assistantProfileId);
       if (!profile || profile.status === "archived") throw new WhatsAppConnectionNotFoundError("Assistant Profile was not found.");
       nextProfileId = profile.id;
     }
@@ -87,7 +91,7 @@ export class WhatsAppConnectionService {
     let updated: WhatsAppConnection | null;
 
     try {
-      updated = this.connections.updateConfiguration(
+      updated = await this.connections.updateConfiguration(
         context,
         current.companyId,
         current.id,
@@ -105,7 +109,7 @@ export class WhatsAppConnectionService {
     if (!updated) return this.changed(context, current);
 
     if (identifiersChanged && this.onboarding) {
-      this.saveState(context, updated, {
+      await this.saveState(context, updated, {
         validationState: "not_validated",
         validatedAt: null,
         validationFailureCode: null,
@@ -120,89 +124,89 @@ export class WhatsAppConnectionService {
     return updated;
   }
 
-  public status(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): WhatsAppConnectionOperationalStatus {
-    const connection = this.get(context, companyIdValue, connectionIdValue), state = this.onboarding?.states.findOperationalState(context, connection.companyId, connection.id), credentials = this.credentialStatus(context, connection);
+  public async status(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): Promise<WhatsAppConnectionOperationalStatus> {
+    const connection = await this.get(context, companyIdValue, connectionIdValue), state = this.onboarding ? await this.onboarding.states.findOperationalState(context, connection.companyId, connection.id) : undefined, credentials = await this.credentialStatus(context, connection);
     return { connection: redacted(connection), credentialsConfigured: credentials.configured, credentialSource: credentials.source, validationState: state?.validationState ?? "not_validated", validatedAt: state?.validatedAt ?? null, validationFailureCode: state?.validationFailureCode ?? null, healthState: state?.healthState ?? "inactive", lastProviderActivityAt: state?.lastProviderActivityAt ?? null, lastWebhookActivityAt: state?.lastWebhookActivityAt ?? null, healthFailureCode: state?.healthFailureCode ?? null, updatedAt: state?.updatedAt ?? connection.updatedAt };
   }
-  public configureCredentials(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown, value: unknown): WhatsAppConnectionOperationalStatus {
-    const connection = this.get(context, companyIdValue, connectionIdValue), dependencies = this.requiredOnboarding();
-    if (dependencies.linked && dependencies.linked.findIntegrationConnectionId(context, connection.companyId, connection.id) !== null) throw new WhatsAppConnectionMetaReconnectRequiredError();
+  public async configureCredentials(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown, value: unknown): Promise<WhatsAppConnectionOperationalStatus> {
+    const connection = await this.get(context, companyIdValue, connectionIdValue), dependencies = this.requiredOnboarding();
+    if (dependencies.linked && await dependencies.linked.findIntegrationConnectionId(context, connection.companyId, connection.id) !== null) throw new WhatsAppConnectionMetaReconnectRequiredError();
     const token = credentialToken(value), now = this.clock.now();
     const credentials = reconstructEncryptedWhatsAppConnectionCredentials({ whatsAppConnectionId: connection.id, encryptedAccessToken: dependencies.cipher.encrypt(token), createdAt: now, updatedAt: now });
     const state = reconstructWhatsAppConnectionOperationalState({ whatsAppConnectionId: connection.id, validationState: "not_validated", validatedAt: null, validationFailureCode: null, healthState: "inactive", lastProviderActivityAt: null, lastWebhookActivityAt: null, healthFailureCode: null, updatedAt: now });
-    const updated = this.connections.replaceCredentialsAndDeactivate(context, connection.companyId, connection.id, connection.updatedAt, credentials, state, next(connection.updatedAt, now));
+    const updated = await this.connections.replaceCredentialsAndDeactivate(context, connection.companyId, connection.id, connection.updatedAt, credentials, state, next(connection.updatedAt, now));
     if (!updated) return this.changed(context, connection);
     return this.status(context, updated.companyId, updated.id);
   }
   public setRateLimiter(limits: RateLimitService): void { this.limits = limits; }
   public async validate(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown, actorId = "unknown"): Promise<WhatsAppConnectionOperationalStatus> {
-    const connection = this.get(context, companyIdValue, connectionIdValue), dependencies = this.requiredOnboarding();
-    this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", connection.companyId, "actor", actorId), "actor", whatsAppValidationActorLimit);
-    this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", connection.companyId), "company", whatsAppValidationCompanyLimit);
-    const token = dependencies.resolver.resolve(context, connection.companyId, connection.id);
+    const connection = await this.get(context, companyIdValue, connectionIdValue), dependencies = this.requiredOnboarding();
+    await this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", connection.companyId, "actor", actorId), "actor", whatsAppValidationActorLimit);
+    await this.limits?.enforce(abuseScope("workspace", context.workspaceId, "company", connection.companyId), "company", whatsAppValidationCompanyLimit);
+    const token = await dependencies.resolver.resolve(context, connection.companyId, connection.id);
     if (!token) throw new WhatsAppConnectionCredentialsNotConfiguredError("WhatsApp credentials are not configured.");
     const now = this.clock.now(), result = await dependencies.validator.validateConnection({ accessToken: token, phoneNumberId: connection.phoneNumberId, whatsappBusinessAccountId: connection.whatsappBusinessAccountId });
-    this.saveState(context, connection, result.status === "valid" ? { validationState: "valid", validatedAt: now, validationFailureCode: null, healthState: "healthy", lastProviderActivityAt: now, lastWebhookActivityAt: null, healthFailureCode: null, updatedAt: now } : { validationState: "invalid", validatedAt: now, validationFailureCode: result.failureCode, healthState: "degraded", lastProviderActivityAt: null, lastWebhookActivityAt: null, healthFailureCode: result.failureCode, updatedAt: now });
+    await this.saveState(context, connection, result.status === "valid" ? { validationState: "valid", validatedAt: now, validationFailureCode: null, healthState: "healthy", lastProviderActivityAt: now, lastWebhookActivityAt: null, healthFailureCode: null, updatedAt: now } : { validationState: "invalid", validatedAt: now, validationFailureCode: result.failureCode, healthState: "degraded", lastProviderActivityAt: null, lastWebhookActivityAt: null, healthFailureCode: result.failureCode, updatedAt: now });
     return this.status(context, connection.companyId, connection.id);
   }
   public async activate(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): Promise<WhatsAppConnectionOperationalStatus> {
-    const connection = this.get(context, companyIdValue, connectionIdValue);
+    const connection = await this.get(context, companyIdValue, connectionIdValue);
     if (this.readiness) {
-      if (this.readiness.refresh(context, connection.companyId, connection.id).status !== "ready") throw new WhatsAppConnectionConflictError("Assistant readiness is blocked.");
+      if ((await this.readiness.refresh(context, connection.companyId, connection.id)).status !== "ready") throw new WhatsAppConnectionConflictError("Assistant readiness is blocked.");
     } else {
-      const dependencies = this.requiredOnboarding(), company = this.companies.findById(context, connection.companyId);
-      if (!dependencies.credentials.findCredentials(context, connection.companyId, connection.id) && !dependencies.resolver.resolve(context, connection.companyId, connection.id)) throw new WhatsAppConnectionCredentialsNotConfiguredError("WhatsApp credentials are not configured.");
-      if (dependencies.states.findOperationalState(context, connection.companyId, connection.id)?.validationState !== "valid") throw new WhatsAppConnectionNotValidatedError("WhatsApp credentials must be validated before activation.");
-      if (!company || company.status !== "ready" || !dependencies.knowledge.loadPublished(context, connection.companyId)) throw new WhatsAppConnectionKnowledgeUnavailableError("Company requires published Knowledge before WhatsApp activation.");
-      const profile = this.profiles.findById(context, connection.companyId, connection.assistantProfileId);
+       const dependencies = this.requiredOnboarding(), company = await this.companies.findById(context, connection.companyId);
+      if (!await dependencies.credentials.findCredentials(context, connection.companyId, connection.id) && !await dependencies.resolver.resolve(context, connection.companyId, connection.id)) throw new WhatsAppConnectionCredentialsNotConfiguredError("WhatsApp credentials are not configured.");
+      if ((await dependencies.states.findOperationalState(context, connection.companyId, connection.id))?.validationState !== "valid") throw new WhatsAppConnectionNotValidatedError("WhatsApp credentials must be validated before activation.");
+       if (!company || company.status !== "ready" || !await dependencies.knowledge.loadPublished(context, connection.companyId)) throw new WhatsAppConnectionKnowledgeUnavailableError("Company requires published Knowledge before WhatsApp activation.");
+      const profile = await this.profiles.findById(context, connection.companyId, connection.assistantProfileId);
       try { if (!profile) throw new AssistantProfilePolicyError(); this.executionPolicy.assert(profile); } catch { throw new WhatsAppConnectionProfileNotExecutableError("Assistant Profile is not executable."); }
     }
-    if (connection.status === "inactive") { this.assertCapacity(context); try { const updated = this.connections.updateStatus(context, connection.companyId, connection.id, connection.updatedAt, "active", next(connection.updatedAt, this.clock.now())); if (!updated) this.changed(context, connection); } catch (error: unknown) { if (unique(error)) throw new WhatsAppConnectionConflictError("Company already has an active WhatsApp Connection."); throw error; } }
+    if (connection.status === "inactive") { await this.assertCapacity(context); try { const updated = await this.connections.updateStatus(context, connection.companyId, connection.id, connection.updatedAt, "active", next(connection.updatedAt, this.clock.now())); if (!updated) await this.changed(context, connection); } catch (error: unknown) { if (unique(error)) throw new WhatsAppConnectionConflictError("Company already has an active WhatsApp Connection."); throw error; } }
     return this.status(context, connection.companyId, connection.id);
   }
-  public deactivate(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): WhatsAppConnectionOperationalStatus {
-    const connection = this.get(context, companyIdValue, connectionIdValue);
-    if (connection.status === "active") { const updated = this.connections.updateStatus(context, connection.companyId, connection.id, connection.updatedAt, "inactive", next(connection.updatedAt, this.clock.now())); if (!updated) this.changed(context, connection); }
+  public async deactivate(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): Promise<WhatsAppConnectionOperationalStatus> {
+    const connection = await this.get(context, companyIdValue, connectionIdValue);
+    if (connection.status === "active") { const updated = await this.connections.updateStatus(context, connection.companyId, connection.id, connection.updatedAt, "inactive", next(connection.updatedAt, this.clock.now())); if (!updated) await this.changed(context, connection); }
     return this.status(context, connection.companyId, connection.id);
   }
-  public recordWebhookActivity(phoneNumberId: string): void {
-    const connection = this.resolveActiveByPhoneNumberId(phoneNumberId);
+  public async recordWebhookActivity(phoneNumberId: string): Promise<void> {
+    const connection = await this.resolveActiveByPhoneNumberId(phoneNumberId);
     if (!connection || !this.onboarding) return;
     const context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" };
-    const state = this.onboarding.states.findOperationalState(context, connection.companyId, connection.id);
+    const state = await this.onboarding.states.findOperationalState(context, connection.companyId, connection.id);
     if (!state) return;
     const now = this.clock.now();
-    this.saveState(context, connection, { ...state, healthState: "healthy", healthFailureCode: null, lastWebhookActivityAt: now, updatedAt: now });
+    await this.saveState(context, connection, { ...state, healthState: "healthy", healthFailureCode: null, lastWebhookActivityAt: now, updatedAt: now });
   }
-  public recordProviderActivity(context: WorkspaceContext, companyId: number, connectionIdValue: WhatsAppConnectionId): void {
+  public async recordProviderActivity(context: WorkspaceContext, companyId: number, connectionIdValue: WhatsAppConnectionId): Promise<void> {
     if (!this.onboarding) return;
-    const connection = this.connections.findById(context, companyId, connectionIdValue);
+    const connection = await this.connections.findById(context, companyId, connectionIdValue);
     if (!connection) return;
-    const state = this.onboarding.states.findOperationalState(context, companyId, connection.id);
+    const state = await this.onboarding.states.findOperationalState(context, companyId, connection.id);
     if (!state) return;
     const now = this.clock.now();
-    this.saveState(context, connection, { ...state, healthState: "healthy", healthFailureCode: null, lastProviderActivityAt: now, updatedAt: now });
+    await this.saveState(context, connection, { ...state, healthState: "healthy", healthFailureCode: null, lastProviderActivityAt: now, updatedAt: now });
   }
-  public recordProviderFailure(context: WorkspaceContext, companyId: number, connectionIdValue: WhatsAppConnectionId): void {
+  public async recordProviderFailure(context: WorkspaceContext, companyId: number, connectionIdValue: WhatsAppConnectionId): Promise<void> {
     if (!this.onboarding) return;
-    const connection = this.connections.findById(context, companyId, connectionIdValue);
+    const connection = await this.connections.findById(context, companyId, connectionIdValue);
     if (!connection) return;
-    const state = this.onboarding.states.findOperationalState(context, companyId, connection.id);
+    const state = await this.onboarding.states.findOperationalState(context, companyId, connection.id);
     if (!state) return;
     const now = this.clock.now();
-    this.saveState(context, connection, { ...state, healthState: "degraded", healthFailureCode: "provider_unavailable", updatedAt: now });
+    await this.saveState(context, connection, { ...state, healthState: "degraded", healthFailureCode: "provider_unavailable", updatedAt: now });
   }
-  private updateStoredStatus(context: WorkspaceContext, current: WhatsAppConnection, status: WhatsAppConnectionStatus): WhatsAppConnection {
+  private async updateStoredStatus(context: WorkspaceContext, current: WhatsAppConnection, status: WhatsAppConnectionStatus): Promise<WhatsAppConnection> {
     if (current.status === status) return current;
-    const updated = this.connections.updateStatus(context, current.companyId, current.id, current.updatedAt, status, next(current.updatedAt, this.clock.now()));
-    return updated ?? this.changed(context, current);
+    const updated = await this.connections.updateStatus(context, current.companyId, current.id, current.updatedAt, status, next(current.updatedAt, this.clock.now()));
+    return updated ?? await this.changed(context, current);
   }
-  private assertCapacity(context: WorkspaceContext): void { try { if (this.entitlements) assertBillingEntitlement(this.entitlements.mayActivateChannel(context.workspaceId)); } catch (error: unknown) { if (error instanceof BillingEntitlementDeniedError) throw new WhatsAppConnectionConflictError(error.message); throw error; } }
-  private changed(context: WorkspaceContext, current: WhatsAppConnection): never { if (!this.connections.findById(context, current.companyId, current.id)) throw new WhatsAppConnectionNotFoundError("WhatsApp Connection was not found."); throw new WhatsAppConnectionConflictError("WhatsApp Connection changed. Try again."); }
-  private company(context: WorkspaceContext, id: number): void { if (!this.companies.findById(context, id)) throw new WhatsAppConnectionNotFoundError("Company was not found."); }
-  private credentialStatus(context: WorkspaceContext, connection: WhatsAppConnection): { readonly source: "none" | "manual" | "meta_embedded"; readonly configured: boolean } { if (!this.onboarding) return { source: "none", configured: false }; const linked = this.onboarding.linked, metaLinked = linked !== undefined && linked.findIntegrationConnectionId(context, connection.companyId, connection.id) !== null; if (metaLinked) return { source: "meta_embedded", configured: linked.findLinkedIntegrationSecret(context, connection.companyId, connection.id) !== null }; const manualCredentialsConfigured = this.onboarding.credentials.findCredentials(context, connection.companyId, connection.id) !== null; return { source: manualCredentialsConfigured ? "manual" : "none", configured: manualCredentialsConfigured }; }
+  private async assertCapacity(context: WorkspaceContext): Promise<void> { try { if (this.entitlements) assertBillingEntitlement(await this.entitlements.mayActivateChannel(context.workspaceId)); } catch (error: unknown) { if (error instanceof BillingEntitlementDeniedError) throw new WhatsAppConnectionConflictError(error.message); throw error; } }
+  private async changed(context: WorkspaceContext, current: WhatsAppConnection): Promise<never> { if (!await this.connections.findById(context, current.companyId, current.id)) throw new WhatsAppConnectionNotFoundError("WhatsApp Connection was not found."); throw new WhatsAppConnectionConflictError("WhatsApp Connection changed. Try again."); }
+  private async company(context: WorkspaceContext, id: number): Promise<void> { if (!await this.companies.findById(context, id)) throw new WhatsAppConnectionNotFoundError("Company was not found."); }
+  private async credentialStatus(context: WorkspaceContext, connection: WhatsAppConnection): Promise<{ readonly source: "none" | "manual" | "meta_embedded"; readonly configured: boolean }> { if (!this.onboarding) return { source: "none", configured: false }; const linked = this.onboarding.linked, metaLinked = linked !== undefined && await linked.findIntegrationConnectionId(context, connection.companyId, connection.id) !== null; if (metaLinked) return { source: "meta_embedded", configured: await linked!.findLinkedIntegrationSecret(context, connection.companyId, connection.id) !== null }; const manualCredentialsConfigured = await this.onboarding.credentials.findCredentials(context, connection.companyId, connection.id) !== null; return { source: manualCredentialsConfigured ? "manual" : "none", configured: manualCredentialsConfigured }; }
   private requiredOnboarding() { if (!this.onboarding) throw new WhatsAppConnectionCredentialsNotConfiguredError("WhatsApp credential configuration is unavailable."); return this.onboarding; }
-  private saveState(context: WorkspaceContext, connection: WhatsAppConnection, value: Omit<WhatsAppConnectionOperationalState, "whatsAppConnectionId">): void { const saved = this.requiredOnboarding().states.replaceOperationalState(context, connection.companyId, reconstructWhatsAppConnectionOperationalState({ whatsAppConnectionId: connection.id, ...value })); if (!saved) throw new WhatsAppConnectionNotFoundError("WhatsApp Connection was not found."); }
+  private async saveState(context: WorkspaceContext, connection: WhatsAppConnection, value: Omit<WhatsAppConnectionOperationalState, "whatsAppConnectionId">): Promise<void> { const saved = await this.requiredOnboarding().states.replaceOperationalState(context, connection.companyId, reconstructWhatsAppConnectionOperationalState({ whatsAppConnectionId: connection.id, ...value })); if (!saved) throw new WhatsAppConnectionNotFoundError("WhatsApp Connection was not found."); }
 }
 export interface WhatsAppConnectionOperationalStatus { readonly connection: ReturnType<typeof redacted>; readonly credentialsConfigured: boolean; readonly credentialSource: "none" | "manual" | "meta_embedded"; readonly validationState: "not_validated" | "valid" | "invalid"; readonly validatedAt: string | null; readonly validationFailureCode: string | null; readonly healthState: "inactive" | "healthy" | "degraded"; readonly lastProviderActivityAt: string | null; readonly lastWebhookActivityAt: string | null; readonly healthFailureCode: string | null; readonly updatedAt: string; }
 function redacted(value: WhatsAppConnection) { return { id: value.id, assistantProfileId: value.assistantProfileId, phoneNumberId: value.phoneNumberId, whatsappBusinessAccountId: value.whatsappBusinessAccountId, status: value.status, createdAt: value.createdAt, updatedAt: value.updatedAt }; }

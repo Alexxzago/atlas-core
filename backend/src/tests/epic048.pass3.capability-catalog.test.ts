@@ -47,10 +47,10 @@ test("EPIC048 PASS3 catalog endpoint projects assignment synchronization, availa
   const app = express();
   app.use(express.json());
   app.use("/workspaces", createAuthorizedCompaniesRouter({
-    authentication: { cookieName: () => "atlas", current: (value: string) => value === "reader" || value === "manager" ? { userId: value } : null, validateCsrf: () => true } as never,
-    users: { findById: (id: string) => ({ id }) } as never,
-    authorization: { authorize: (user: { id: string }) => user.id === "reader" ? { userId: user.id, membershipId: "member", role: "viewer", capabilities: new Set(["company:read"]) } : { userId: user.id, membershipId: "member", role: "administrator", capabilities: new Set(["company:read", "assistant:capability:manage"]) } } as never,
-    resolver: { resolve: () => context } as never,
+    authentication: { cookieName: () => "atlas", current: async (value: string) => value === "reader" || value === "manager" ? { userId: value } : null, validateCsrf: async () => true } as never,
+    users: { findById: async (id: string) => ({ id }) } as never,
+    authorization: { authorize: async (user: { id: string }) => user.id === "reader" ? { userId: user.id, membershipId: "member", role: "viewer", capabilities: new Set(["company:read"]) } : { userId: user.id, membershipId: "member", role: "administrator", capabilities: new Set(["company:read", "assistant:capability:manage"]) } } as never,
+    resolver: { resolve: async () => context } as never,
     controllers: {} as never,
     assistantControllers: {} as never,
     assistantCapabilityControllers: { list: () => (_req, res) => res.status(501).end(), catalog: (workspace) => createListAssistantCapabilityCatalogController(catalogService, workspace), replace: (workspace, actor) => createReplaceAssistantCapabilitiesController(capabilityService, workspace, actor) },

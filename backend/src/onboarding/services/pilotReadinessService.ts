@@ -1,12 +1,12 @@
 import type { AssistantReadinessService } from "../../assistant/services/assistantReadinessService.js";
 import type { BillingPilotReadiness } from "../../billing/services/billingEntitlementService.js";
-import type { CompanyDomainRepositoryPort } from "../../company/application/ports.js";
+import type { AsyncCompanyLookupPort } from "../../company/application/ports.js";
 import type { KnowledgeRepositoryPort } from "../../knowledge/application/ports.js";
 import type { ProactiveActionRepositoryPort } from "../../proactive/application/ports.js";
 import type { SchedulingConfigurationService } from "../../scheduling/services/schedulingConfigurationService.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import type { WebChatConnectionRepositoryPort } from "../../webChat/application/ports.js";
-import type { WhatsAppConnectionCredentialRepositoryPort, WhatsAppConnectionOperationalStateRepositoryPort, WhatsAppConnectionRepositoryPort } from "../../whatsapp/application/ports.js";
+import type { AsyncWhatsAppConnectionCredentialRepositoryPort, AsyncWhatsAppConnectionOperationalStateRepositoryPort, AsyncWhatsAppConnectionRepositoryPort, WhatsAppConnectionCredentialRepositoryPort, WhatsAppConnectionOperationalStateRepositoryPort, WhatsAppConnectionRepositoryPort } from "../../whatsapp/application/ports.js";
 import { operationalLogger } from "../../observability/operationalLogger.js";
 import { assessPilotReadiness, type PilotReadinessAssessment, type PilotReadinessFacts } from "../domain/pilotReadiness.js";
 
@@ -15,17 +15,17 @@ export class PilotReadinessUnavailableError extends Error {}
 
 export interface PilotReadinessProjection extends PilotReadinessAssessment { readonly evaluatedAt: string; }
 export interface PilotReadinessPlatformCapabilities { readonly whatsAppEmbeddedSignupAvailable: boolean; }
-export interface PilotReadinessBillingPort { pilotReadiness(workspaceId: number): BillingPilotReadiness; }
+export interface PilotReadinessBillingPort { pilotReadiness(workspaceId: number): Promise<BillingPilotReadiness>; }
 
 export class PilotReadinessService {
   private readonly classifications = new Map<string, PilotReadinessProjection["classification"]>();
 
   public constructor(
-    private readonly companies: CompanyDomainRepositoryPort,
+    private readonly companies: AsyncCompanyLookupPort,
     private readonly assistantReadiness: AssistantReadinessService,
     private readonly knowledge: KnowledgeRepositoryPort,
     private readonly webChat: WebChatConnectionRepositoryPort,
-    private readonly whatsApp: WhatsAppConnectionRepositoryPort & WhatsAppConnectionCredentialRepositoryPort & WhatsAppConnectionOperationalStateRepositoryPort,
+    private readonly whatsApp: (WhatsAppConnectionRepositoryPort & WhatsAppConnectionCredentialRepositoryPort & WhatsAppConnectionOperationalStateRepositoryPort) | (AsyncWhatsAppConnectionRepositoryPort & AsyncWhatsAppConnectionCredentialRepositoryPort & AsyncWhatsAppConnectionOperationalStateRepositoryPort),
     private readonly billing: PilotReadinessBillingPort,
     private readonly platform: PilotReadinessPlatformCapabilities,
     private readonly clock: { now(): string },
@@ -34,17 +34,17 @@ export class PilotReadinessService {
 
   public async get(context: WorkspaceContext, companyId: number): Promise<PilotReadinessProjection> {
     try {
-      const company = this.companies.findById(context, companyId as import("../../company/domain/company.js").CompanyId);
+      const company = await this.companies.findById(context, companyId as import("../../company/domain/company.js").CompanyId);
       if (!company) throw new PilotReadinessNotFoundError();
-      const assistant = this.assistantReadiness.assess(context, companyId);
+      const assistant = await this.assistantReadiness.assess(context, companyId);
       const facts: PilotReadinessFacts = {
         workspaceContextValid: true,
         company: company.lifecycle === "suspended" ? "suspended" : company.lifecycle === "archived" ? "archived" : "active",
         defaultAssistantExecutable: assistant.assistantProfileId !== null && !assistant.blockers.some((blocker) => blocker.startsWith("default_assistant_")),
-        publishedKnowledge: this.knowledge.loadCurrentVersion(context, companyId) !== null,
-        commercial: this.billing.pilotReadiness(context.workspaceId),
-        webChat: this.webChatState(context, companyId, assistant.assistantProfileId),
-        whatsApp: this.whatsAppState(context, companyId, assistant.assistantProfileId),
+        publishedKnowledge: (await this.knowledge.loadCurrentVersion(context, companyId)) !== null,
+        commercial: await this.billing.pilotReadiness(context.workspaceId),
+        webChat: await this.webChatState(context, companyId, assistant.assistantProfileId),
+        whatsApp: await this.whatsAppState(context, companyId, assistant.assistantProfileId),
         ...(await this.optionalFacts(context, companyId)),
       };
       const projection = Object.freeze({ ...assessPilotReadiness(facts), evaluatedAt: this.clock.now() });
@@ -68,20 +68,22 @@ export class PilotReadinessService {
     if (projection.classification === "pilot_ready") operationalLogger.info("pilot_readiness_pilot_ready_reached", fields);
   }
 
-  private webChatState(context: WorkspaceContext, companyId: number, defaultProfileId: string | null): PilotReadinessFacts["webChat"] {
-    if (this.webChat.listByCompany(context, companyId).some((connection) => connection.status === "active" && connection.assistantProfileId === defaultProfileId)) return "operational";
-    return this.webChat.listByCompany(context, companyId).some((connection) => connection.status === "inactive") ? "inactive" : "absent";
+  private async webChatState(context: WorkspaceContext, companyId: number, defaultProfileId: string | null): Promise<PilotReadinessFacts["webChat"]> {
+    const connections = await this.webChat.listByCompany(context, companyId);
+    if (connections.some((connection) => connection.status === "active" && connection.assistantProfileId === defaultProfileId)) return "operational";
+    return connections.some((connection) => connection.status === "inactive") ? "inactive" : "absent";
   }
 
-  private whatsAppState(context: WorkspaceContext, companyId: number, defaultProfileId: string | null): PilotReadinessFacts["whatsApp"] {
-    const connections = this.whatsApp.listByCompany(context, companyId);
+  private async whatsAppState(context: WorkspaceContext, companyId: number, defaultProfileId: string | null): Promise<PilotReadinessFacts["whatsApp"]> {
+    const connections = await this.whatsApp.listByCompany(context, companyId);
     for (const connection of connections) {
-      const state = this.whatsApp.findOperationalState(context, companyId, connection.id);
-      const credentials = this.whatsApp.findCredentials(context, companyId, connection.id);
+      const state = await this.whatsApp.findOperationalState(context, companyId, connection.id);
+      const credentials = await this.whatsApp.findCredentials(context, companyId, connection.id);
       if (connection.status === "active" && connection.assistantProfileId === defaultProfileId && credentials && state?.validationState === "valid" && state.healthState === "healthy") return "operational";
     }
-    if (connections.some((connection) => this.whatsApp.findOperationalState(context, companyId, connection.id)?.healthState === "degraded")) return "health_degraded";
-    if (connections.some((connection) => this.whatsApp.findOperationalState(context, companyId, connection.id)?.validationState === "invalid")) return "validation_failed";
+    const states = await Promise.all(connections.map((connection) => this.whatsApp.findOperationalState(context, companyId, connection.id)));
+    if (states.some((state) => state?.healthState === "degraded")) return "health_degraded";
+    if (states.some((state) => state?.validationState === "invalid")) return "validation_failed";
     if (connections.some((connection) => connection.status === "inactive")) return "inactive";
     return connections.length ? "inactive" : this.platform.whatsAppEmbeddedSignupAvailable ? "absent" : "platform_configuration_unavailable";
   }
@@ -92,7 +94,7 @@ export class PilotReadinessService {
       const configuration = await this.optional.scheduling.read(context, companyId).catch(() => null);
       if (configuration) { schedulingRelevant = true; schedulingConfigured = (configuration.readiness as { state?: unknown } | undefined)?.state === "locally_configured"; }
     }
-    const policy = this.optional.proactive?.findPolicy(context, companyId) ?? null;
+    const policy = this.optional.proactive ? await this.optional.proactive.findPolicy(context, companyId) : null;
     return { schedulingRelevant, schedulingConfigured, proactiveRelevant: policy !== null, proactiveConfigured: policy !== null };
   }
 }

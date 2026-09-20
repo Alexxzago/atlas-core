@@ -1,4 +1,4 @@
-import type { CompanyRepositoryPort } from "../../application/ports/repositories.js";
+import type { CompanyPersistencePort } from "../../application/ports/repositories.js";
 import type { AssistantProfileRepositoryPort } from "../../assistant/application/ports.js";
 import { assistantProfileId } from "../../assistant/domain/assistantProfile.js";
 import { AssistantProfileExecutionPolicy } from "../../assistant/domain/assistantProfilePolicies.js";
@@ -32,8 +32,8 @@ export class ProactiveRuntimeService {
 
   public constructor(
     private readonly actions: ProactiveActionRepositoryPort,
-    private readonly companies: CompanyRepositoryPort,
-    private readonly knowledge: { loadCurrentVersion(context: WorkspaceContext, companyId: number): CompanyKnowledgeVersion | null },
+    private readonly companies: CompanyPersistencePort,
+    private readonly knowledge: { loadCurrentVersion(context: WorkspaceContext, companyId: number): Promise<CompanyKnowledgeVersion | null> },
     private readonly profiles: AssistantProfileRepositoryPort,
     private readonly conversations: ConversationService,
     private readonly runtime: OperationalAssistantRuntime,
@@ -46,35 +46,35 @@ export class ProactiveRuntimeService {
 
   public async execute(lease: ProactiveActionLease): Promise<void> {
     const action = lease.action, context: WorkspaceContext = { workspaceId: action.workspaceId, workspaceKey: "proactive" }, now = this.clock.now();
-    if (this.actions.validateClaim(lease, now) !== "valid") return;
-    const company = this.companies.findById(context, action.companyId);
-    const profile = this.profiles.findById(context, action.companyId, assistantProfileId(action.assistantProfileId));
-    const knowledge = this.knowledge.loadCurrentVersion(context, action.companyId);
-    if (!company || !profile || !knowledge || company.status !== "ready") { this.actions.suppressClaim(lease, now, "proactive_runtime_unavailable"); return; }
+    if (await this.actions.validateClaim(lease, now) !== "valid") return;
+    const company = await this.companies.findById(context, action.companyId);
+    const profile = await this.profiles.findById(context, action.companyId, assistantProfileId(action.assistantProfileId));
+    const knowledge = await this.knowledge.loadCurrentVersion(context, action.companyId);
+    if (!company || !profile || !knowledge || company.status !== "ready") { await this.actions.suppressClaim(lease, now, "proactive_runtime_unavailable"); return; }
     try { this.profilePolicy.assert(profile); }
-    catch { this.actions.suppressClaim(lease, now, "assistant_profile_unavailable"); return; }
+    catch { await this.actions.suppressClaim(lease, now, "assistant_profile_unavailable"); return; }
     const conversation = conversationId(action.conversationId);
-    const history = historyFor(this.conversations.listMessages(context, action.companyId, conversation), historyLimit);
-    const memory = this.intelligence?.state(context, action.companyId, conversation);
+    const history = await historyFor(await this.conversations.listMessages(context, action.companyId, conversation), historyLimit);
+    const memory = await this.intelligence?.state(context, action.companyId, conversation);
     const heartbeat = this.startHeartbeat(lease);
     try {
       const executed = await this.runtime.execute(company, profile, knowledge, followUpInstruction, history, {
         purpose: "proactive_execution", provider: "gemini", fallbackOnUnavailable: true, proactiveActionId: action.id,
         conversationMemory: memory ? conversationWorkingMemory(memory) : "",
         snapshotContext: { conversationId: action.conversationId, whatsAppConnectionId: action.whatsAppConnectionId, authorityGeneration: action.expectedAuthorityGeneration, channelProvider: "whatsapp" },
-        ...(this.retrieval ? { retrieval: this.retrieval.context(context, action.companyId, knowledge.sourceRevisionIds, followUpInstruction) } : {}),
+        ...(this.retrieval ? { retrieval: await this.retrieval.context(context, action.companyId, knowledge.sourceRevisionIds, followUpInstruction) } : {}),
       });
-      this.actions.selectCompletedExecution(context, action.companyId, { actionId: action.id, executionRecordId: executed.record.id, leaseToken: lease.leaseToken, now: this.clock.now() });
+      await this.actions.selectCompletedExecution(context, action.companyId, { actionId: action.id, executionRecordId: executed.record.id, leaseToken: lease.leaseToken, now: this.clock.now() });
     } catch {
       // Runtime evidence retains the provider category; action audit stores only this safe classification.
-      this.actions.scheduleRetry(lease, this.clock.now(), "proactive_runtime_transient");
+      await this.actions.scheduleRetry(lease, this.clock.now(), "proactive_runtime_transient");
     } finally { heartbeat(); }
   }
 
   private startHeartbeat(lease: ProactiveActionLease): () => void {
     return this.scheduleHeartbeat(() => {
       const now = this.clock.now();
-      this.actions.renewClaim(lease, now, new Date(Date.parse(now) + leaseExtensionMilliseconds).toISOString());
+      void this.actions.renewClaim(lease, now, new Date(Date.parse(now) + leaseExtensionMilliseconds).toISOString());
     }, this.heartbeatIntervalMilliseconds);
   }
 }

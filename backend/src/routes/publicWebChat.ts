@@ -22,22 +22,23 @@ export function createPublicWebChatRouter(service: PublicWebChatSessionService, 
   const router = Router(), cookieName = production ? productionCookie : developmentCookie;
   const set = (response: Response, raw: string, expiresAt: string): void => { const age = Math.max(0, Math.floor((Date.parse(expiresAt) - Date.now()) / 1000)); response.setHeader("set-cookie", `${cookieName}=${encodeURIComponent(raw)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${production ? "; Secure" : ""}`); };
   const clear = (response: Response): void => { response.setHeader("set-cookie", `${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${production ? "; Secure" : ""}`); };
-  router.post("/:connectionPublicId/session", (request, response): void => {
+  router.post("/:connectionPublicId/session", async (request, response): Promise<void> => {
     if (request.headers["content-type"] && !request.is("application/json")) { response.status(415).json({ error: "Web Chat is unavailable." }); return; }
-    try { const value = service.start(request.params.connectionPublicId, cookie(request, cookieName)); set(response, value.rawToken, value.expiresAt); response.status(201).json({ state: value.state, expiresAt: value.expiresAt }); }
+    try { const value = await service.start(request.params.connectionPublicId, cookie(request, cookieName)); set(response, value.rawToken, value.expiresAt); response.status(201).json({ state: value.state, expiresAt: value.expiresAt }); }
     catch (error: unknown) { if (error instanceof PublicWebChatSessionUnavailableError) unavailable(response); else { console.error("Public Web Chat Session start failed.", error); unavailable(response); } }
   });
-  router.get("/:connectionPublicId/session", (request, response): void => { try { response.json(service.state(request.params.connectionPublicId, cookie(request, cookieName))); } catch { unavailable(response); } });
-  router.delete("/:connectionPublicId/session", (request, response): void => { try { service.close(request.params.connectionPublicId, cookie(request, cookieName)); clear(response); response.status(204).end(); } catch { clear(response); unavailable(response); } });
-  if (activation) router.post("/:connectionPublicId/activation-verifications/:token", (request, response): void => {
-    if (!activation.canClaimPublicVerification(request.params.connectionPublicId, request.params.token)) { unavailable(response); return; }
+  router.get("/:connectionPublicId/session", async (request, response): Promise<void> => { try { response.json(await service.state(request.params.connectionPublicId, cookie(request, cookieName))); } catch { unavailable(response); } });
+  router.delete("/:connectionPublicId/session", async (request, response): Promise<void> => { try { await service.close(request.params.connectionPublicId, cookie(request, cookieName)); clear(response); response.status(204).end(); } catch { clear(response); unavailable(response); } });
+  if (activation) router.post("/:connectionPublicId/activation-verifications/:token", async (request, response): Promise<void> => {
+    if (!await activation.canClaimPublicVerification(request.params.connectionPublicId, request.params.token)) { unavailable(response); return; }
     try {
-      const value = service.start(request.params.connectionPublicId, null), session = service.resolveSession(value.rawToken);
-      if (!session || !activation.claimPublicVerification(request.params.connectionPublicId, request.params.token, session)) { unavailable(response); return; }
+      const value = await service.start(request.params.connectionPublicId, null, async (session) => {
+        if (!await activation.claimPublicVerification(request.params.connectionPublicId, request.params.token, session)) throw new PublicWebChatSessionUnavailableError();
+      });
       set(response,value.rawToken,value.expiresAt); response.status(204).end();
     } catch { unavailable(response); }
   });
-  router.get("/:connectionPublicId/messages", (request, response): void => { try { response.json(conversations.history(request.params.connectionPublicId, cookie(request, cookieName))); } catch { unavailable(response); } });
+  router.get("/:connectionPublicId/messages", async (request, response): Promise<void> => { try { response.json(await conversations.history(request.params.connectionPublicId, cookie(request, cookieName))); } catch { unavailable(response); } });
   router.post("/:connectionPublicId/messages", (request, response, next): void => {
     if (!request.is("application/json")) { response.status(415).json({ error: "Message is invalid." }); return; }
     if (!sameOrigin(request)) { unavailable(response); return; }

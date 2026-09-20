@@ -7,7 +7,7 @@ import { createAsyncWorkspaceCompanyPersistence } from "../company/infrastructur
 import { runFreshAsyncMigrations } from "../config/asyncMigrations.js";
 import { LocalSqlDatabase, type SqlDatabase } from "../config/sqlDatabase.js";
 import { createAsyncConversationRuntimePersistence } from "../conversation/infrastructure/asyncConversationFactory.js";
-import { createAsyncWebChatPublicPersistence } from "../webChat/infrastructure/asyncWebChatFactory.js";
+import { createAsyncWebChatPersistence } from "../webChat/infrastructure/asyncWebChatFactory.js";
 
 const at="2026-09-17T14:00:00.000Z",context={workspaceId:1,workspaceKey:"default"},companyId=5423,profileId="asp_00000000000000000000000000005423",conversationId="cnv_00000000000000000000000000005423",visitorId="cpt_00000000000000000000000000005423",responderId="cpt_00000000000000000000000000005424",messageId=`cmsg_${"0".repeat(28)}5423`,connectionId="wcc_00000000000000000000000000005423",publicId="wcp_00000000000000000000000000005423",sessionId="wcs_00000000000000000000000000005423";
 
@@ -19,7 +19,7 @@ test("EPIC054 PASS5A2C2 runs conversation, intelligence, public web-chat, and ac
     const company=createCompany({id:companyId,workspaceId:1,identity:{name:"Pass5A2C2",slug:"pass5a2c2",website:"https://pass5a2c2.test"},createdAt:at});
     await createAsyncWorkspaceCompanyPersistence(database).companies.createWithEvents(context,company,[{id:"evt-pass5a2c2",type:"CompanyCreated",aggregateVersion:1,sequence:1,occurredAt:at,actorId:null,payload:{companyId}}]);
     await database.execute("INSERT INTO assistant_profiles(id,company_id,name,normalized_name,description,business_role,objective,audience,tone,assistant_language,welcome_message,fallback_message,status,created_at,updated_at,archived_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",[profileId,companyId,"Atlas","atlas",null,null,null,null,"friendly","en",null,"Human help.","ready",at,at,null]);
-    const runtime=createAsyncConversationRuntimePersistence(database),webChat=createAsyncWebChatPublicPersistence(database),activation=createAsyncActivationVerificationPersistence(database).verificationSettlements;
+    const runtime=createAsyncConversationRuntimePersistence(database),webChat=createAsyncWebChatPersistence(database),activation=createAsyncActivationVerificationPersistence(database).verificationSettlements;
     events.length=0;const turn=new Promise<void>(resolve=>setImmediate(()=>{events.push("event-loop");resolve();}));
     const conversation=await runtime.conversations.createConversation(context,{id:conversationId as never,companyId,channel:"web_chat",state:"open",createdAt:at,updatedAt:at,closedAt:null});
     await turn;assert.equal(events[0],"event-loop");assert.ok(conversation);

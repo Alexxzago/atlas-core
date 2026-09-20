@@ -45,28 +45,28 @@ function action(value: ReturnType<typeof fixture>, digit: string, runAt: string)
 
 function worker(value: ReturnType<typeof fixture>, now: string) { return new ProactiveDueWorkerService(value.repository, { now: () => now }); }
 
-test("EPIC045 PASS3 promotes due actions in deterministic order and never claims future work", () => {
+test("EPIC045 PASS3 promotes due actions in deterministic order and never claims future work", async () => {
   const value = fixture();
   try {
     const future = action(value, "f", "2026-08-28T13:00:00.000Z"), later = action(value, "b", "2026-08-28T12:20:00.000Z"), immediate = action(value, "a", inboundAt);
-    const leases = worker(value, "2026-08-28T12:30:00.000Z").claimDue("worker-a");
+    const leases = await worker(value, "2026-08-28T12:30:00.000Z").claimDue("worker-a");
     assert.deepEqual(leases.map((lease) => lease.action.id), [immediate.id, later.id]);
     assert.equal(value.repository.findAction(value.context, value.company.id, future.id)?.state, "scheduled");
   } finally { value.db.close(); }
 });
 
-test("EPIC051 PASS3 permits proactive creation and due work while human attention is required", () => {
+test("EPIC051 PASS3 permits proactive creation and due work while human attention is required", async () => {
   const value = fixture();
   try {
     value.db.prepare("UPDATE conversation_controls SET state='human_required',authority_generation=1 WHERE conversation_id=?").run(value.conversation.id);
     const scope = value.repository.resolveCreationScope(value.context, value.company.id, value.conversation.id);
     assert.ok(scope);
     const created = action(value, "a", inboundAt);
-    assert.equal(worker(value, inboundAt).claimDue("worker-human-required").map(lease => lease.action.id).includes(created.id), true);
+    assert.equal((await worker(value, inboundAt).claimDue("worker-human-required")).map(lease => lease.action.id).includes(created.id), true);
   } finally { value.db.close(); }
 });
 
-test("EPIC051 PASS3 blocks human control and never replays terminal suppression after release", () => {
+test("EPIC051 PASS3 blocks human control and never replays terminal suppression after release", async () => {
   const value = fixture();
   try {
     value.db.prepare("UPDATE conversation_controls SET state='human_controlled',controlling_actor_id='usr_pass3',taken_at=?,authority_generation=2 WHERE conversation_id=?").run(inboundAt,value.conversation.id);
@@ -76,16 +76,16 @@ test("EPIC051 PASS3 blocks human control and never replays terminal suppression 
     value.db.prepare("UPDATE conversation_controls SET state='automated',controlling_actor_id=NULL,taken_at=NULL,authority_generation=1 WHERE conversation_id=?").run(value.conversation.id);
     const created=action(value,"b",inboundAt);
     value.db.prepare("UPDATE conversation_controls SET state='human_controlled',controlling_actor_id='usr_pass3',taken_at=?,authority_generation=2 WHERE conversation_id=?").run(inboundAt,value.conversation.id);
-    worker(value,inboundAt).recoverAvailable();
+    await worker(value,inboundAt).recoverAvailable();
     assert.equal(value.repository.findAction(value.context,value.company.id,created.id)?.state,"suppressed");
     value.db.prepare("UPDATE conversation_controls SET state='automated',controlling_actor_id=NULL,taken_at=NULL,authority_generation=3 WHERE conversation_id=?").run(value.conversation.id);
-    worker(value,"2026-08-28T12:01:00.000Z").recoverAvailable();
+    await worker(value,"2026-08-28T12:01:00.000Z").recoverAvailable();
     assert.equal(value.repository.findAction(value.context,value.company.id,created.id)?.state,"suppressed");
     assert.equal(value.repository.listActions(value.context,value.company.id,10).length,1);
   } finally { value.db.close(); }
 });
 
-test("EPIC045 PASS3 suppresses policy, service-window, assignment, authority, conversation, and binding fences", () => {
+test("EPIC045 PASS3 suppresses policy, service-window, assignment, authority, conversation, and binding fences", async () => {
   const cases: Array<{ readonly mutate: (value: ReturnType<typeof fixture>) => void; readonly reason: string }> = [
     { mutate: (value) => { value.repository.applyPolicy(value.context, value.company.id, { actorId: "usr_pass3", operationId: "disable", expectedVersion: 2, enabled: false, occurredAt: inboundAt }); }, reason: "proactive_policy_disabled" },
     { mutate: (value) => { value.db.prepare("INSERT INTO assistant_profiles(id,company_id,name,normalized_name,tone,assistant_language,fallback_message,status,created_at,updated_at,archived_at) VALUES(?,?,?,?,?,?,?,?,?,?,NULL)").run("apr_cccccccccccccccccccccccccccccccc", value.company.id, "Changed", "changed", "professional", "en", "Fallback", "ready", inboundAt, inboundAt); value.db.prepare("UPDATE whatsapp_connections SET assistant_profile_id='apr_cccccccccccccccccccccccccccccccc' WHERE id=?").run(value.connectionId); }, reason: "assistant_assignment_changed" },
@@ -95,58 +95,58 @@ test("EPIC045 PASS3 suppresses policy, service-window, assignment, authority, co
   ];
   for (const [index, item] of cases.entries()) {
     const value = fixture();
-    try { const created = action(value, (index + 1).toString(16), "2026-08-28T12:10:00.000Z"); item.mutate(value); worker(value, "2026-08-28T12:20:00.000Z").recoverAvailable(); const saved = value.repository.findAction(value.context, value.company.id, created.id)!; assert.equal(saved.state, "suppressed"); assert.equal(saved.safeReasonCode, item.reason); if (item.reason === "assistant_assignment_changed") { value.db.prepare("UPDATE whatsapp_connections SET assistant_profile_id=? WHERE id=?").run(value.profileId, value.connectionId); worker(value, "2026-08-28T12:21:00.000Z").recoverAvailable(); assert.equal(value.repository.findAction(value.context, value.company.id, created.id)?.state, "suppressed"); } } finally { value.db.close(); }
+    try { const created = action(value, (index + 1).toString(16), "2026-08-28T12:10:00.000Z"); item.mutate(value); await worker(value, "2026-08-28T12:20:00.000Z").recoverAvailable(); const saved = value.repository.findAction(value.context, value.company.id, created.id)!; assert.equal(saved.state, "suppressed"); assert.equal(saved.safeReasonCode, item.reason); if (item.reason === "assistant_assignment_changed") { value.db.prepare("UPDATE whatsapp_connections SET assistant_profile_id=? WHERE id=?").run(value.profileId, value.connectionId); await worker(value, "2026-08-28T12:21:00.000Z").recoverAvailable(); assert.equal(value.repository.findAction(value.context, value.company.id, created.id)?.state, "suppressed"); } } finally { value.db.close(); }
   }
   const expired = fixture();
-  try { const created = action(expired, "e", "2026-08-28T12:10:00.000Z"); worker(expired, "2026-08-29T12:00:00.000Z").recoverAvailable(); assert.equal(expired.repository.findAction(expired.context, expired.company.id, created.id)?.safeReasonCode, "whatsapp_service_window_closed"); } finally { expired.db.close(); }
+  try { const created = action(expired, "e", "2026-08-28T12:10:00.000Z"); await worker(expired, "2026-08-29T12:00:00.000Z").recoverAvailable(); assert.equal(expired.repository.findAction(expired.context, expired.company.id, created.id)?.safeReasonCode, "whatsapp_service_window_closed"); } finally { expired.db.close(); }
 });
 
-test("EPIC045 PASS3 retries token-fenced transient work with bounded exponential backoff", () => {
+test("EPIC045 PASS3 retries token-fenced transient work with bounded exponential backoff", async () => {
   const value = fixture();
   try {
-    const created = action(value, "c", inboundAt), service = worker(value, inboundAt), first = service.claimDue("worker-a")[0]!;
+    const created = action(value, "c", inboundAt), service = worker(value, inboundAt), first = (await service.claimDue("worker-a"))[0]!;
     const retry = value.repository.scheduleRetry(first, inboundAt, "worker_transient")!;
     assert.equal(retry.state, "retryable"); assert.equal(retry.nextAttemptAt, "2026-08-28T12:00:02.000Z");
-    assert.equal(worker(value, "2026-08-28T12:00:01.000Z").claimDue("worker-b").length, 0);
-    let lease = worker(value, retry.nextAttemptAt).claimDue("worker-b")[0]!;
-    for (let attempt = 0; attempt < 4; attempt += 1) { const saved = value.repository.scheduleRetry(lease, lease.action.leaseAcquiredAt!, "worker_transient")!; if (saved.state === "permanent_failure") break; lease = worker(value, saved.nextAttemptAt).claimDue("worker-b")[0]!; }
+    assert.equal((await worker(value, "2026-08-28T12:00:01.000Z").claimDue("worker-b")).length, 0);
+    let lease = (await worker(value, retry.nextAttemptAt).claimDue("worker-b"))[0]!;
+    for (let attempt = 0; attempt < 4; attempt += 1) { const saved = value.repository.scheduleRetry(lease, lease.action.leaseAcquiredAt!, "worker_transient")!; if (saved.state === "permanent_failure") break; lease = (await worker(value, saved.nextAttemptAt).claimDue("worker-b"))[0]!; }
     assert.equal(value.repository.findAction(value.context, value.company.id, created.id)?.state, "permanent_failure");
   } finally { value.db.close(); }
 });
 
-test("EPIC045 PASS3 revalidates the latest real inbound and never reactivates terminal suppression", () => {
+test("EPIC045 PASS3 revalidates the latest real inbound and never reactivates terminal suppression", async () => {
   const value = fixture();
   try {
     addInbound(value, "2", "2026-08-29T11:00:00.000Z");
     const created = action(value, "8", "2026-08-29T11:30:00.000Z");
-    worker(value, "2026-08-29T11:30:00.000Z").recoverAvailable();
+    await worker(value, "2026-08-29T11:30:00.000Z").recoverAvailable();
     assert.equal(value.repository.findAction(value.context, value.company.id, created.id)?.state, "ready");
     const justInside = action(value, "7", "2026-08-30T10:59:59.999Z");
-    worker(value, "2026-08-30T10:59:59.999Z").recoverAvailable();
+    await worker(value, "2026-08-30T10:59:59.999Z").recoverAvailable();
     assert.equal(value.repository.findAction(value.context, value.company.id, justInside.id)?.state, "ready");
     const expired = action(value, "6", "2026-08-30T10:59:58.000Z");
-    worker(value, "2026-08-30T11:00:00.000Z").recoverAvailable();
+    await worker(value, "2026-08-30T11:00:00.000Z").recoverAvailable();
     assert.equal(value.repository.findAction(value.context, value.company.id, expired.id)?.state, "suppressed");
     addInbound(value, "3", "2026-08-30T11:01:00.000Z");
-    worker(value, "2026-08-30T11:02:00.000Z").recoverAvailable();
+    await worker(value, "2026-08-30T11:02:00.000Z").recoverAvailable();
     assert.equal(value.repository.findAction(value.context, value.company.id, expired.id)?.state, "suppressed");
   } finally { value.db.close(); }
 });
 
-test("EPIC045 PASS3 suppresses retryable work when policy changes before its backoff", () => {
+test("EPIC045 PASS3 suppresses retryable work when policy changes before its backoff", async () => {
   const value = fixture();
   try {
-    const created = action(value, "5", inboundAt), lease = worker(value, inboundAt).claimDue("worker-a")[0]!, retry = value.repository.scheduleRetry(lease, inboundAt, "worker_transient")!;
+    const created = action(value, "5", inboundAt), lease = (await worker(value, inboundAt).claimDue("worker-a"))[0]!, retry = value.repository.scheduleRetry(lease, inboundAt, "worker_transient")!;
     value.repository.applyPolicy(value.context, value.company.id, { actorId: "usr_pass3", operationId: "disable-retry", expectedVersion: 2, enabled: false, occurredAt: inboundAt });
-    worker(value, retry.nextAttemptAt).recoverAvailable();
+    await worker(value, retry.nextAttemptAt).recoverAvailable();
     assert.equal(value.repository.findAction(value.context, value.company.id, created.id)?.safeReasonCode, "proactive_policy_disabled");
   } finally { value.db.close(); }
 });
 
-test("EPIC045 PASS3 cancellation wins before runtime and stale leased workers cannot mutate", () => {
+test("EPIC045 PASS3 cancellation wins before runtime and stale leased workers cannot mutate", async () => {
   const value = fixture();
   try {
-    const created = action(value, "d", inboundAt), lease = worker(value, inboundAt).claimDue("worker-a")[0]!, current = value.repository.findAction(value.context, value.company.id, created.id)!;
+    const created = action(value, "d", inboundAt), lease = (await worker(value, inboundAt).claimDue("worker-a"))[0]!, current = value.repository.findAction(value.context, value.company.id, created.id)!;
     assert.equal(value.repository.requestCancel(value.context, value.company.id, created.id, { actorId: "usr_pass3", operationId: "cancel-leased", expectedVersion: current.version, occurredAt: inboundAt }).kind, "cancelled");
     assert.equal(value.repository.validateClaim(lease, inboundAt), "stale");
     assert.equal(value.repository.scheduleRetry(lease, inboundAt, "worker_transient"), null);
@@ -154,11 +154,11 @@ test("EPIC045 PASS3 cancellation wins before runtime and stale leased workers ca
   } finally { value.db.close(); }
 });
 
-test("EPIC045 PASS3 uses SQLite leases across connections and recovers expired file-backed leases once", () => {
+test("EPIC045 PASS3 uses SQLite leases across connections and recovers expired file-backed leases once", async () => {
   const directory = mkdtempSync(join(tmpdir(), "atlas-epic045-pass3-")), path = join(directory, "atlas.sqlite"), first = fixture(path);
   let second: DatabaseSync | null = null;
   try {
-    const created = action(first, "9", inboundAt), firstLease = worker(first, inboundAt).claimDue("worker-a")[0]!;
+    const created = action(first, "9", inboundAt), firstLease = (await worker(first, inboundAt).claimDue("worker-a"))[0]!;
     second = new DatabaseSync(path); second.exec("PRAGMA foreign_keys=ON"); const other = new ProactiveActionRepository(second);
     assert.equal(other.claimDue("worker-b", inboundAt, "2026-08-28T12:01:00.000Z", 25).length, 0);
     first.db.close(); second.close(); second = new DatabaseSync(path); second.exec("PRAGMA foreign_keys=ON"); const recovered = new ProactiveActionRepository(second).claimDue("worker-c", "2026-08-28T12:01:01.000Z", "2026-08-28T12:02:01.000Z", 25);

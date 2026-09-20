@@ -1,6 +1,6 @@
 import { createApp } from "./app.js";
 import { billingReconciliationRuntime, createProductionAppRouters, proactiveDueWorkerService, proactiveSemanticRecoveryService, voiceDeferredSemanticRecoveryService, whatsAppInboundMediaRecoveryService, whatsAppOutboundDeliveryService, whatsAppWebhookService } from "./composition.js";
-import { database } from "./config/database.js";
+import { initializeSqlDatabase, sqlDatabase } from "./config/database.js";
 import { setShuttingDown } from "./routes/health.js";
 import { markRuntimeReady, markRuntimeShuttingDown, registerRuntimeWorker } from "./config/runtimeReadiness.js";
 import { randomUUID } from "node:crypto";
@@ -9,6 +9,8 @@ import { createRunId, normalizeOperationalError, operationalLogger, withRunConte
 const portValue = Number(process.env.PORT ?? "3000");
 if (!Number.isSafeInteger(portValue) || portValue < 1 || portValue > 65_535) throw new Error("PORT must be a valid TCP port.");
 
+async function start(): Promise<void> {
+await initializeSqlDatabase();
 const server = createApp(createProductionAppRouters(), { production: process.env.NODE_ENV === "production" }).listen(portValue, "0.0.0.0", () => {
   operationalLogger.info("process_started", { subsystem: "http", outcome: "started", migrationHead: "0069", deploymentVersion: process.env.ATLAS_DEPLOYMENT_VERSION ?? "unknown" });
   registerRuntimeWorker("billing_reconciliation");
@@ -49,10 +51,10 @@ function gracefulShutdown(reason: string, exitCode: number): void {
     }
   }
 
-  const forceTimeout = setTimeout(() => {
+  const forceTimeout = setTimeout(async () => {
     operationalLogger.error("process_shutdown_timeout", { subsystem: "process", safeErrorCategory: "internal_failure" });
     try {
-      database.close();
+      await sqlDatabase.close();
       operationalLogger.info("database_closed", { subsystem: "database", outcome: "forced" });
     } catch (error: unknown) {
       operationalLogger.error("database_close_failed", { subsystem: "database", safeErrorCategory: normalizeOperationalError(error) });
@@ -72,7 +74,7 @@ function gracefulShutdown(reason: string, exitCode: number): void {
     clearTimeout(forceTimeout);
 
     try {
-      database.close();
+      await sqlDatabase.close();
       operationalLogger.info("database_closed", { subsystem: "database", outcome: "completed" });
     } catch (dbErr: unknown) {
       operationalLogger.error("database_close_failed", { subsystem: "database", safeErrorCategory: normalizeOperationalError(dbErr) });
@@ -93,4 +95,12 @@ process.on("uncaughtException", (error) => {
 process.on("unhandledRejection", (reason) => {
   operationalLogger.error("process_unhandled_rejection", { subsystem: "process", safeErrorCategory: normalizeOperationalError(reason) });
   gracefulShutdown("unhandledRejection", 1);
+});
+}
+
+void start().catch(async (error: unknown) => {
+  operationalLogger.error("process_start_failed", { subsystem: "process", safeErrorCategory: normalizeOperationalError(error) });
+  try { await sqlDatabase.close(); }
+  catch (closeError: unknown) { operationalLogger.error("database_close_failed", { subsystem: "database", safeErrorCategory: normalizeOperationalError(closeError) }); }
+  process.exitCode = 1;
 });

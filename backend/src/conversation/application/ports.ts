@@ -19,7 +19,7 @@ export type AssistantResponseFinalizationResult =
   | { readonly kind: "not_found" }
   | { readonly kind: "execution_not_owned" };
 
-export interface ConversationRepositoryPort {
+export interface SynchronousConversationRepositoryPort {
   hasCompany(context: WorkspaceContext, companyId: number): boolean;
   findConversation(context: WorkspaceContext, companyId: number, conversationId: ConversationId): Conversation | null;
   listConversations(context: WorkspaceContext, companyId: number): Conversation[];
@@ -48,4 +48,36 @@ export interface ConversationRepositoryPort {
   isConversationControlledBy(context: WorkspaceContext, companyId: number, conversationId: ConversationId, actorId: UserId): boolean;
   conversationEventTail(context: WorkspaceContext, companyId: number): number;
   listConversationEventsAfter(context: WorkspaceContext, companyId: number, afterSequence: number, limit: number): readonly ConversationEventFeedEntry[];
+}
+
+/** Async persistence boundary for the portable SQLite/libSQL conversation runtime. */
+export interface ConversationRepositoryPort {
+  hasCompany(context: WorkspaceContext, companyId: number): Promise<boolean>;
+  findConversation(context: WorkspaceContext, companyId: number, conversationId: ConversationId): Promise<Conversation | null>;
+  listConversations(context: WorkspaceContext, companyId: number): Promise<readonly Conversation[]>;
+  createConversation(context: WorkspaceContext, conversation: Conversation): Promise<Conversation | null>;
+  updateConversation(context: WorkspaceContext, companyId: number, conversation: Conversation, expectedState: "open"): Promise<boolean>;
+  createParticipant(context: WorkspaceContext, companyId: number, participant: ConversationParticipant): Promise<ConversationParticipant | null>;
+  listParticipants(context: WorkspaceContext, companyId: number, conversationId: ConversationId): Promise<readonly ConversationParticipant[]>;
+  createMessage(context: WorkspaceContext, companyId: number, message: ConversationMessage): Promise<ConversationMessage | null>;
+  listMessages(context: WorkspaceContext, companyId: number, conversationId: ConversationId): Promise<readonly ConversationMessage[]>;
+  findMessage(context: WorkspaceContext, companyId: number, messageId: ConversationMessageId): Promise<ConversationMessage | null>;
+  findMessageByIdempotencyKey(context: WorkspaceContext, companyId: number, conversationId: ConversationId, idempotencyKey: string): Promise<ConversationMessage | null>;
+  findParticipant(context: WorkspaceContext, companyId: number, participantId: ConversationParticipantId): Promise<ConversationParticipant | null>;
+  ensureConversationControl(context: WorkspaceContext, companyId: number, conversationId: ConversationId): Promise<ConversationControl | null>;
+  findConversationControl(context: WorkspaceContext, companyId: number, conversationId: ConversationId): Promise<ConversationControl | null>;
+  updateConversationControl(context: WorkspaceContext, companyId: number, control: ConversationControl, expectedVersion: number): Promise<ConversationControl | null>;
+  applyConversationControlOperation(context: WorkspaceContext, companyId: number, conversationId: ConversationId, command: ConversationControlAtomicCommand): Promise<ConversationControlAtomicResult>;
+  persistOperatorMessage(context: WorkspaceContext, companyId: number, conversationId: ConversationId, actorId: UserId, content: string, idempotencyKey: string, whatsAppConnectionId: string, occurredAt: string): Promise<OperatorMessagePersistenceResult>;
+  finalizeAssistantResponse(context: WorkspaceContext, companyId: number, conversationId: ConversationId, inboundMessageId: ConversationMessageId, outboundParticipantId: ConversationParticipantId, executionRecordId: string, authorityGeneration: number, content: string, idempotencyKey: string, occurredAt: string, whatsAppConnectionId: string | null): Promise<AssistantResponseFinalizationResult>;
+  updateConversationOperatorActivity(context: WorkspaceContext, companyId: number, conversationId: ConversationId, actorId: UserId, activityAt: string, updatedAt: string): Promise<ConversationControl | null>;
+  updateConversationResolution(context: WorkspaceContext, companyId: number, conversationId: ConversationId, expectedVersion: number, resolvedAt: string, resolvedBy: string, updatedAt: string): Promise<ConversationControl | null>;
+  clearConversationResolution(context: WorkspaceContext, companyId: number, conversationId: ConversationId, expectedVersion: number, updatedAt: string): Promise<ConversationControl | null>;
+  listConversationInbox(context: WorkspaceContext, companyId: number): Promise<readonly ConversationInboxProjection[]>;
+  listConversationInboxPage(context: WorkspaceContext, companyId: number, actorId: UserId, filters: ConversationInboxFilters, cursor: { readonly activity: string; readonly id: string } | null, limit: number): Promise<ConversationInboxPage<ConversationInboxProjection>>;
+  findConversationDetail(context: WorkspaceContext, companyId: number, conversationId: ConversationId, actorId?: UserId): Promise<ConversationDetailProjection | null>;
+  markConversationRead(context: WorkspaceContext, companyId: number, conversationId: ConversationId, actorId: UserId, readAt: string): Promise<boolean>;
+  isConversationControlledBy(context: WorkspaceContext, companyId: number, conversationId: ConversationId, actorId: UserId): Promise<boolean>;
+  conversationEventTail(context: WorkspaceContext, companyId: number): Promise<number>;
+  listConversationEventsAfter(context: WorkspaceContext, companyId: number, afterSequence: number, limit: number): Promise<readonly ConversationEventFeedEntry[]>;
 }

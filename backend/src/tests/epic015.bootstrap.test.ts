@@ -53,7 +53,7 @@ test("platform bootstrap atomically creates the first verified owner, selected d
   assert.equal(bootstrap.initialized(), false);
   const result = await bootstrap.bootstrap({ email: "owner@example.com", locale: "es", password: "frase inicial muy segura", confirmation: "frase inicial muy segura", setupSecret: secret });
   assert.equal(bootstrap.initialized(), true);
-  assert.equal(authentication.current(result.rawSessionIdentifier)?.email, "owner@example.com");
+  assert.equal((await authentication.current(result.rawSessionIdentifier))?.email, "owner@example.com");
   assert.equal((database.prepare("SELECT status FROM users").get() as { status: string }).status, "active");
   assert.equal((database.prepare("SELECT email_verified FROM authentication_identities").get() as { email_verified: number }).email_verified, 1);
   assert.equal((database.prepare("SELECT COUNT(*) AS count FROM password_credentials WHERE state='active'").get() as { count: number }).count, 1);
@@ -147,7 +147,7 @@ test("bootstrap owner keeps the default Workspace through login, proxy-origin se
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const headers = { "content-type": "application/json", cookie: `${authentication.cookieName()}=${encodeURIComponent(login.rawIdentifier)}`, origin: "https://portal.example.test", "sec-fetch-site": "same-origin", "x-csrf-token": login.csrfToken };
   try {
-    assert.ok(authentication.current(initial.rawSessionIdentifier));
+    assert.ok(await authentication.current(initial.rawSessionIdentifier));
     const listed = await fetch(`${base}/workspaces`, { headers });
     assert.equal(listed.status, 200);
     const [defaultWorkspace] = await listed.json() as Array<{ id: string; role: string }>;
@@ -156,7 +156,7 @@ test("bootstrap owner keeps the default Workspace through login, proxy-origin se
     assert.equal((await fetch(`${base}/workspaces/${defaultWorkspace.id}/select`, { method: "POST", headers, body: "{}" })).status, 200);
     assert.deepEqual(await (await fetch(`${base}/workspaces/${defaultWorkspace.id}/companies`, { headers })).json(), []);
     assert.equal((await fetch(`${base}/workspaces/${defaultWorkspace.id}/companies`, { method: "POST", headers, body: JSON.stringify({ name: "Default Company", website: "https://default-company.test" }) })).status, 201);
-    const ownerId = authentication.current(login.rawIdentifier)!.userId;
+    const ownerId = (await authentication.current(login.rawIdentifier))!.userId;
     const controls = new CommercialControlsRepository(database);
     const workspaceControls = controls.workspaceByPublicId(defaultWorkspace.id)!;
     assert.equal(controls.setWorkspaceStatus(ownerId, workspaceControls.workspaceId, "suspended", workspaceControls.version, clock.now())?.status, "suspended");
@@ -182,7 +182,7 @@ test("workspace selection accepts only strict forwarded HTTPS through the shared
   await bootstrap.bootstrap({ email: "owner@example.com", locale: "en", password: "first administrator password", confirmation: "first administrator password", setupSecret: secret });
   const login = await authentication.login("owner@example.com", "first administrator password", "127.0.0.1");
   const service = new WorkspaceAdministrationService(new SqliteWorkspaceAdministrationTransaction(database), new SecureInvitationProofProvider(), clock, { async deliver() { return "accepted" as const; } }, "https://portal.example.test");
-  const workspaceId = service.listWorkspaces(authentication.current(login.rawIdentifier)!.userId as import("../identity/domain/user.js").UserId)[0]!.publicId;
+  const workspaceId = (await service.listWorkspaces((await authentication.current(login.rawIdentifier))!.userId as import("../identity/domain/user.js").UserId))[0]!.publicId;
   const app = express();
   app.use(express.json());
   app.use("/workspaces", createWorkspacesRouter(createWorkspaceAdministrationControllers(service, authentication, new ExactRequestOriginPolicy(["https://portal.example.test"], true))));

@@ -19,7 +19,7 @@ const context = { workspaceId: input.workspaceId, workspaceKey: input.workspaceK
 const repository = new CompanyKnowledgeRepository(database);
 
 port.postMessage({ status: "ready" });
-port.once("message", (message: unknown) => {
+port.once("message", async (message: unknown) => {
   if (message !== "start") return;
   try {
     let result: string;
@@ -32,7 +32,7 @@ port.once("message", (message: unknown) => {
       result = `changed:${Number(repository.archiveSource(context, input.companyId, required(input.sourceId), required(input.expectedSourceVersion), input.at) !== null)}`;
     } else {
       const service = new KnowledgeService(new CompanyRepository(database), repository, { acquire: async () => { throw new Error("URL acquisition is not used by this worker."); } }, { extract: async () => { throw new Error("PDF extraction is not used by this worker."); } }, { extract: async () => { throw new Error("Fact extraction is not used by this worker."); } }, new SystemClock());
-      const published = service.publish(context, createSystemActorContext("knowledge-race"), input.companyId, { sourceRevisionIds: input.revisionIds ?? [], expectedKnowledgeVersionId: input.expectedKnowledgeVersionId ?? null });
+      const published = await service.publish(context, createSystemActorContext("knowledge-race"), input.companyId, { sourceRevisionIds: input.revisionIds ?? [], expectedKnowledgeVersionId: input.expectedKnowledgeVersionId ?? null });
       result = published.status;
     }
     port.postMessage({ status: "result", result });

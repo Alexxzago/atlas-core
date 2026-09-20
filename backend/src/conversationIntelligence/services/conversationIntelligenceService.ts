@@ -12,23 +12,23 @@ const MAX_OPERATIONS = 16;
 export class ConversationIntelligenceService {
   public constructor(private readonly states: ConversationIntelligenceRepositoryPort, private readonly derivation: ConversationStateDerivationPort, private readonly clock: { now(): string }) {}
   public async apply(context: WorkspaceContext, companyId: number, message: ConversationMessage, sourceKind: ConversationFactSourceKind = message.direction === "inbound" ? "user" : "assistant_inference"): Promise<ConversationIntelligenceApplyResult> {
-    if (this.states.isApplied(context, companyId, message.conversationId, message.id)) return { kind: "applied", state: this.require(context, companyId, message.conversationId) };
+    if (await this.states.isApplied(context, companyId, message.conversationId, message.id)) return { kind: "applied", state: await this.require(context, companyId, message.conversationId) };
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const current = this.states.find(context, companyId, message.conversationId);
+      const current = await this.states.find(context, companyId, message.conversationId);
       let operations: readonly ConversationStateOperation[];
       try { operations = validateConversationStateOperations(await this.derivation.derive({ state: current, message })); }
       catch { return { kind: "skipped", reason: "derivation_unavailable", state: current }; }
       let next: ConversationIntelligenceState;
       try { next = apply(current ?? empty(message.conversationId, this.clock.now()), operations, message, sourceKind, this.clock.now()); }
       catch { return { kind: "skipped", reason: "invalid_derivation", state: current }; }
-      const saved = this.states.compareAndSet(context, companyId, message.conversationId, current?.version ?? null, { state: next, appliedMessageId: message.id, sourceKind, at: this.clock.now() });
+      const saved = await this.states.compareAndSet(context, companyId, message.conversationId, current?.version ?? null, { state: next, appliedMessageId: message.id, sourceKind, at: this.clock.now() });
       if (saved) return { kind: "applied", state: saved };
-      if (this.states.isApplied(context, companyId, message.conversationId, message.id)) return { kind: "applied", state: this.require(context, companyId, message.conversationId) };
+      if (await this.states.isApplied(context, companyId, message.conversationId, message.id)) return { kind: "applied", state: await this.require(context, companyId, message.conversationId) };
     }
-    return { kind: "skipped", reason: "conflict", state: this.states.find(context, companyId, message.conversationId) };
+    return { kind: "skipped", reason: "conflict", state: await this.states.find(context, companyId, message.conversationId) };
   }
-  public state(context: WorkspaceContext, companyId: number, conversationId: ConversationMessage["conversationId"]): ConversationIntelligenceState | null { return this.states.find(context, companyId, conversationId); }
-  private require(context: WorkspaceContext, companyId: number, conversationId: ConversationMessage["conversationId"]): ConversationIntelligenceState { const state = this.states.find(context, companyId, conversationId); if (!state) throw new ConversationIntelligenceConflictError("Conversation intelligence state is unavailable."); return state; }
+  public state(context: WorkspaceContext, companyId: number, conversationId: ConversationMessage["conversationId"]): Promise<ConversationIntelligenceState | null> { return this.states.find(context, companyId, conversationId); }
+  private async require(context: WorkspaceContext, companyId: number, conversationId: ConversationMessage["conversationId"]): Promise<ConversationIntelligenceState> { const state = await this.states.find(context, companyId, conversationId); if (!state) throw new ConversationIntelligenceConflictError("Conversation intelligence state is unavailable."); return state; }
 }
 function empty(conversationId: ConversationMessage["conversationId"], at: string): ConversationIntelligenceState { return Object.freeze({ conversationId, version: 0, activeIntent: null, facts: Object.freeze([]), pending: Object.freeze([]), referenceGroups: Object.freeze([]), toolMemory: Object.freeze([]), createdAt: at, updatedAt: at }); }
 function apply(current: ConversationIntelligenceState, operations: readonly ConversationStateOperation[], message: ConversationMessage, sourceKind: ConversationFactSourceKind, at: string): ConversationIntelligenceState {
