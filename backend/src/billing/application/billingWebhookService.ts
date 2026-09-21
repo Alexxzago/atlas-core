@@ -52,7 +52,7 @@ function normalize(provider: BillingProviderKind, raw: Buffer): Omit<import("../
   const eventId = text(payload.id), eventType = text(provider === "stripe" ? payload.type : payload.type ?? payload.action);
   const data = object(provider === "stripe" ? object(payload.data)?.object : payload.data) ?? object(payload);
   const objectId = text(data?.id), customerId = text(data?.customer ?? data?.payer_id), subscriptionId = text(data?.subscription ?? (eventType && isSubscriptionType(eventType) ? data?.id : undefined)), correlationToken=text(data?.client_reference_id ?? data?.external_reference);
-  if (!bounded(eventId) || !bounded(eventType) || (provider === "stripe" && eventType !== "checkout.session.completed" && !eventType.startsWith("customer.subscription."))) return null;
+  if (!bounded(eventId) || !bounded(eventType) || (provider === "stripe" && eventType !== "checkout.session.completed" && !eventType.startsWith("customer.subscription.")) || (provider === "mercadopago" && (eventType !== "preapproval.updated" || !bounded(objectId) || !bounded(subscriptionId)))) return null;
   if (provider === "stripe" && eventType === "checkout.session.completed" && (!bounded(objectId) || !bounded(subscriptionId))) return null;
   return { providerEventId: eventId, eventType, providerObjectId: bounded(objectId) ? objectId : null, providerCustomerId: bounded(customerId) ? customerId : null, providerSubscriptionId: bounded(subscriptionId) ? subscriptionId : null, correlationToken:bounded(correlationToken)?correlationToken:null };
 }
