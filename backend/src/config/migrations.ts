@@ -2339,6 +2339,21 @@ const migrations: Migration[] = [
     CREATE TRIGGER activation_verification_attempt_scope_insert BEFORE INSERT ON activation_verification_attempts WHEN NOT EXISTS(SELECT 1 FROM web_chat_connections WHERE id=NEW.web_chat_connection_id AND workspace_id=NEW.workspace_id AND company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Activation verification attempt scope is invalid'); END;
     CREATE TRIGGER activation_verification_attempts_no_delete BEFORE DELETE ON activation_verification_attempts BEGIN SELECT RAISE(ABORT,'Activation verification attempts are immutable'); END;
   `);}},
+  { id:76,name:"0076_public_web_chat_durable_turn_claims",checksumSource:"public-web-chat-session-scoped-durable-idempotency-terminal-handoff-v1",apply(database):void{database.exec(`
+    CREATE TABLE public_web_chat_turns(
+      web_chat_session_id TEXT NOT NULL REFERENCES web_chat_sessions(id) ON DELETE CASCADE,
+      idempotency_key_digest TEXT NOT NULL CHECK(length(idempotency_key_digest)=64 AND idempotency_key_digest NOT GLOB '*[^0-9a-f]*'),
+      content_digest TEXT NOT NULL CHECK(length(content_digest)=64 AND content_digest NOT GLOB '*[^0-9a-f]*'),
+      status TEXT NOT NULL CHECK(status IN ('pending','succeeded','failed')),
+      inbound_message_id TEXT REFERENCES conversation_messages(id) ON DELETE RESTRICT,
+      execution_record_id TEXT REFERENCES assistant_execution_records(id) ON DELETE RESTRICT,
+      response_message TEXT,
+      created_at TEXT NOT NULL,completed_at TEXT,updated_at TEXT NOT NULL,
+      PRIMARY KEY(web_chat_session_id,idempotency_key_digest),
+      CHECK((status='pending' AND inbound_message_id IS NULL AND execution_record_id IS NULL AND response_message IS NULL AND completed_at IS NULL) OR (status='succeeded' AND inbound_message_id IS NOT NULL AND execution_record_id IS NOT NULL AND response_message IS NOT NULL AND completed_at IS NOT NULL) OR (status='failed' AND completed_at IS NOT NULL))
+    );
+    CREATE INDEX idx_public_web_chat_turns_cleanup ON public_web_chat_turns(status,updated_at);
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

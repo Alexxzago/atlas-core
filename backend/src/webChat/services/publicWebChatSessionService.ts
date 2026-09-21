@@ -3,6 +3,8 @@ import type { ConversationService } from "../../conversation/services/conversati
 import type { WebChatConnectionService } from "./webChatConnectionService.js";
 import type { WebChatSessionRepositoryPort } from "../application/sessionPorts.js";
 import { reconstructWebChatSession, webChatSessionId, type WebChatSession } from "../domain/webChatSession.js";
+import { abuseScope } from "../../abuse/sharedRateLimitRepository.js";
+import { publicWebChatSessionLimit, type RateLimitService } from "../../abuse/rateLimitService.js";
 
 export class PublicWebChatSessionUnavailableError extends Error {}
 export interface PublicWebChatSessionClock { now(): string; }
@@ -10,7 +12,7 @@ export interface PublicWebChatSessionResult { readonly state: "active"; readonly
 export interface ResolvedPublicWebChatSession { readonly workspaceId:number; readonly companyId:number; readonly assistantProfileId:string; readonly conversationId:string; readonly visitorParticipantId:string; readonly responderParticipantId:string; readonly sessionId:string; readonly expiresAt:string; }
 
 export class PublicWebChatSessionService {
-  public constructor(private readonly connections: WebChatConnectionService, private readonly conversations: ConversationService, private readonly sessions: WebChatSessionRepositoryPort, private readonly clock: PublicWebChatSessionClock, private readonly lifetimeMilliseconds = 24 * 60 * 60 * 1000) {}
+  public constructor(private readonly connections: WebChatConnectionService, private readonly conversations: ConversationService, private readonly sessions: WebChatSessionRepositoryPort, private readonly clock: PublicWebChatSessionClock, private readonly lifetimeMilliseconds = 24 * 60 * 60 * 1000, private readonly limits?: RateLimitService) {}
 
   public async start(connectionPublicId: unknown, currentRawToken: string | null, onCreated?: (session: Pick<ResolvedPublicWebChatSession, "sessionId" | "conversationId">) => Promise<void>): Promise<PublicWebChatSessionResult> {
     const connection = await this.connections.resolveActiveByPublicId(connectionPublicId);
@@ -19,6 +21,7 @@ export class PublicWebChatSessionService {
       const existing = await this.resolve(currentRawToken, false);
       if (existing && existing.connectionId === connection.id) return { state: "active", expiresAt: existing.context.expiresAt, rawToken: currentRawToken };
     }
+    await this.limits?.enforce(abuseScope("workspace", connection.workspaceId, "company", connection.companyId, "connection", connection.id), "actor", publicWebChatSessionLimit);
     const rawToken = randomBytes(32).toString("base64url"), now = this.clock.now(), expiresAt = new Date(Date.parse(now) + this.lifetimeMilliseconds).toISOString();
     const context = { workspaceId: connection.workspaceId, workspaceKey: "public" };
     await this.sessions.transaction(async () => {

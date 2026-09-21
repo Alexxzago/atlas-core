@@ -55,7 +55,7 @@ export function PublicChatPage({ connectionPublicId }: { readonly connectionPubl
     setMessages((current) => [...current, { localId: nextLocalId.current++, role: "visitor", content: message }]);
     setDraft(""); setNotice(null); setStatus("sending");
     try {
-      const response = await publicWebChatApi.sendMessage(connectionPublicId, message);
+      const response = await publicWebChatApi.sendMessage(connectionPublicId, message, crypto.randomUUID().replaceAll("-", ""));
       setMessages((current) => [...current, { localId: nextLocalId.current++, role: "assistant", content: response.message }]);
       setStatus("ready");
       window.setTimeout(() => textarea.current?.focus(), 0);

@@ -6,7 +6,7 @@ import { reconstructWebChatSession, type WebChatSession, type WebChatSessionId, 
 import { conversationId, conversationParticipantId } from "../../conversation/domain/conversation.js";
 import { webChatConnectionId } from "../domain/webChatConnection.js";
 import type { WebChatConnectionRepositoryPort } from "../application/ports.js";
-import type { WebChatSessionRepositoryPort } from "../application/sessionPorts.js";
+import type { PublicWebChatTurnClaim, PublicWebChatTurnRepositoryPort, WebChatSessionRepositoryPort } from "../application/sessionPorts.js";
 
 type ConnectionRow={id:string;public_id:string;workspace_id:number;company_id:number;assistant_profile_id:string;status:WebChatConnectionStatus;created_at:string;updated_at:string};
 type SessionRow={id:string;web_chat_connection_id:string;conversation_id:string;visitor_participant_id:string;responder_participant_id:string;token_digest:string;state:WebChatSessionState;created_at:string;updated_at:string;expires_at:string;last_seen_at:string};
@@ -34,4 +34,29 @@ export class AsyncPublicWebChatSessionPersistence implements WebChatSessionRepos
   public async updateState(id:WebChatSessionId,expectedState:"active",state:WebChatSessionState,updatedAt:string):Promise<WebChatSession|null>{const result=await this.database.execute("UPDATE web_chat_sessions SET state=?,updated_at=? WHERE id=? AND state=?",[state,updatedAt,id,expectedState]);return Number(result.rowsAffected)===1?this.findById(id):null;}
   public async updateLastSeen(id:WebChatSessionId,expectedState:"active",updatedAt:string,lastSeenAt:string):Promise<WebChatSession|null>{const result=await this.database.execute("UPDATE web_chat_sessions SET updated_at=?,last_seen_at=? WHERE id=? AND state=?",[updatedAt,lastSeenAt,id,expectedState]);return Number(result.rowsAffected)===1?this.findById(id):null;}
   private async findById(id:WebChatSessionId):Promise<WebChatSession|null>{const rows=await this.database.query<SessionRow>("SELECT * FROM web_chat_sessions WHERE id=?",[id]);return rows[0]?session(rows[0]):null;}
+}
+
+export class AsyncPublicWebChatTurnPersistence implements PublicWebChatTurnRepositoryPort {
+  public constructor(private readonly database: SqlDatabase) {}
+  public async claim(sessionId: string, idempotencyKeyDigest: string, contentDigest: string, createdAt: string): Promise<PublicWebChatTurnClaim> {
+    return this.database.transaction(async (database) => {
+      // A turn cannot outlive its session; opportunistically remove expired-session claims.
+      await database.execute("DELETE FROM public_web_chat_turns WHERE web_chat_session_id IN (SELECT id FROM web_chat_sessions WHERE expires_at<=?)", [createdAt]);
+      const inserted = await database.execute("INSERT INTO public_web_chat_turns(web_chat_session_id,idempotency_key_digest,content_digest,status,created_at,updated_at) VALUES(?,?,?,'pending',?,?) ON CONFLICT(web_chat_session_id,idempotency_key_digest) DO NOTHING", [sessionId, idempotencyKeyDigest, contentDigest, createdAt, createdAt]);
+      if (Number(inserted.rowsAffected) === 1) return Object.freeze({ kind: "acquired" });
+      const row = (await database.query<{ content_digest: string; status: "pending" | "succeeded" | "failed"; response_message: string | null }>("SELECT content_digest,status,response_message FROM public_web_chat_turns WHERE web_chat_session_id=? AND idempotency_key_digest=?", [sessionId, idempotencyKeyDigest]))[0];
+      if (!row || row.content_digest !== contentDigest) return Object.freeze({ kind: "mismatch" });
+      if (row.status === "succeeded" && row.response_message !== null) return Object.freeze({ kind: "succeeded", message: row.response_message });
+      return Object.freeze({ kind: row.status === "failed" ? "failed" : "in_progress" });
+    });
+  }
+  public async abandon(sessionId: string, idempotencyKeyDigest: string): Promise<void> { await this.database.execute("DELETE FROM public_web_chat_turns WHERE web_chat_session_id=? AND idempotency_key_digest=? AND status='pending' AND inbound_message_id IS NULL", [sessionId, idempotencyKeyDigest]); }
+  public async succeed(sessionId: string, idempotencyKeyDigest: string, inboundMessageId: string, executionRecordId: string, message: string, completedAt: string): Promise<void> { await this.database.execute("UPDATE public_web_chat_turns SET status='succeeded',inbound_message_id=?,execution_record_id=?,response_message=?,completed_at=?,updated_at=? WHERE web_chat_session_id=? AND idempotency_key_digest=? AND status='pending'", [inboundMessageId, executionRecordId, message, completedAt, completedAt, sessionId, idempotencyKeyDigest]); }
+  public async fail(sessionId: string, idempotencyKeyDigest: string, inboundMessageId: string | null, completedAt: string): Promise<void> { await this.database.execute("UPDATE public_web_chat_turns SET status='failed',inbound_message_id=?,completed_at=?,updated_at=? WHERE web_chat_session_id=? AND idempotency_key_digest=? AND status='pending'", [inboundMessageId, completedAt, completedAt, sessionId, idempotencyKeyDigest]); }
+  public async requestHumanHandoff(workspaceId: number, companyId: number, conversationId: string, occurredAt: string): Promise<void> {
+    await this.database.transaction(async (database) => {
+      await database.execute("INSERT INTO conversation_controls(conversation_id,state,controlling_actor_id,last_controlling_actor_id,taken_at,released_at,last_operator_activity_at,attention_reason,resolved_at,resolved_by,version,created_at,updated_at) SELECT ?,'automated',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,1,?,? WHERE EXISTS(SELECT 1 FROM conversations c JOIN companies co ON co.id=c.company_id WHERE c.id=? AND c.company_id=? AND co.workspace_id=? AND c.state='open') ON CONFLICT(conversation_id) DO NOTHING", [conversationId, occurredAt, occurredAt, conversationId, companyId, workspaceId]);
+      await database.execute("UPDATE conversation_controls SET state='human_required',version=version+1,updated_at=? WHERE conversation_id=? AND state='automated'", [occurredAt, conversationId]);
+    });
+  }
 }

@@ -9,7 +9,7 @@ import { DeterministicFakeBillingProvider, mercadoPagoBillingProviderCapabilitie
 import { BillingProviderRegistry } from "../billing/application/billingProviderRegistry.js";
 import { BillingWebhookService } from "../billing/application/billingWebhookService.js";
 import { BillingReconciliationWorker } from "../billing/services/billingReconciliationWorker.js";
-import { runMigrations } from "../config/migrations.js";
+import { migrationHead, runMigrations } from "../config/migrations.js";
 import { createBillingControllers } from "../controllers/billingController.js";
 import { BillingCatalogAdministrationRepository } from "../repositories/billingCatalogAdministrationRepository.js";
 import { BillingOperationRepository } from "../repositories/billingOperationRepository.js";
@@ -33,8 +33,8 @@ test("EPIC052 PASS5 migrates a fresh database and a genuine 0073 billing fixture
   const fresh = open();
   try {
     const head = fresh.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as { id: number; name: string };
-    assert.equal(head.id, 75);
-    assert.equal(head.name, "0075_activation_verification_attempts");
+    assert.equal(head.id, migrationHead.id);
+    assert.equal(head.name, migrationHead.name);
     assert.deepEqual(fresh.prepare("PRAGMA foreign_key_check").all(), []);
   } finally { fresh.close(); }
   const upgraded = open(73);

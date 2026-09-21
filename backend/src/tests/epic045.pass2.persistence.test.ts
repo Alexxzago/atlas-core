@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { createDatabase } from "../config/database.js";
-import { runMigrations } from "../config/migrations.js";
+import { migrationHead, runMigrations } from "../config/migrations.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
 import { ConversationRepository } from "../repositories/conversationRepository.js";
 import { ProactiveActionRepository } from "../repositories/proactiveActionRepository.js";
@@ -863,7 +863,7 @@ test("EPIC045 PASS2 preserves outbound rowids on 0062 upgrade and restart", () =
           )
           .get() as { id: number; name: string }
       ).name,
-        "0075_activation_verification_attempts",
+        migrationHead.name,
     );
     assert.equal(
       (

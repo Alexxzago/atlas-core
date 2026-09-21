@@ -8,7 +8,7 @@ import { Worker } from "node:worker_threads";
 import type { AddressInfo } from "node:net";
 import { Router } from "express";
 import { amountMinor, billingInterval, currencyCode, effectiveSubscriptionState, entitlementState, providerEvidenceState, rolloutMode } from "../billing/domain/billing.js";
-import { runMigrations } from "../config/migrations.js";
+import { migrationHead, runMigrations } from "../config/migrations.js";
 import { BillingAccountRepository, BillingCatalogRepository, BillingEntitlementSnapshotRepository, BillingSubscriptionRepository } from "../repositories/billingRepository.js";
 import { CommercialControlsRepository } from "../repositories/commercialControlsRepository.js";
 import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
@@ -643,7 +643,7 @@ test("EPIC046 migrates fresh and staged file-backed databases, backfills unmanag
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
     db.close(); db = new DatabaseSync(path); db.exec("PRAGMA foreign_keys=ON"); runMigrations(db);
     const head = db.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as {id:number;name:string};
-    assert.equal(head.id, 75); assert.equal(head.name, "0075_activation_verification_attempts");
+    assert.equal(head.id, migrationHead.id); assert.equal(head.name, migrationHead.name);
   } finally { if (db.isOpen) db.close(); rmSync(directory, {recursive:true, force:true}); }
 });
 

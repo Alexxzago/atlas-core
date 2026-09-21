@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { assistantProfileId, reconstructAssistantProfile, type AssistantProfile } from "../assistant/domain/assistantProfile.js";
 import { createDatabase } from "../config/database.js";
+import { migrationHead } from "../config/migrations.js";
 import { reconstructConversation, reconstructConversationMessage, reconstructConversationParticipant } from "../conversation/domain/conversation.js";
 import { MediaRepository } from "../repositories/mediaRepository.js";
 import { createMediaCore } from "../media/composition.js";
@@ -150,8 +151,8 @@ test("EPIC040 migrates a fresh database through the current schema head", () => 
   const database = createDatabase(":memory:");
   try {
     const head = database.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as { id: number; name: string };
-    assert.equal(head.id, 75);
-    assert.equal(head.name, "0075_activation_verification_attempts");
+    assert.equal(head.id, migrationHead.id);
+    assert.equal(head.name, migrationHead.name);
   } finally {
     database.close();
   }

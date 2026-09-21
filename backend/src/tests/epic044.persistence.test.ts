@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { createDatabase } from "../config/database.js";
-import { runMigrations } from "../config/migrations.js";
+import { migrationHead, runMigrations } from "../config/migrations.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
 import { ChannelProviderEventRepository } from "../repositories/channelProviderEventRepository.js";
 import { ConversationRepository } from "../repositories/conversationRepository.js";
@@ -74,7 +74,7 @@ test("EPIC044 upgrades 0059 data without changing delivery order or event cursor
     assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
     database.close();
     const reopened = new DatabaseSync(path); reopened.exec("PRAGMA foreign_keys=ON"); runMigrations(reopened);
-    assert.deepEqual({ ...(reopened.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as Record<string, unknown>) }, { id: 75, name: "0075_activation_verification_attempts" });
+    assert.deepEqual({ ...(reopened.prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as Record<string, unknown>) }, { id: migrationHead.id, name: migrationHead.name });
     assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=60").get() as { count: number }).count, 1);
     assert.equal(reopened.prepare("SELECT id FROM schema_migrations WHERE id=61").get(), undefined);
     assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE id=62").get() as { count: number }).count, 1);

@@ -3,7 +3,7 @@ import test from "node:test";
 import { productionConfiguration, productionConfigurationInventory } from "../config/productionConfiguration.js";
 import { createProductionRuntimeDatabase, productionDatabaseConfiguration } from "../config/database.js";
 import { DatabaseSync } from "node:sqlite";
-import { runMigrations } from "../config/migrations.js";
+import { migrationHead, runMigrations } from "../config/migrations.js";
 import { UnavailableMediaStorage } from "../media/infrastructure/unavailableMediaStorage.js";
 import { MediaDomainError } from "../media/domain/media.js";
 import { CompanyOperationalStatusService } from "../company/services/companyOperationalStatusService.js";
@@ -25,7 +25,7 @@ test("EPIC047 production keeps local SQLite rejected and fails safely for missin
   assert.throws(() => productionConfiguration({ ...core(), TURSO_AUTH_TOKEN: "" }), /TURSO_DATABASE_URL and TURSO_AUTH_TOKEN/);
 });
 
-test("EPIC047 zero-media production preflight is healthy without a local fallback and Voice remains unavailable", () => {
+test("EPIC047 zero-media production preflight is healthy without a local fallback and Voice remains unavailable", async () => {
   const configuration = productionConfiguration(noMedia());
   assert.equal(configuration.mediaStorage, null);
   assert.equal(configuration.mediaCapability, "unavailable");
@@ -34,7 +34,7 @@ test("EPIC047 zero-media production preflight is healthy without a local fallbac
   assert.equal(runtimeReadinessStatus(), "ready");
   assert.deepEqual(runtimeMissingRequiredWorkers(), []);
   resetRuntimeReadinessForTests();
-  const status = new CompanyOperationalStatusService({ findById: () => ({}) } as never, { findLatest: () => null } as never, { listByCompany: () => [], findOperationalState: () => null } as never).get({} as never, 1);
+  const status = await new CompanyOperationalStatusService({ findById: () => ({}) } as never, { findLatest: () => null } as never, { listByCompany: () => [], findOperationalState: () => null } as never).get({} as never, 1);
   assert.equal(status.voice.status, "unavailable");
 });
 
@@ -72,7 +72,7 @@ test("EPIC047 valid production preflight permits the normal 0068 to 0069 migrati
     database.exec("PRAGMA foreign_keys=ON"); runMigrations(database, 68);
     const runtime = createProductionRuntimeDatabase(noMedia(), () => database);
     assert.equal(runtime.configuration.mediaCapability, "unavailable");
-    assert.equal((database.prepare("SELECT name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as { name: string }).name, "0075_activation_verification_attempts");
+    assert.equal((database.prepare("SELECT name FROM schema_migrations ORDER BY id DESC LIMIT 1").get() as { name: string }).name, migrationHead.name);
     assert.doesNotThrow(() => createProductionRuntimeDatabase(noMedia(), () => database));
   } finally { database.close(); }
 });

@@ -25,7 +25,7 @@ export function createPublicWebChatRouter(service: PublicWebChatSessionService, 
   router.post("/:connectionPublicId/session", async (request, response): Promise<void> => {
     if (request.headers["content-type"] && !request.is("application/json")) { response.status(415).json({ error: "Web Chat is unavailable." }); return; }
     try { const value = await service.start(request.params.connectionPublicId, cookie(request, cookieName)); set(response, value.rawToken, value.expiresAt); response.status(201).json({ state: value.state, expiresAt: value.expiresAt }); }
-    catch (error: unknown) { if (error instanceof PublicWebChatSessionUnavailableError) unavailable(response); else { console.error("Public Web Chat Session start failed.", error); unavailable(response); } }
+    catch (error: unknown) { if (error instanceof PublicWebChatSessionUnavailableError) unavailable(response); else { console.error("Public Web Chat Session start failed."); unavailable(response); } }
   });
   router.get("/:connectionPublicId/session", async (request, response): Promise<void> => { try { response.json(await service.state(request.params.connectionPublicId, cookie(request, cookieName))); } catch { unavailable(response); } });
   router.delete("/:connectionPublicId/session", async (request, response): Promise<void> => { try { await service.close(request.params.connectionPublicId, cookie(request, cookieName)); clear(response); response.status(204).end(); } catch { clear(response); unavailable(response); } });
@@ -48,7 +48,7 @@ export function createPublicWebChatRouter(service: PublicWebChatSessionService, 
   }, (request, response): void => {
     const body = request.body;
     if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || !("message" in body)) { invalidMessage(response); return; }
-    void conversations.sendMessage(request.params.connectionPublicId, cookie(request, cookieName), (body as { message: unknown }).message)
+    void conversations.sendMessage(request.params.connectionPublicId, cookie(request, cookieName), (body as { message: unknown }).message, request.get("idempotency-key") || undefined)
       .then((result) => { response.json(result); })
       .catch((error: unknown) => {
         if (error instanceof PublicWebChatConversationValidationError) invalidMessage(response);

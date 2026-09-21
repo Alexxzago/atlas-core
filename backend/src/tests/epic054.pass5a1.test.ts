@@ -9,21 +9,21 @@ import { migrationHead, migrationRegistry } from "../config/migrations.js";
 import { createLibsqlDatabase, type SqlDatabase } from "../config/sqlDatabase.js";
 import { LiveDataObservationRepository } from "../repositories/liveDataObservationRepository.js";
 
-test("EPIC054 PASS5A1 keeps the 75-migration bootstrap registry immutable", () => {
-  assert.deepEqual(migrationHead, { id: 75, name: "0075_activation_verification_attempts", checksum: migrationHead.checksum });
-  assert.equal(migrationRegistry.length, 75);
+test("EPIC054 PASS5A1 keeps the bootstrap registry immutable through the current head", () => {
+  assert.deepEqual(migrationHead, migrationRegistry.at(-1));
+  assert.equal(migrationRegistry.length, migrationHead.id);
   assert.equal(Object.isFrozen(migrationRegistry), true);
   assert.equal(Object.isFrozen(migrationHead), true);
 });
 
-test("EPIC054 PASS5A1 runs a fresh 0001-0075 history through an isolated native async libSQL database", async () => {
+test("EPIC054 PASS5A1 runs a fresh history through the current head in an isolated native async libSQL database", async () => {
   const directory = mkdtempSync(join(tmpdir(), "atlas-async-migration-"));
   const path = join(directory, "atlas.sqlite");
   const database = createLibsqlDatabase(pathToFileURL(path).href, "local-test-token");
   try {
     await runFreshAsyncMigrations(database);
-    assert.deepEqual(await database.query("SELECT id,name,checksum FROM schema_migrations ORDER BY id DESC LIMIT 1"), [{ id: 75, name: migrationHead.name, checksum: migrationHead.checksum }]);
-    assert.equal((await database.query("SELECT id FROM schema_migrations")).length, 75);
+    assert.deepEqual(await database.query("SELECT id,name,checksum FROM schema_migrations ORDER BY id DESC LIMIT 1"), [{ id: migrationHead.id, name: migrationHead.name, checksum: migrationHead.checksum }]);
+    assert.equal((await database.query("SELECT id FROM schema_migrations")).length, migrationRegistry.length);
     assert.equal((await database.query("SELECT name FROM sqlite_master WHERE type='table' AND name='activation_verification_attempts'")).length, 1);
     await assert.rejects(runFreshAsyncMigrations(database), /empty migration history/);
   } finally {

@@ -6,10 +6,11 @@ import {
   RateLimitService,
 } from "../abuse/rateLimitService.js";
 import {
-  SharedRateLimitRepository,
+  SharedRateLimitRepository as AsyncSharedRateLimitRepository,
   abuseScope,
   normalizedIdentityScope,
 } from "../abuse/sharedRateLimitRepository.js";
+import { SynchronousSqlDatabaseAdapter } from "../config/sqlDatabase.js";
 import express from "express";
 import type { AddressInfo } from "node:net";
 import { createAuthorizedCompaniesRouter } from "../routes/authorizedCompanies.js";
@@ -32,7 +33,7 @@ import { createOnboardingController } from "../controllers/onboarding.js";
 import { createApp } from "../app.js";
 import { createScrapeRouter } from "../routes/scrape.js";
 import { DatabaseSync } from "node:sqlite";
-import { runMigrations } from "../config/migrations.js";
+import { migrationHead, runMigrations } from "../config/migrations.js";
 import { MetaEmbeddedSignupHttpService } from "../whatsapp/application/metaEmbeddedSignupHttpService.js";
 import { createMetaEmbeddedSignupControllers } from "../controllers/metaEmbeddedSignupController.js";
 import { configureProductionConversationMessageController } from "../routes/authorizedCompanies.js";
@@ -86,7 +87,13 @@ const policy = {
   windowMilliseconds: 60_000,
 };
 
-test("EPIC047 PASS5 shared fixed windows are atomic across service instances, isolated, and bounded", () => {
+class SharedRateLimitRepository extends AsyncSharedRateLimitRepository {
+  public constructor(database: ReturnType<typeof createDatabase>) {
+    super(new SynchronousSqlDatabaseAdapter(database));
+  }
+}
+
+test("EPIC047 PASS5 shared fixed windows are atomic across service instances, isolated, and bounded", async () => {
   const database = createDatabase(":memory:"),
     now = "2026-01-01T00:00:00.000Z";
   try {
@@ -101,15 +108,15 @@ test("EPIC047 PASS5 shared fixed windows are atomic across service instances, is
     const actorA = abuseScope("workspace", 1, "company", 1, "actor", "usr_a"),
       actorB = abuseScope("workspace", 1, "company", 1, "actor", "usr_b"),
       tenantB = abuseScope("workspace", 2, "company", 2, "actor", "usr_a");
-    first.enforce(actorA, "actor", policy);
-    second.enforce(actorA, "actor", policy);
-    first.enforce(actorA, "actor", policy);
-    assert.throws(
+    await first.enforce(actorA, "actor", policy);
+    await second.enforce(actorA, "actor", policy);
+    await first.enforce(actorA, "actor", policy);
+    await assert.rejects(
       () => second.enforce(actorA, "actor", policy),
       AbuseLimitExceededError,
     );
-    assert.doesNotThrow(() => first.enforce(actorB, "actor", policy));
-    assert.doesNotThrow(() => second.enforce(tenantB, "actor", policy));
+    await assert.doesNotReject(() => first.enforce(actorB, "actor", policy));
+    await assert.doesNotReject(() => second.enforce(tenantB, "actor", policy));
     const row = database
       .prepare(
         "SELECT count,scope_key,action_key FROM shared_rate_limit_windows WHERE count=3",
@@ -278,7 +285,7 @@ test("EPIC047 PASS5 invitation workspace limits preserve tenant and authorizatio
   const database=createDatabase(":memory:"),now="2026-07-28T12:05:00.000Z",workspaces=new WorkspaceRepository(database),first=workspaces.resolveDefault(),second=workspaces.createForSystemUse({key:"second",name:"Second"}),users=new UserRepository(database),memberships=new MembershipRepository(database),limits=new RateLimitService(new SharedRateLimitRepository(database),()=>now);let proofs=0,emails=0;for(const id of[...Array.from({length:31},(_,i)=>`owner-${i}`),"viewer"]){users.create(reconstructUser({id:id as never,status:"active",locale:"en",authenticationIdentities:[{id:`aid-${id}`,email:`${id}@example.test`,normalizedEmail:`${id}@example.test`,emailVerified:true,createdAt:now,updatedAt:now}],createdAt:now,updatedAt:now}));for(const workspace of[first,second])memberships.create({id:`mem-${workspace.id}-${id}`as never,workspaceId:workspace.id,userId:id as never,role:id==="viewer"?"viewer":"owner",status:"active",version:1,createdAt:now,activatedAt:now,suspendedAt:null,reactivatedAt:null,removedAt:null,roleChangedAt:null});}const service=new WorkspaceAdministrationService(new SqliteWorkspaceAdministrationTransaction(database),{create:()=>({raw:`proof-${++proofs}`,digest:`digest-${proofs}`,version:"sha256-v1"}),parse:()=>null}as never,{now:()=>now},{deliver:async()=>{emails++;return"accepted"as const;}}as never,"https://atlas.test",undefined,limits),app=express();app.use(express.json());app.use("/workspaces",createWorkspacesRouter(createWorkspaceAdministrationControllers(service,{cookieName:()=>"atlas",current:(raw:string)=>({userId:raw}),validateCsrf:()=>true}as never,{allows:()=>true}as never)));const server=app.listen(0,"127.0.0.1");await new Promise<void>(resolve=>server.once("listening",resolve));const origin=`http://127.0.0.1:${(server.address()as AddressInfo).port}`,request=(actor:string,workspace:string,email:string)=>fetch(`${origin}/workspaces/${workspace}/invitations`,{method:"POST",headers:{cookie:`atlas=${actor}`,origin,"sec-fetch-site":"same-origin","x-csrf-token":"csrf","content-type":"application/json"},body:JSON.stringify({email,role:"viewer"})});try{for(let i=0;i<30;i++)assert.equal((await request(`owner-${i}`,first.publicId,`recipient-${i}@example.test`)).status,202);const before=[proofs,emails,database.prepare("SELECT COUNT(*) count FROM workspace_invitations").get()as{count:number}],blocked=await request("owner-30",first.publicId,"blocked@example.test");assert.equal(blocked.status,429);assert.equal(blocked.headers.get("retry-after"),"3300");assert.deepEqual(await blocked.json(),{error:{code:"rate_limited",message:"Request is temporarily unavailable."}});assert.deepEqual([proofs,emails,database.prepare("SELECT COUNT(*) count FROM workspace_invitations").get()],before);assert.equal((await request("owner-30",second.publicId,"second@example.test")).status,202);const deniedBefore=[proofs,emails,database.prepare("SELECT COUNT(*) count FROM workspace_invitations").get()as{count:number}],denied=await request("viewer",first.publicId,"denied@example.test");assert.equal(denied.status,404);assert.deepEqual([proofs,emails,database.prepare("SELECT COUNT(*) count FROM workspace_invitations").get()],deniedBefore);}finally{await new Promise<void>(resolve=>server.close(()=>resolve()));database.close();}
 });
 
-test("EPIC047 PASS5 identity keys are private, per identity, and reset in a new fixed window", () => {
+test("EPIC047 PASS5 identity keys are private, per identity, and reset in a new fixed window", async () => {
   const database = createDatabase(":memory:"),
     email = normalizedIdentityScope("User@Example.Test");
   try {
@@ -286,23 +293,23 @@ test("EPIC047 PASS5 identity keys are private, per identity, and reset in a new 
     assert.notEqual(email, "user@example.test");
     for (let index = 0; index < 3; index++)
       assert.equal(
-        repository.consume(email, policy, "2026-01-01T00:00:00.000Z").allowed,
+        (await repository.consume(email, policy, "2026-01-01T00:00:00.000Z")).allowed,
         true,
       );
     assert.equal(
-      repository.consume(email, policy, "2026-01-01T00:00:00.000Z").allowed,
+      (await repository.consume(email, policy, "2026-01-01T00:00:00.000Z")).allowed,
       false,
     );
     assert.equal(
-      repository.consume(
+      (await repository.consume(
         normalizedIdentityScope("other@example.test"),
         policy,
         "2026-01-01T00:00:00.000Z",
-      ).allowed,
+      )).allowed,
       true,
     );
     assert.equal(
-      repository.consume(email, policy, "2026-01-01T00:01:00.000Z").allowed,
+      (await repository.consume(email, policy, "2026-01-01T00:01:00.000Z")).allowed,
       true,
     );
   } finally {
@@ -1023,15 +1030,15 @@ test("EPIC047 PASS5C scope limits real authenticated onboarding before any servi
   }
 });
 
-test("EPIC047 PASS5C migrates fresh and exact-0068 databases to the sole 0069 shared limiter schema", () => {
-  const verify = (database: DatabaseSync): void => {
+test("EPIC047 PASS5C migrates fresh and exact-0068 databases to the sole 0069 shared limiter schema", async () => {
+  const verify = async (database: DatabaseSync): Promise<void> => {
     const head = database
       .prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1")
       .get() as { id: number; name: string };
-    assert.equal(head.id, 75);
+    assert.equal(head.id, migrationHead.id);
     assert.equal(
       head.name,
-      "0075_activation_verification_attempts",
+      migrationHead.name,
     );
     assert.deepEqual(
       (
@@ -1052,7 +1059,7 @@ test("EPIC047 PASS5C migrates fresh and exact-0068 databases to the sole 0069 sh
         .get(),
       undefined,
     );
-    assert.doesNotThrow(() =>
+    await assert.doesNotReject(() =>
       new RateLimitService(
         new SharedRateLimitRepository(database),
         () => "2026-07-28T12:05:00.000Z",
@@ -1067,7 +1074,7 @@ test("EPIC047 PASS5C migrates fresh and exact-0068 databases to the sole 0069 sh
     upgrade = new DatabaseSync(":memory:");
   try {
     runMigrations(fresh);
-    verify(fresh);
+    await verify(fresh);
     runMigrations(upgrade, 68);
     const before = upgrade
       .prepare("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1")
@@ -1086,7 +1093,7 @@ test("EPIC047 PASS5C migrates fresh and exact-0068 databases to the sole 0069 sh
       undefined,
     );
     runMigrations(upgrade);
-    verify(upgrade);
+    await verify(upgrade);
     assert.equal(
       (
         upgrade
@@ -1677,7 +1684,7 @@ test("EPIC047 PASS5 Assistant Preview enforces real HTTP limits without leaking 
       workspaceKey: secondWorkspace.key,
     },
     companies = new CompanyRepository(database),
-    knowledge = new KnowledgeRepository(database),
+    knowledge = new KnowledgeRepository(new SynchronousSqlDatabaseAdapter(database)),
     profiles = new AssistantProfileRepository(database),
     profileService = new AssistantProfileService(profiles, {
       now: () => now,
@@ -1710,26 +1717,26 @@ test("EPIC047 PASS5 Assistant Preview enforces real HTTP limits without leaking 
       undefined,
       limits,
     ),
-    createReadyPreview = (
+    createReadyPreview = async (
       context: WorkspaceContext,
       name: string,
-    ): { id: number; profileId: string } => {
+    ): Promise<{ id: number; profileId: string }> => {
       const company = companies.create(context, {
           name,
           website: `https://${name.toLowerCase()}.test`,
           status: "ready",
         }),
-        profile = profileService.transition(
+        profile = await profileService.transition(
           context,
           company.id,
-          profileService.create(context, company.id, {
+          (await profileService.create(context, company.id, {
             name: `${name} Preview`,
             assistantLanguage: "en",
             businessRole: "Sales",
             objective: "Help customers",
             welcomeMessage: "Welcome",
             fallbackMessage: "Safe fallback",
-          }).id,
+          })).id,
           "ready",
         );
       publishKnowledgeFixture(database, context, company.id, {
@@ -1738,10 +1745,10 @@ test("EPIC047 PASS5 Assistant Preview enforces real HTTP limits without leaking 
         faq: [],
       });
       return { id: company.id, profileId: profile.id };
-    },
-    actorCompany = createReadyPreview(primary, "Actor"),
-    companyCompany = createReadyPreview(primary, "Company"),
-    tenantCompany = createReadyPreview(tenant, "Tenant"),
+    };
+  const actorCompany = await createReadyPreview(primary, "Actor"),
+    companyCompany = await createReadyPreview(primary, "Company"),
+    tenantCompany = await createReadyPreview(tenant, "Tenant"),
     app = express(),
     restore = setOperationalLogSinkForTests((line) => logs.push(line));
   app.use((req, _res, next) =>
