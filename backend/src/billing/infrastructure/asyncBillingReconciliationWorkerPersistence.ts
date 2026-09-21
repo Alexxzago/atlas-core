@@ -129,8 +129,8 @@ export class AsyncBillingReconciliationWorkerRepository {
       Number(
         (
           await this.database.execute(
-            "UPDATE billing_reconciliation_work SET status='pending',lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,next_attempt_at=?,safe_failure_code=?,version=version+1,updated_at=? WHERE id=? AND status='leased' AND lease_token=? AND version=?",
-            [next, code, now, claim.id, claim.leaseToken, claim.version],
+            "UPDATE billing_reconciliation_work SET status='pending',lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,next_attempt_at=?,safe_failure_code=?,version=version+1,updated_at=? WHERE id=? AND status='leased' AND lease_token=? AND version=? AND lease_expires_at>?",
+            [next, code, now, claim.id, claim.leaseToken, claim.version, now],
           )
         ).rowsAffected,
       ) === 1
@@ -150,7 +150,7 @@ export class AsyncBillingReconciliationWorkerRepository {
     at: string,
   ): Promise<AsyncReconciliationSettle> {
     return this.database.transaction(async (database) => {
-      if (!(await this.valid(database, claim))) return "lost_lease";
+      if (!(await this.valid(database, claim, at))) return "lost_lease";
       if (await this.woken(database, claim)) {
         await this.requeue(database, claim, at);
         return "requeued";
@@ -207,7 +207,7 @@ export class AsyncBillingReconciliationWorkerRepository {
     at: string,
   ): Promise<AsyncReconciliationSettle> {
     return this.database.transaction(async (database) => {
-      if (!(await this.valid(database, claim))) return "lost_lease";
+      if (!(await this.valid(database, claim, at))) return "lost_lease";
       if (await this.woken(database, claim)) {
         await this.requeue(database, claim, at);
         return "requeued";
@@ -381,10 +381,11 @@ export class AsyncBillingReconciliationWorkerRepository {
   private async valid(
     database: SqlDatabase,
     claim: AsyncReconciliationClaim,
+    at: string,
   ): Promise<boolean> {
     const row = (
       await database.query<Row>(
-        "SELECT status,lease_token,version FROM billing_reconciliation_work WHERE id=?",
+        "SELECT status,lease_token,version,lease_expires_at FROM billing_reconciliation_work WHERE id=?",
         [claim.id],
       )
     )[0];
@@ -392,7 +393,9 @@ export class AsyncBillingReconciliationWorkerRepository {
       !!row &&
       row.status === "leased" &&
       row.lease_token === claim.leaseToken &&
-      Number(row.version) === claim.version
+      Number(row.version) === claim.version &&
+      typeof row.lease_expires_at === "string" &&
+      row.lease_expires_at > at
     );
   }
   private async woken(
@@ -418,8 +421,8 @@ export class AsyncBillingReconciliationWorkerRepository {
     return Number(
       (
         await database.execute(
-          "UPDATE billing_reconciliation_work SET status='succeeded',lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,safe_failure_code=NULL,version=version+1,updated_at=? WHERE id=? AND status='leased' AND lease_token=? AND version=? AND wake_generation=?",
-          [at, claim.id, claim.leaseToken, claim.version, claim.wakeGeneration],
+          "UPDATE billing_reconciliation_work SET status='succeeded',lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,safe_failure_code=NULL,version=version+1,updated_at=? WHERE id=? AND status='leased' AND lease_token=? AND version=? AND wake_generation=? AND lease_expires_at>?",
+          [at, claim.id, claim.leaseToken, claim.version, claim.wakeGeneration, at],
         )
       ).rowsAffected,
     ) === 1

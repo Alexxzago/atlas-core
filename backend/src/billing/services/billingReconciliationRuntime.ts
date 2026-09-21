@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createRunId, operationalLogger, withRunContext } from "../../observability/operationalLogger.js";
-import { runtimeWorkerCycleFailed, runtimeWorkerCycleStarted, runtimeWorkerCycleSucceeded, runtimeWorkerStarted, runtimeWorkerStopped } from "../../config/runtimeReadiness.js";
+import { registerRuntimeWorker, runtimeWorkerCycleFailed, runtimeWorkerCycleStarted, runtimeWorkerCycleSucceeded, runtimeWorkerStarted, runtimeWorkerStopped } from "../../config/runtimeReadiness.js";
 
 const defaultIntervalMilliseconds = 5_000;
 const minimumIntervalMilliseconds = 1_000;
@@ -48,6 +48,7 @@ export class BillingReconciliationRuntime {
   public start(): void {
     if (this.started) return;
     this.started = true;
+    registerRuntimeWorker("billing_reconciliation", { configured: true, required: true, staleAfterMilliseconds: this.configuration.intervalMilliseconds + 60_000 });
     runtimeWorkerStarted("billing_reconciliation");
     this.timer = this.schedule(() => { this.run(); }, this.configuration.intervalMilliseconds);
     this.timer.unref();

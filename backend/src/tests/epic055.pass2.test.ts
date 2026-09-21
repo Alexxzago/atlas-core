@@ -8,6 +8,7 @@ import { BillingProviderRegistry } from "../billing/application/billingProviderR
 import { BillingWebhookService } from "../billing/application/billingWebhookService.js";
 import { StripeBillingProvider } from "../billing/providers/stripeBillingProvider.js";
 import { AsyncBillingReconciliationWorkerRepository } from "../billing/infrastructure/asyncBillingReconciliationWorkerPersistence.js";
+import { AsyncBillingOperationRecoveryRepository } from "../billing/infrastructure/asyncBillingOperationRecoveryPersistence.js";
 import { AsyncBillingReconciliationWorker } from "../billing/services/asyncBillingReconciliationWorker.js";
 import { runMigrations } from "../config/migrations.js";
 import { SynchronousSqlDatabaseAdapter } from "../config/sqlDatabase.js";
@@ -130,5 +131,35 @@ test("EPIC055 PASS2 retries canonical reconciliation when Stripe price evidence 
     assert.equal(await worker.runNext("price-mismatch"), "retry");
     assert.equal((database.prepare("SELECT effective_state FROM billing_subscriptions WHERE billing_account_id=?").get(account.id) as { effective_state: string }).effective_state, "active");
     assert.equal((database.prepare("SELECT safe_failure_code FROM billing_reconciliation_work WHERE billing_account_id=?").get(account.id) as { safe_failure_code: string }).safe_failure_code, "commercial_mismatch");
+  } finally { database.close(); }
+});
+
+test("EPIC055 PASS6 rejects reconciliation settlement after its lease expires", async () => {
+  const database = open();
+  try {
+    const { entry, offer: selected } = offer(database, "stripe-expired-lease"), account = new BillingAccountRepository(database).findByWorkspace(workspace(database))!;
+    database.prepare("UPDATE billing_accounts SET rollout_mode='managed',provider_kind='stripe',provider_customer_id='cus_expired' WHERE id=?").run(account.id);
+    database.prepare("UPDATE billing_subscriptions SET catalog_entry_id=?,provider_commercial_offer_id=?,provider_kind='stripe',provider_subscription_id='sub_expired',provider_evidence_state='active',effective_state='active' WHERE billing_account_id=?").run(entry.id, selected.id, account.id);
+    new BillingWebhookRepository(database).accept({ providerKind: "stripe", providerEventId: "evt_expired", eventType: "customer.subscription.updated", providerObjectId: "sub_expired", providerCustomerId: "cus_expired", providerSubscriptionId: "sub_expired", payloadDigest: "e".repeat(64) }, at);
+    let clock = at;
+    const provider = new DeterministicFakeBillingProvider(undefined, stripeBillingProviderCapabilities, { kind: "success", evidence: { providerSubscriptionId: "sub_expired", providerCommercialReference: selected.providerPlanReference, providerEvidenceState: "paused", currentPeriodStart: null, currentPeriodEnd: null, trialEndsAt: null, cancelAtPeriodEnd: false } }), originalRead = provider.readSubscription.bind(provider);
+    provider.readSubscription = async input => { clock = "2026-09-21T00:01:00.001Z"; return originalRead(input); };
+    const registry = new BillingProviderRegistry([{ kind: "stripe", provider }]);
+    const worker = new AsyncBillingReconciliationWorker(new AsyncBillingReconciliationWorkerRepository(new SynchronousSqlDatabaseAdapter(database)), registry, () => clock);
+    assert.equal(await worker.runNext("expired"), "lost_lease");
+    assert.equal((database.prepare("SELECT effective_state FROM billing_subscriptions WHERE billing_account_id=?").get(account.id) as { effective_state: string }).effective_state, "active");
+    assert.equal((database.prepare("SELECT status FROM billing_reconciliation_work WHERE billing_account_id=?").get(account.id) as { status: string }).status, "leased");
+  } finally { database.close(); }
+});
+
+test("EPIC055 PASS6 rejects operation recovery retry after its lease expires", async () => {
+  const database = open();
+  try {
+    const { entry, offer: selected } = offer(database, "stripe-recovery-lease"), service = asyncBillingOperations(database, new BillingProviderRegistry([{ kind: "stripe", provider: new DeterministicFakeBillingProvider({ kind: "uncertain" }) }]), () => at);
+    assert.equal((await service.checkout({ workspaceId: workspace(database), catalogEntryId: entry.id, providerCommercialOfferId: selected.id, operationId: "recovery-lease", successTarget: "https://atlas.test/s", cancelTarget: "https://atlas.test/c" })).kind, "uncertain");
+    const repository = new AsyncBillingOperationRecoveryRepository(new SynchronousSqlDatabaseAdapter(database)), claim = await repository.claimRecovery("recovery", at, at, "2026-09-21T00:01:00.000Z");
+    assert.ok(claim);
+    assert.equal(await repository.retryRecovery(claim!, "2026-09-21T00:02:00.000Z", "uncertain", "2026-09-21T00:01:00.001Z"), false);
+    assert.equal((database.prepare("SELECT status FROM billing_operations WHERE operation_id='recovery-lease'").get() as { status: string }).status, "uncertain");
   } finally { database.close(); }
 });
