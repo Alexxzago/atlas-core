@@ -6,19 +6,121 @@ import { OpenCheckoutEnrollmentConflictError } from "../infrastructure/asyncBill
 import type { AsyncBillingCustomerReadRepository, AsyncBillingOperationRepository, AsyncBillingPayerIdentityRepository } from "../infrastructure/asyncBillingCustomerPersistence.js";
 import { BillingProviderRegistry } from "./billingProviderRegistry.js";
 
-export type BillingOperationOutcome={readonly kind:"succeeded"|"failed"|"uncertain"|"in_progress"|"conflict"|"invalid"|"unsupported"|"unavailable";readonly operation?:BillingOperation};
-export type BillingPortalOutcome={readonly kind:"succeeded";readonly result:import("./billingProvider.js").BillingProviderResult}|Readonly<{readonly kind:"failed"|"uncertain"|"invalid"|"unsupported"|"unavailable"}>;
-type CheckoutInput=Readonly<{workspaceId:number;catalogEntryId:string;providerCommercialOfferId?:string;operationId:string;successTarget:string;cancelTarget:string}>;
-type SubscriptionInput=Readonly<{workspaceId:number;operationId:string;subscriptionId:string}>;
+export type BillingOperationOutcome = { readonly kind: "succeeded" | "failed" | "uncertain" | "in_progress" | "conflict" | "invalid" | "unsupported" | "unavailable"; readonly operation?: BillingOperation };
+export type BillingPortalOutcome = { readonly kind: "succeeded"; readonly result: import("./billingProvider.js").BillingProviderResult } | Readonly<{ readonly kind: "failed" | "uncertain" | "invalid" | "unsupported" | "unavailable" }>;
+type CheckoutInput = Readonly<{ workspaceId: number; catalogEntryId: string; providerCommercialOfferId?: string; operationId: string; successTarget: string; cancelTarget: string }>;
+type SubscriptionInput = Readonly<{ workspaceId: number; operationId: string; subscriptionId: string }>;
 
 export class BillingOperationService {
-  public constructor(private readonly customer:AsyncBillingCustomerReadRepository,private readonly operations:AsyncBillingOperationRepository,private readonly providers:BillingProviderRegistry,private readonly now:()=>string,private readonly payers:AsyncBillingPayerIdentityRepository){}
-  public async checkout(input:CheckoutInput):Promise<BillingOperationOutcome>{const [account,entry]=await Promise.all([this.customer.account(input.workspaceId),this.customer.entry(input.catalogEntryId)]);if(!account||!entry||entry.publicationState!=="published")return{kind:"invalid"};const selected=input.providerCommercialOfferId?await this.customer.offer(input.providerCommercialOfferId):null,offers=selected?[selected]:await this.customer.sellableOffers(entry.id),offer=offers.find(value=>value.catalogEntryId===entry.id&&value.lifecycle==="sellable"&&value.readinessState==="ready")??null,kind=offer?.providerKind;if(!offer||!kind||(account.providerKind&&account.providerKind!==kind))return{kind:"invalid"};const provider=this.providers.get(kind);if(!provider)return{kind:"unavailable"};if(!provider.capabilities.subscriptionCheckout)return{kind:"unsupported"};const payer=provider.capabilities.requiresPayerEmailForCheckout?await this.payers.resolve(account.id):null;if(provider.capabilities.requiresPayerEmailForCheckout&&!payer)return{kind:"invalid"};const replay=await this.operations.find(account.id,"checkout_session_create",input.operationId);if(!replay&&await this.operations.hasOpenCheckoutEnrollment(account.id))return{kind:"conflict"};return this.execute(account.id,"checkout_session_create",kind,input.operationId,billingOperationFingerprint({billingAccountId:account.id,operationKind:"checkout_session_create",catalogEntryId:entry.id,...(input.providerCommercialOfferId?{providerCommercialOfferId:offer.id}:{}),providerKind:kind,redirectTarget:input.successTarget,cancelTarget:input.cancelTarget}),operation=>provider.createCheckoutSession({idempotencyKey:operation.providerIdempotencyKey,catalogReference:offer.providerPlanReference,successTarget:input.successTarget,cancelTarget:input.cancelTarget,correlationToken:operation.recoveryCorrelationToken??undefined,...(payer?{payerEmail:payer.email}:{})}),entry.id,{catalogEntryId:entry.id,providerCommercialOfferId:offer.id,successTarget:input.successTarget,cancelTarget:input.cancelTarget});}
-  public async portal(input:Readonly<{workspaceId:number;returnTarget:string}>):Promise<BillingPortalOutcome>{const account=await this.customer.account(input.workspaceId),kind=account?.providerKind;if(!account||account.rolloutMode!=="managed"||!kind||!account.providerCustomerId)return{kind:"invalid"};const provider=this.providers.get(kind);if(!provider)return{kind:"unavailable"};if(!provider.capabilities.supportsCustomerPortal)return{kind:"unsupported"};const result=await provider.createPortalSession({billingAccountReference:account.providerCustomerId,returnTarget:input.returnTarget});return result.kind==="success"?{kind:"succeeded",result}:result.kind==="failed"?{kind:"failed"}:{kind:"uncertain"};}
-  public async supportedManagementActions(workspaceId:number):Promise<readonly ("portal"|"cancel"|"reactivate")[]>{const account=await this.customer.account(workspaceId),sub=account?await this.customer.subscription(account.id):null,kind=sub?.providerKind??account?.providerKind,provider=kind?this.providers.get(kind):null;if(!account||!sub||!provider)return Object.freeze([]);const actions:Array<"portal"|"cancel"|"reactivate">=[];if(account.rolloutMode==="managed"&&account.providerCustomerId&&provider.capabilities.supportsCustomerPortal)actions.push("portal");if(["trial","active","grace"].includes(sub.effectiveState)&&sub.providerSubscriptionId&&provider.capabilities.supportsNativeCancelAtPeriodEnd)actions.push("cancel");if(sub.effectiveState==="canceling_at_period_end"&&sub.providerSubscriptionId&&provider.capabilities.supportsNativeReactivateCancelAtPeriodEnd)actions.push("reactivate");return Object.freeze(actions);}
-  public async managementCapabilities(workspaceId:number,offers:readonly BillingProviderCommercialOffer[]):Promise<Readonly<{canOpenBillingPortal:boolean;canCancel:boolean;canReactivate:boolean;canStartNewCheckout:boolean;canSwitchProvider:false}>>{const [actions,account]=await Promise.all([this.supportedManagementActions(workspaceId),this.customer.account(workspaceId)]);let canStart=false;if(account&&!await this.operations.hasOpenCheckoutEnrollment(account.id)){const values=await Promise.all(offers.map(async offer=>{const provider=this.providers.get(offer.providerKind);return (!account.providerKind||account.providerKind===offer.providerKind)&&Boolean(provider?.capabilities.subscriptionCheckout)&&(!provider!.capabilities.requiresPayerEmailForCheckout||Boolean(await this.payers.resolve(account.id)));}));canStart=values.some(Boolean);}return Object.freeze({canOpenBillingPortal:actions.includes("portal"),canCancel:actions.includes("cancel"),canReactivate:actions.includes("reactivate"),canStartNewCheckout:canStart,canSwitchProvider:false});}
-  public async cancelAtPeriodEnd(input:SubscriptionInput):Promise<BillingOperationOutcome>{return this.subscription(input,"subscription_cancel_at_period_end",["trial","active","grace"]);}
-  public async reactivate(input:SubscriptionInput):Promise<BillingOperationOutcome>{return this.subscription(input,"subscription_reactivate",["canceling_at_period_end"]);}
-  private async subscription(input:SubscriptionInput,kind:Extract<BillingOperationKind,"subscription_cancel_at_period_end"|"subscription_reactivate">,states:readonly string[]):Promise<BillingOperationOutcome>{const account=await this.customer.account(input.workspaceId),sub=account?await this.customer.subscription(account.id):null,providerKind=sub?.providerKind;if(!account||!sub||sub.id!==input.subscriptionId||!providerKind||!sub.providerSubscriptionId||!states.includes(sub.effectiveState)||(account.providerKind&&account.providerKind!==providerKind))return{kind:"invalid"};const provider=this.providers.get(providerKind);if(!provider)return{kind:"unavailable"};if(kind==="subscription_cancel_at_period_end"&&!provider.capabilities.supportsNativeCancelAtPeriodEnd)return{kind:"unsupported"};if(kind==="subscription_reactivate"&&!provider.capabilities.supportsNativeReactivateCancelAtPeriodEnd)return{kind:"unsupported"};return this.execute(account.id,kind,providerKind,input.operationId,billingOperationFingerprint({billingAccountId:account.id,operationKind:kind,subscriptionId:sub.id,providerKind}),operation=>kind==="subscription_cancel_at_period_end"?provider.cancelAtPeriodEnd({idempotencyKey:operation.providerIdempotencyKey,subscriptionReference:sub.providerSubscriptionId!}):provider.reactivateSubscription({idempotencyKey:operation.providerIdempotencyKey,subscriptionReference:sub.providerSubscriptionId!}),undefined,{targetSubscriptionId:sub.id});}
-  private async execute(accountId:string,kind:BillingOperationKind,providerKind:BillingProviderKind,operationId:string,fingerprint:string,call:(operation:BillingOperation)=>Promise<import("./billingProvider.js").BillingProviderResult>,catalogEntryId?:string,context:Readonly<{catalogEntryId?:string;providerCommercialOfferId?:string;successTarget?:string;cancelTarget?:string;targetSubscriptionId?:string}>={}):Promise<BillingOperationOutcome>{const replay=await this.operations.createOrReplay({billingAccountId:accountId,kind,providerKind,operationId,fingerprint,at:this.now(),...context});if(replay.kind==="conflict")return{kind:"conflict"};const current=replay.operation!;if(current.status==="succeeded")return{kind:"succeeded",operation:current};if(current.status==="failed")return{kind:"failed",operation:current};if(current.status==="uncertain")return{kind:"uncertain",operation:current};if(current.status==="request_started")return{kind:"in_progress",operation:current};const started=await this.operations.start(current.id,current.version,this.now());if(!started)return{kind:"in_progress",operation:(await this.operations.find(accountId,kind,operationId))!};const result=await call(started);if(result.kind==="success"){const safe=JSON.stringify({providerObjectId:result.providerObjectId,...(result.redirectUrl?{redirectUrl:result.redirectUrl}:{})});try{const settled=catalogEntryId?await this.operations.succeedCheckout(started.id,started.version,result.providerObjectId,safe,catalogEntryId,this.now()):await this.operations.succeed(started.id,started.version,result.providerObjectId,safe,this.now());return settled?{kind:"succeeded",operation:settled}:{kind:"uncertain",operation:(await this.operations.find(accountId,kind,operationId))!};}catch(error){if(error instanceof OpenCheckoutEnrollmentConflictError)return{kind:"conflict"};throw error;}}if(result.kind==="failed"){const settled=await this.operations.fail(started.id,started.version,result.code,this.now());return settled?{kind:"failed",operation:settled}:{kind:"uncertain",operation:(await this.operations.find(accountId,kind,operationId))!};}const unsettled=await this.operations.uncertain(started.id,started.version,this.now());return{kind:"uncertain",operation:unsettled??(await this.operations.find(accountId,kind,operationId))!};}
+  public constructor(private readonly customer: AsyncBillingCustomerReadRepository, private readonly operations: AsyncBillingOperationRepository, private readonly providers: BillingProviderRegistry, private readonly now: () => string, private readonly payers: AsyncBillingPayerIdentityRepository) {}
+
+  public async checkout(input: CheckoutInput): Promise<BillingOperationOutcome> {
+    const [account, entry] = await Promise.all([this.customer.account(input.workspaceId), this.customer.entry(input.catalogEntryId)]);
+    if (!account || !entry || entry.publicationState !== "published") return { kind: "invalid" };
+    const selected = input.providerCommercialOfferId ? await this.customer.offer(input.providerCommercialOfferId) : null;
+    const offers = selected ? [selected] : await this.customer.sellableOffers(entry.id);
+    const offer = offers.find(value => value.catalogEntryId === entry.id && value.lifecycle === "sellable" && value.readinessState === "ready") ?? null;
+    const providerKind = offer?.providerKind;
+    if (!offer || !providerKind || (account.providerKind && account.providerKind !== providerKind)) return { kind: "invalid" };
+    const provider = this.providers.get(providerKind);
+    if (!provider) return { kind: "unavailable" };
+    if (!provider.capabilities.subscriptionCheckout) return { kind: "unsupported" };
+    const payer = provider.capabilities.requiresPayerEmailForCheckout ? await this.payers.resolve(account.id) : null;
+    if (provider.capabilities.requiresPayerEmailForCheckout && !payer) return { kind: "invalid" };
+
+    // Preserve a completed request's durable replay even if reconciliation has since progressed.
+    const replay = await this.operations.find(account.id, "checkout_session_create", input.operationId);
+    if (!replay) {
+      const current = await this.customer.subscription(account.id);
+      if ((current && current.effectiveState !== "unmanaged" && current.effectiveState !== "canceled") || await this.operations.hasOpenCheckoutEnrollment(account.id)) return { kind: "conflict" };
+    }
+
+    return this.execute(
+      account.id,
+      "checkout_session_create",
+      providerKind,
+      input.operationId,
+      billingOperationFingerprint({ billingAccountId: account.id, operationKind: "checkout_session_create", catalogEntryId: entry.id, ...(input.providerCommercialOfferId ? { providerCommercialOfferId: offer.id } : {}), providerKind, redirectTarget: input.successTarget, cancelTarget: input.cancelTarget }),
+      operation => provider.createCheckoutSession({ idempotencyKey: operation.providerIdempotencyKey, catalogReference: offer.providerPlanReference, successTarget: input.successTarget, cancelTarget: input.cancelTarget, correlationToken: operation.recoveryCorrelationToken ?? undefined, ...(payer ? { payerEmail: payer.email } : {}) }),
+      entry.id,
+      { catalogEntryId: entry.id, providerCommercialOfferId: offer.id, successTarget: input.successTarget, cancelTarget: input.cancelTarget }
+    );
+  }
+
+  public async portal(input: Readonly<{ workspaceId: number; returnTarget: string }>): Promise<BillingPortalOutcome> {
+    const account = await this.customer.account(input.workspaceId), providerKind = account?.providerKind;
+    if (!account || account.rolloutMode !== "managed" || !providerKind || !account.providerCustomerId) return { kind: "invalid" };
+    const provider = this.providers.get(providerKind);
+    if (!provider) return { kind: "unavailable" };
+    if (!provider.capabilities.supportsCustomerPortal) return { kind: "unsupported" };
+    const result = await provider.createPortalSession({ billingAccountReference: account.providerCustomerId, returnTarget: input.returnTarget });
+    return result.kind === "success" ? { kind: "succeeded", result } : result.kind === "failed" ? { kind: "failed" } : { kind: "uncertain" };
+  }
+
+  public async supportedManagementActions(workspaceId: number): Promise<readonly ("portal" | "cancel" | "reactivate")[]> {
+    const account = await this.customer.account(workspaceId), subscription = account ? await this.customer.subscription(account.id) : null;
+    const providerKind = subscription?.providerKind ?? account?.providerKind, provider = providerKind ? this.providers.get(providerKind) : null;
+    if (!account || !subscription || !provider) return Object.freeze([]);
+    const actions: Array<"portal" | "cancel" | "reactivate"> = [];
+    if (account.rolloutMode === "managed" && account.providerCustomerId && provider.capabilities.supportsCustomerPortal) actions.push("portal");
+    if (["trial", "active", "grace"].includes(subscription.effectiveState) && subscription.providerSubscriptionId && provider.capabilities.supportsNativeCancelAtPeriodEnd) actions.push("cancel");
+    if (subscription.effectiveState === "canceling_at_period_end" && subscription.providerSubscriptionId && provider.capabilities.supportsNativeReactivateCancelAtPeriodEnd) actions.push("reactivate");
+    return Object.freeze(actions);
+  }
+
+  public async managementCapabilities(workspaceId: number, offers: readonly BillingProviderCommercialOffer[]): Promise<Readonly<{ canOpenBillingPortal: boolean; canCancel: boolean; canReactivate: boolean; canStartNewCheckout: boolean; canSwitchProvider: false }>> {
+    const [actions, account] = await Promise.all([this.supportedManagementActions(workspaceId), this.customer.account(workspaceId)]);
+    const current = account ? await this.customer.subscription(account.id) : null;
+    let canStart = false;
+    if (account && (!current || current.effectiveState === "unmanaged" || current.effectiveState === "canceled") && !await this.operations.hasOpenCheckoutEnrollment(account.id)) {
+      const values = await Promise.all(offers.map(async offer => {
+        const provider = this.providers.get(offer.providerKind);
+        return (!account.providerKind || account.providerKind === offer.providerKind) && Boolean(provider?.capabilities.subscriptionCheckout) && (!provider!.capabilities.requiresPayerEmailForCheckout || Boolean(await this.payers.resolve(account.id)));
+      }));
+      canStart = values.some(Boolean);
+    }
+    return Object.freeze({ canOpenBillingPortal: actions.includes("portal"), canCancel: actions.includes("cancel"), canReactivate: actions.includes("reactivate"), canStartNewCheckout: canStart, canSwitchProvider: false });
+  }
+
+  public async cancelAtPeriodEnd(input: SubscriptionInput): Promise<BillingOperationOutcome> { return this.subscription(input, "subscription_cancel_at_period_end", ["trial", "active", "grace"]); }
+  public async reactivate(input: SubscriptionInput): Promise<BillingOperationOutcome> { return this.subscription(input, "subscription_reactivate", ["canceling_at_period_end"]); }
+
+  private async subscription(input: SubscriptionInput, kind: Extract<BillingOperationKind, "subscription_cancel_at_period_end" | "subscription_reactivate">, states: readonly string[]): Promise<BillingOperationOutcome> {
+    const account = await this.customer.account(input.workspaceId), subscription = account ? await this.customer.subscription(account.id) : null, providerKind = subscription?.providerKind;
+    if (!account || !subscription || subscription.id !== input.subscriptionId || !providerKind || !subscription.providerSubscriptionId || !states.includes(subscription.effectiveState) || (account.providerKind && account.providerKind !== providerKind)) return { kind: "invalid" };
+    const provider = this.providers.get(providerKind);
+    if (!provider) return { kind: "unavailable" };
+    if (kind === "subscription_cancel_at_period_end" && !provider.capabilities.supportsNativeCancelAtPeriodEnd) return { kind: "unsupported" };
+    if (kind === "subscription_reactivate" && !provider.capabilities.supportsNativeReactivateCancelAtPeriodEnd) return { kind: "unsupported" };
+    return this.execute(account.id, kind, providerKind, input.operationId, billingOperationFingerprint({ billingAccountId: account.id, operationKind: kind, subscriptionId: subscription.id, providerKind }), operation => kind === "subscription_cancel_at_period_end" ? provider.cancelAtPeriodEnd({ idempotencyKey: operation.providerIdempotencyKey, subscriptionReference: subscription.providerSubscriptionId! }) : provider.reactivateSubscription({ idempotencyKey: operation.providerIdempotencyKey, subscriptionReference: subscription.providerSubscriptionId! }), undefined, { targetSubscriptionId: subscription.id });
+  }
+
+  private async execute(accountId: string, kind: BillingOperationKind, providerKind: BillingProviderKind, operationId: string, fingerprint: string, call: (operation: BillingOperation) => Promise<import("./billingProvider.js").BillingProviderResult>, catalogEntryId?: string, context: Readonly<{ catalogEntryId?: string; providerCommercialOfferId?: string; successTarget?: string; cancelTarget?: string; targetSubscriptionId?: string }> = {}): Promise<BillingOperationOutcome> {
+    const replay = await this.operations.createOrReplay({ billingAccountId: accountId, kind, providerKind, operationId, fingerprint, at: this.now(), ...context });
+    if (replay.kind === "conflict") return { kind: "conflict" };
+    const current = replay.operation!;
+    if (current.status === "succeeded") return { kind: "succeeded", operation: current };
+    if (current.status === "failed") return { kind: "failed", operation: current };
+    if (current.status === "uncertain") return { kind: "uncertain", operation: current };
+    if (current.status === "request_started") return { kind: "in_progress", operation: current };
+    const started = await this.operations.start(current.id, current.version, this.now());
+    if (!started) return { kind: "in_progress", operation: (await this.operations.find(accountId, kind, operationId))! };
+    const result = await call(started);
+    if (result.kind === "success") {
+      const safe = JSON.stringify({ providerObjectId: result.providerObjectId, ...(result.redirectUrl ? { redirectUrl: result.redirectUrl } : {}) });
+      try {
+        const settled = catalogEntryId ? await this.operations.succeedCheckout(started.id, started.version, result.providerObjectId, safe, catalogEntryId, this.now()) : await this.operations.succeed(started.id, started.version, result.providerObjectId, safe, this.now());
+        return settled ? { kind: "succeeded", operation: settled } : { kind: "uncertain", operation: (await this.operations.find(accountId, kind, operationId))! };
+      } catch (error) {
+        if (error instanceof OpenCheckoutEnrollmentConflictError) return { kind: "conflict" };
+        throw error;
+      }
+    }
+    if (result.kind === "failed") {
+      const settled = await this.operations.fail(started.id, started.version, result.code, this.now());
+      return settled ? { kind: "failed", operation: settled } : { kind: "uncertain", operation: (await this.operations.find(accountId, kind, operationId))! };
+    }
+    const unsettled = await this.operations.uncertain(started.id, started.version, this.now());
+    return { kind: "uncertain", operation: unsettled ?? (await this.operations.find(accountId, kind, operationId))! };
+  }
 }

@@ -43,3 +43,15 @@ test("EPIC054 PASS5B configured WhatsApp and billing reconciliation publish the 
   const whatsApp = new WhatsAppRecoveryRuntime(async () => { calls++; await gate; }, { schedule: callback => { timer.value = callback; return { unref() {} }; }, clear: () => {} });
   whatsApp.start(); timer.value!(); timer.value!(); assert.equal(calls, 1); const stopping = whatsApp.stop(); timer.value!(); assert.equal(calls, 1); release!(); await stopping; assert.equal(runtimeWorkerHealth("whatsapp_recovery")?.running, false); resetRuntimeReadinessForTests();
 });
+
+test("EPIC055 PASS6 billing readiness allows the configured interval plus its bounded provider work window", async () => {
+  resetRuntimeReadinessForTests(); const callback = { value: null as (() => void) | null }, originalNow = Date.now; let clock = 1_000, app: Awaited<ReturnType<typeof healthApp>> | null = null;
+  Date.now = () => clock;
+  try {
+    const billing = new BillingReconciliationRuntime({ runBatch: async () => [] } as never, { intervalMilliseconds: 60_000, batchSize: 1 }, { schedule: scheduled => { callback.value = scheduled; return { unref() {} }; }, clear: () => {}, reportError: () => {} });
+    billing.start(); await new Promise<void>(resolve => setImmediate(resolve)); markRuntimeReady(); app = await healthApp(new ProbeDatabase());
+    clock += 60_001; assert.equal(runtimeWorkerHealth("billing_reconciliation")?.staleAfterMilliseconds, 120_000); assert.equal(runtimeWorkerHealth("billing_reconciliation")?.lastSuccessfulCycleAt, 1_000); assert.equal((await fetch(`${app.origin}/ready`)).status, 200);
+    clock += 60_000; assert.equal((await fetch(`${app.origin}/ready`)).status, 503);
+    await billing.stop();
+  } finally { Date.now = originalNow; resetRuntimeReadinessForTests(); await app?.close(); }
+});

@@ -52,6 +52,14 @@ test("EPIC046 PASS4F6 lifecycle is idempotent, non-overlapping, and recovers fro
   assert.equal(calls, 3);
 });
 
+test("EPIC055 PASS6 recovers durable provider operations before normal reconciliation in every cycle", async () => {
+  const order: string[] = [], callback = { value: null as (() => void) | null };
+  const subject = new BillingReconciliationRuntime({ async runBatch() { order.push("reconciliation"); return []; } } as never, { intervalMilliseconds: 1_000, batchSize: 1 }, { schedule: scheduled => { callback.value = scheduled; return { unref() {} }; }, clear: () => {}, reportError: () => {} }, { async runBatch() { order.push("operation_recovery"); return []; } });
+  subject.start(); await new Promise<void>(resolve => setImmediate(resolve)); callback.value!(); await new Promise<void>(resolve => setImmediate(resolve));
+  assert.deepEqual(order, ["operation_recovery", "reconciliation", "operation_recovery", "reconciliation"]);
+  await subject.stop();
+});
+
 test("EPIC046 PASS4F6 e2e webhook acceptance wakes runtime to paused authority and safe HTTP projection", async () => {
   const db = new DatabaseSync(":memory:"); db.exec("PRAGMA foreign_keys=ON"); runMigrations(db);
   const workspaceId = (db.prepare("SELECT id FROM workspaces WHERE key='default'").get() as { id: number }).id;
