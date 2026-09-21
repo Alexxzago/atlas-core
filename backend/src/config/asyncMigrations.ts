@@ -1,4 +1,4 @@
-import { freshPortableMigrations, migrationHead, migrationRegistry, type MigrationRegistryEntry, type PortableMigration } from "./migrations.js";
+import { freshPortableMigrations, migrationHead, migrationRegistry, type PortableMigration } from "./migrations.js";
 import type { SqlDatabase, SqlValue } from "./sqlDatabase.js";
 
 interface MigrationRow extends Record<string, unknown> { readonly id: number; readonly name: string; readonly checksum: string; }
@@ -14,9 +14,8 @@ export async function runFreshAsyncMigrations(database: SqlDatabase): Promise<vo
 }
 
 /**
- * Initializes an async database at process startup. Existing databases must be
- * at the current migration head: replaying historical data migrations against
- * a populated database would be unsafe without explicit upgrade plans.
+ * Initializes an async database at process startup. Existing databases advance
+ * only through the validated canonical migration sequence.
  */
 export async function runAsyncMigrations(database: SqlDatabase): Promise<void> {
   await initializeAsyncMigrations(database, false);
@@ -35,14 +34,9 @@ async function initializeAsyncMigrations(database: SqlDatabase, requireEmptyHist
   const applied = await database.query<MigrationRow>("SELECT id, name, checksum FROM schema_migrations ORDER BY id");
   if (requireEmptyHistory && applied.length > 0) throw new Error("Fresh async migrations require an empty migration history.");
   validateAppliedMigrations(applied);
-  if (applied.length > 0) {
-    const current = applied[applied.length - 1]!;
-    if (current.id !== migrationHead.id) throw new Error(`Async migration startup requires database migration head ${migrationHead.id}; found ${current.id}.`);
-    if ((await database.query("PRAGMA foreign_key_check")).length > 0) throw new Error("Foreign-key integrity check failed after async migration validation.");
-    return;
-  }
-
-  for (const migration of freshPortableMigrations()) await apply(database, migration);
+  const appliedIds = new Set(applied.map((migration) => migration.id));
+  const missing = freshPortableMigrations().filter((migration) => !appliedIds.has(migration.id));
+  for (const migration of applied.length === 0 ? missing : missing.filter((migration) => !migration.retired)) await apply(database, migration);
 
   const head = await database.query<MigrationRow>("SELECT id, name, checksum FROM schema_migrations ORDER BY id DESC LIMIT 1");
   if (head.length !== 1 || head[0]!.id !== migrationHead.id || head[0]!.name !== migrationHead.name || head[0]!.checksum !== migrationHead.checksum) {
@@ -52,11 +46,19 @@ async function initializeAsyncMigrations(database: SqlDatabase, requireEmptyHist
 }
 
 function validateAppliedMigrations(applied: readonly MigrationRow[]): void {
-  const known = new Map<number, MigrationRegistryEntry>(migrationRegistry.map((migration) => [migration.id, migration]));
+  const known = new Map(migrationRegistry.map((migration) => [migration.id, migration]));
+  const appliedIds = new Set<number>();
+  let previousId = 0;
   for (const migration of applied) {
     const expected = known.get(migration.id);
-    if (!expected || expected.name !== migration.name) throw new Error(`Database contains unknown migration ${migration.id}:${migration.name}.`);
+    if (!expected || migration.id <= previousId || expected.name !== migration.name) throw new Error(`Database contains unknown or out-of-order migration ${migration.id}:${migration.name}.`);
     if (expected.checksum !== migration.checksum) throw new Error(`Migration checksum mismatch for ${migration.name}.`);
+    appliedIds.add(migration.id);
+    previousId = migration.id;
+  }
+  for (const migration of migrationRegistry) {
+    if (migration.id >= previousId) break;
+    if (!migration.retired && !appliedIds.has(migration.id)) throw new Error(`Database contains unknown or out-of-order migration ${previousId}.`);
   }
 }
 
