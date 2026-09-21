@@ -6,7 +6,7 @@ import { RouterProvider, useRouter } from "./RouterProvider";
 
 function RouterProbe(): React.JSX.Element {
   const { route, navigate, navigateToOwnWorkspace, intentionalWorkspaceAccess } = useRouter();
-  return <><p>{route.name}</p><p>{intentionalWorkspaceAccess ? "customer-mode" : "admin-mode"}</p><button onClick={() => navigate("/companies/3")}>Navigate</button><button onClick={navigateToOwnWorkspace}>Own workspace</button><button onClick={() => navigate("/onboarding/workspace", { replace: true })}>Workspace onboarding</button><button onClick={() => navigate("/admin")}>Administration</button></>;
+  return <><p>{route.name}</p><p>{intentionalWorkspaceAccess ? "customer-mode" : "admin-mode"}</p><button onClick={() => navigate("/companies/3")}>Navigate</button><button onClick={() => navigate("/verify-email?proof=proof-value", { replace: true })}>Verify email</button><button onClick={navigateToOwnWorkspace}>Own workspace</button><button onClick={() => navigate("/onboarding/workspace", { replace: true })}>Workspace onboarding</button><button onClick={() => navigate("/admin")}>Administration</button></>;
 }
 
 afterEach(() => cleanup());
@@ -35,4 +35,13 @@ test("keeps intentional customer mode through workspace onboarding and clears it
   expect(screen.getByText("customer-mode")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Administration" }));
   expect(screen.getByText("admin-mode")).toBeTruthy();
+});
+
+test("preserves query parameters while parsing the destination route", () => {
+  window.history.replaceState({}, "", "/identity/verify-email?proof=old");
+  render(<RouterProvider><RouterProbe /></RouterProvider>);
+  fireEvent.click(screen.getByRole("button", { name: "Verify email" }));
+  expect(window.location.pathname).toBe("/verify-email");
+  expect(window.location.search).toBe("?proof=proof-value");
+  expect(screen.getByText("not-found")).toBeTruthy();
 });

@@ -4,6 +4,9 @@ import { afterEach, expect, test, vi } from "vitest";
 import { ActivationJourney } from "./ActivationJourney";
 import type { ActivationAction, ActivationProjection } from "../types/api";
 
+vi.mock("../api/atlasApi", () => ({ atlasApi: { startActivationVerification: vi.fn(), listWebChatConnections: vi.fn() }, ApiError: class ApiError extends Error {} }));
+vi.mock("../api/publicWebChatApi", () => ({ publicWebChatApi: { startActivationVerification: vi.fn() } }));
+
 const ids=["company","knowledge","assistant","web_chat","verification","pilot_ready","human_ops"] as const;
 const actions=["complete_company","publish_knowledge","configure_assistant","activate_web_chat","start_verification","resolve_pilot_readiness","review_human_operations"] as const;
 const paths=["/companies/1","/companies/1/knowledge","/companies/1/assistant","/companies/1/channels/web-chat",null,null,"/conversations"] as const;
@@ -39,4 +42,15 @@ test("does not navigate to an action path outside the current company",()=>{
   render(<ActivationJourney csrf="csrf" workspaceId="workspace" companyId={1} projection={value} onNavigate={navigate} onRefresh={()=>{}}/>);
   fireEvent.click(screen.getByRole("button",{name:"Configurar asistente"}));
   expect(navigate).not.toHaveBeenCalled();
+});
+
+test("keeps verification reachable when the browser blocks a popup",async()=>{
+  const {atlasApi}=await import("../api/atlasApi"),{publicWebChatApi}=await import("../api/publicWebChatApi");
+  vi.mocked(atlasApi.startActivationVerification).mockResolvedValue({token:"a".repeat(43),expiresAt:"2026-01-01T00:15:00.000Z"});
+  vi.mocked(atlasApi.listWebChatConnections).mockResolvedValue([{id:"wcc_1",publicId:"wcp_00000000000000000000000000000000",assistantProfileId:"assistant",status:"active",createdAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z"}]);
+  vi.mocked(publicWebChatApi.startActivationVerification).mockResolvedValue();
+  vi.spyOn(window,"open").mockReturnValue(null);
+  render(<ActivationJourney csrf="csrf" workspaceId="workspace" companyId={1} projection={projection("start_verification")} onNavigate={()=>{}} onRefresh={()=>{}}/>);
+  fireEvent.click(screen.getByRole("button",{name:"Iniciar verificación"}));
+  expect((await screen.findByRole("link",{name:"Abrir conversación de verificación"})).getAttribute("href")).toBe("/chat/wcp_00000000000000000000000000000000");
 });

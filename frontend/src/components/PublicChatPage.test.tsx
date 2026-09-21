@@ -49,6 +49,8 @@ describe("PublicChatPage", () => {
     expect(screen.getByRole("button", { name: "Enviando..." }).hasAttribute("disabled")).toBe(true);
     await screen.findByRole("alert");
     expect(screen.getByRole("alert").textContent).toContain("Esperá unos segundos");
+    expect((textarea as HTMLTextAreaElement).value).toBe("Consulta");
+    expect(screen.queryByText("Consulta", { selector: ".public-chat__message p" })).toBeNull();
   });
 
   it("shows unavailability on session failure and closes through DELETE", async () => {

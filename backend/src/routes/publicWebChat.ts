@@ -11,6 +11,7 @@ const productionCookie = "__Host-atlas_web_chat_session";
 function cookie(request: Request, name: string): string | null { for (const part of (request.headers.cookie ?? "").split(";")) { const [key, ...rest] = part.trim().split("="); if (key === name) { try { return decodeURIComponent(rest.join("=")); } catch { return null; } } } return null; }
 function unavailable(response: Response): void { response.status(404).json({ error: "Web Chat is unavailable." }); }
 function invalidMessage(response: Response): void { response.status(400).json({ error: "Message is invalid." }); }
+function rateLimited(response: Response, error: AbuseLimitExceededError): void { response.setHeader("Retry-After", String(error.retryAfterSeconds)); response.status(429).json({ error: { code: "rate_limited", message: "Request is temporarily unavailable." } }); }
 function sameOrigin(request: Request): boolean {
   const origin = request.headers.origin;
   if (!origin) return request.headers["sec-fetch-site"] !== "cross-site" && request.headers["sec-fetch-site"] !== "same-site";
@@ -25,7 +26,7 @@ export function createPublicWebChatRouter(service: PublicWebChatSessionService, 
   router.post("/:connectionPublicId/session", async (request, response): Promise<void> => {
     if (request.headers["content-type"] && !request.is("application/json")) { response.status(415).json({ error: "Web Chat is unavailable." }); return; }
     try { const value = await service.start(request.params.connectionPublicId, cookie(request, cookieName)); set(response, value.rawToken, value.expiresAt); response.status(201).json({ state: value.state, expiresAt: value.expiresAt }); }
-    catch (error: unknown) { if (error instanceof PublicWebChatSessionUnavailableError) unavailable(response); else { console.error("Public Web Chat Session start failed."); unavailable(response); } }
+    catch (error: unknown) { if (error instanceof PublicWebChatSessionUnavailableError) unavailable(response); else if (error instanceof AbuseLimitExceededError) rateLimited(response,error); else { console.error("Public Web Chat Session start failed."); unavailable(response); } }
   });
   router.get("/:connectionPublicId/session", async (request, response): Promise<void> => { try { response.json(await service.state(request.params.connectionPublicId, cookie(request, cookieName))); } catch { unavailable(response); } });
   router.delete("/:connectionPublicId/session", async (request, response): Promise<void> => { try { await service.close(request.params.connectionPublicId, cookie(request, cookieName)); clear(response); response.status(204).end(); } catch { clear(response); unavailable(response); } });
@@ -38,7 +39,7 @@ export function createPublicWebChatRouter(service: PublicWebChatSessionService, 
       set(response,value.rawToken,value.expiresAt); response.status(204).end();
     } catch { unavailable(response); }
   });
-  router.get("/:connectionPublicId/messages", async (request, response): Promise<void> => { try { response.json(await conversations.history(request.params.connectionPublicId, cookie(request, cookieName))); } catch { unavailable(response); } });
+  router.get("/:connectionPublicId/messages", async (request, response): Promise<void> => { try { response.json(await conversations.history(request.params.connectionPublicId, cookie(request, cookieName))); } catch (error: unknown) { if(error instanceof AbuseLimitExceededError)rateLimited(response,error);else unavailable(response); } });
   router.post("/:connectionPublicId/messages", (request, response, next): void => {
     if (!request.is("application/json")) { response.status(415).json({ error: "Message is invalid." }); return; }
     if (!sameOrigin(request)) { unavailable(response); return; }
@@ -53,7 +54,7 @@ export function createPublicWebChatRouter(service: PublicWebChatSessionService, 
       .catch((error: unknown) => {
         if (error instanceof PublicWebChatConversationValidationError) invalidMessage(response);
         else if (error instanceof PublicWebChatConversationUnavailableError) unavailable(response);
-        else if (error instanceof AbuseLimitExceededError) { response.setHeader("Retry-After", String(error.retryAfterSeconds)); response.status(429).json({ error: { code: "rate_limited", message: "Request is temporarily unavailable." } }); }
+        else if (error instanceof AbuseLimitExceededError) rateLimited(response,error);
         else if (error instanceof PublicWebChatConversationInProgressError) response.status(409).json({ error: { code: "conversation_busy", message: "Message cannot be sent right now." } });
         else if (error instanceof PublicWebChatConversationRuntimeError) response.status(503).json({ error: "Message cannot be sent right now." });
         else response.status(503).json({ error: "Message cannot be sent right now." });

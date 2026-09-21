@@ -5,7 +5,7 @@ interface MigrationRow extends Record<string, unknown> { readonly id: number; re
 interface ForeignKeyRow extends Record<string, unknown> { readonly foreign_keys: number; }
 
 /**
- * Applies the complete 0001-0075 history to an empty database using only the
+ * Applies the complete 0001-0076 history to an empty database using only the
  * asynchronous SqlDatabase contract. An already-current database is validated
  * rather than replayed, so startup is idempotent.
  */
