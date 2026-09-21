@@ -18,12 +18,12 @@ export async function deliverVerification(
   url.searchParams.set("proof", proof);
   const outcome = await delivery.deliver({ recipient: email, locale, verificationUrl: url.toString(), expiresAt: workflow.expiresAt, workflowId: workflow.id });
   const now = clock.now();
-  transaction.execute(({ verifications }) => {
+  await transaction.execute(async ({ verifications }) => {
     if (outcome === "temporary_failure" || outcome === "permanent_failure") {
-      const current = verifications.findByDigest(workflow.purpose, workflow.digestVersion, workflow.tokenDigest);
-      if (current?.status === "pending") verifications.update(invalidateVerification(current, now), "pending");
+      const current = await verifications.findByDigest(workflow.purpose, workflow.digestVersion, workflow.tokenDigest);
+      if (current?.status === "pending") await verifications.update(invalidateVerification(current, now), "pending");
     } else {
-      verifications.setDeliveryStatus(workflow.id, outcome, now);
+      await verifications.setDeliveryStatus(workflow.id, outcome, now);
     }
   });
   return outcome;

@@ -1,9 +1,8 @@
 import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
-import type { CredentialEnrollmentRepositoryPort, LoginThrottleRepositoryPort, PasswordCredentialRepositoryPort, SessionRepositoryPort } from "../identity/application/ports.js";
 import type { PasswordCredential, Session } from "../identity/domain/authentication.js";
 import type { CredentialEnrollment } from "../identity/domain/credentialEnrollment.js";
 
-export class PasswordCredentialRepository implements PasswordCredentialRepositoryPort {
+export class PasswordCredentialRepository {
   public constructor(private readonly db: SynchronousDatabase) {}
   public findCurrent(authenticationIdentityId: string): PasswordCredential | null {
     const row=this.db.prepare("SELECT * FROM password_credentials WHERE authentication_identity_id = ? AND state = 'active'").get(authenticationIdentityId) as Record<string,unknown>|undefined;
@@ -18,7 +17,7 @@ export class PasswordCredentialRepository implements PasswordCredentialRepositor
   private insert(v: PasswordCredential): void { this.db.prepare(`INSERT INTO password_credentials (id,authentication_identity_id,state,algorithm,algorithm_version,parameters,salt,confirmation,credential_version,created_at,replaced_at,upgraded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(v.id,v.authenticationIdentityId,v.state,v.algorithm,v.algorithmVersion,v.parameters,v.salt,v.confirmation,v.credentialVersion,v.createdAt,v.replacedAt,v.upgradedAt); }
 }
 
-export class CredentialEnrollmentRepository implements CredentialEnrollmentRepositoryPort {
+export class CredentialEnrollmentRepository {
   public constructor(private readonly db: SynchronousDatabase) {}
   public findCurrent(id: string): CredentialEnrollment | null { return this.map(this.db.prepare("SELECT * FROM credential_enrollments WHERE authentication_identity_id=? AND status='pending'").get(id)); }
   public findByDigest(digest: string): CredentialEnrollment | null { return this.map(this.db.prepare("SELECT * FROM credential_enrollments WHERE purpose='credential_enrollment' AND digest_version='sha256-v1' AND proof_digest=?").get(digest)); }
@@ -28,7 +27,7 @@ export class CredentialEnrollmentRepository implements CredentialEnrollmentRepos
   private map(row: unknown): CredentialEnrollment | null { if(!row)return null; const r=row as Record<string,unknown>; return {id:String(r.id),userId:String(r.user_id) as CredentialEnrollment["userId"],authenticationIdentityId:String(r.authentication_identity_id) as CredentialEnrollment["authenticationIdentityId"],purpose:"credential_enrollment",digestVersion:"sha256-v1",proofDigest:String(r.proof_digest),status:r.status as CredentialEnrollment["status"],deliveryStatus:r.delivery_status as CredentialEnrollment["deliveryStatus"],issuedAt:String(r.issued_at),expiresAt:String(r.expires_at),consumedAt:r.consumed_at as string|null,supersededAt:r.superseded_at as string|null,invalidatedAt:r.invalidated_at as string|null,updatedAt:String(r.updated_at)}; }
 }
 
-export class SessionRepository implements SessionRepositoryPort {
+export class SessionRepository {
   public constructor(private readonly db: SynchronousDatabase) {}
   public findByDigest(d:string):Session|null{return this.map(this.db.prepare("SELECT * FROM sessions WHERE digest_version='sha256-v1' AND identifier_digest=?").get(d));}
   public create(v:Session):Session{this.insert(v);return v;}
@@ -41,7 +40,7 @@ export class SessionRepository implements SessionRepositoryPort {
   private map(row:unknown):Session|null{if(!row)return null;const r=row as Record<string,unknown>;return {id:String(r.id),userId:String(r.user_id) as Session["userId"],authenticationIdentityId:String(r.authentication_identity_id) as Session["authenticationIdentityId"],strategy:"password",authenticationVersion:Number(r.authentication_version),credentialVersion:Number(r.credential_version),digestVersion:"sha256-v1",identifierDigest:String(r.identifier_digest),csrfDigest:String(r.csrf_digest),csrfGeneration:Number(r.csrf_generation),state:r.state as Session["state"],issuedAt:String(r.issued_at),lastSeenAt:String(r.last_seen_at),idleExpiresAt:String(r.idle_expires_at),absoluteExpiresAt:String(r.absolute_expires_at),predecessorId:r.predecessor_id as string|null,replacedAt:r.replaced_at as string|null,revokedAt:r.revoked_at as string|null,revocationReason:r.revocation_reason as string|null};}
 }
 
-export class LoginThrottleRepository implements LoginThrottleRepositoryPort {
+export class LoginThrottleRepository {
   public constructor(private readonly db:SynchronousDatabase){}
   public recordFailure(i:string,o:string,at:string,e:string):number{this.db.prepare(`INSERT INTO login_throttles(identity_key,origin_key,failure_count,first_failure_at,last_failure_at,expires_at) VALUES(?,?,1,?,?,?) ON CONFLICT(identity_key,origin_key) DO UPDATE SET failure_count=failure_count+1,last_failure_at=excluded.last_failure_at,expires_at=excluded.expires_at`).run(i,o,at,at,e);return Number((this.db.prepare("SELECT failure_count AS count FROM login_throttles WHERE identity_key=? AND origin_key=?").get(i,o) as {count:number}).count);}
   public isBlocked(i:string,o:string,n:string,m:number):boolean{const r=this.db.prepare("SELECT failure_count AS count FROM login_throttles WHERE identity_key=? AND origin_key=? AND expires_at>?").get(i,o,n) as {count:number}|undefined;return (r?.count??0)>=m;}

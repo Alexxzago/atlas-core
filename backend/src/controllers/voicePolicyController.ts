@@ -4,11 +4,11 @@ import type { WorkspaceContext } from "../types/workspaceContext.js";
 import { VoicePolicyConflictError, VoicePolicyNotFoundError, VoicePolicyService, VoicePolicyValidationError } from "../whatsapp/services/voicePolicyService.js";
 
 export function createGetVoicePolicyController(service: VoicePolicyService, context: WorkspaceContext): RequestHandler {
-  return (req, res): void => { try { res.json(service.get(context, req.params.companyId, req.params.connectionId)); } catch (error: unknown) { respond(res, error); } };
+  return async (req, res): Promise<void> => { try { res.json(await service.get(context, req.params.companyId, req.params.connectionId)); } catch (error: unknown) { respond(res, error); } };
 }
 
 export function createPutVoicePolicyController(service: VoicePolicyService, context: WorkspaceContext, actor: ActorContext): RequestHandler {
-  return (req, res): void => { try { res.json(service.update(context, actor.userId, req.params.companyId, req.params.connectionId, req.body)); } catch (error: unknown) { respond(res, error); } };
+  return async (req, res): Promise<void> => { try { res.json(await service.update(context, actor.userId, req.params.companyId, req.params.connectionId, req.body)); } catch (error: unknown) { respond(res, error); } };
 }
 
 function respond(res: Response, error: unknown): void {

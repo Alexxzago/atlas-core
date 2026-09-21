@@ -44,5 +44,6 @@
     "moduleDetection": "force",
     "moduleResolution": "bundler",
     "skipLibCheck": true,
-  }
+  },
+  "exclude": ["src/tests"]
 }

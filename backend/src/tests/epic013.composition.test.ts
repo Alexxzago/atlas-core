@@ -69,9 +69,10 @@ test("production composition mounts the authorized operational route with an inj
   const company = companies.create(context, { name: "Composition", website: `https://composition-${suffix}.test`, status: "ready" });
   publishKnowledgeFixture(database, context, company.id, { company: { name: company.name, website: company.website, phone: "", email: "" }, business: { services: ["Service"], hours: "Always", locations: [] }, faq: [] });
   const profiles = new AssistantProfileRepository(database), profileService = new AssistantProfileService(profiles, new SystemClock());
-  const profile = profileService.transition(context, company.id, profileService.create(context, company.id, { name: "Operational", assistantLanguage: "en", businessRole: "Sales", objective: "Help", welcomeMessage: "Welcome", fallbackMessage: "Fallback" }).id, "ready");
+  const createdProfile = await profileService.create(context, company.id, { name: "Operational", assistantLanguage: "en", businessRole: "Sales", objective: "Help", welcomeMessage: "Welcome", fallbackMessage: "Fallback" });
+  const profile = await profileService.transition(context, company.id, createdProfile.id, "ready");
   const otherCompany = companies.create(context, { name: "Other", website: `https://other-${suffix}.test`, status: "ready" });
-  const mismatchedProfile = profileService.create(context, otherCompany.id, { name: "Other operational", assistantLanguage: "en", businessRole: "Sales", objective: "Help", welcomeMessage: "Welcome", fallbackMessage: "Fallback" });
+  const mismatchedProfile = await profileService.create(context, otherCompany.id, { name: "Other operational", assistantLanguage: "en", businessRole: "Sales", objective: "Help", welcomeMessage: "Welcome", fallbackMessage: "Fallback" });
   const execution = new FakeExecution();
   assert.equal(Reflect.get(geminiProvider, "client"), null);
   const app = createApp(createProductionAppRouters(execution), { production: true, trustedLocalMode: false });

@@ -2,6 +2,7 @@ import { useI18n } from "../i18n/I18nContext";
 import type { TranslationKey } from "../i18n/translations";
 import type { CompanyWorkspaceViewModel, WorkspaceActionId, WorkspaceEvidenceState } from "./dashboardPresentation";
 import { ProgressIndicator } from "../design-system/feedback";
+import { Button } from "../design-system/primitives";
 
 const messageTitle: Record<CompanyWorkspaceViewModel["message"], TranslationKey> = {
   no_workspace: "today.noWorkspace.title", companies_loading: "today.companiesLoading.title", companies_unavailable: "today.companiesUnavailable.title", first_company: "today.firstCompany.title", choose_company: "today.chooseCompany.title", company_processing: "today.processing.title", company_failed: "today.failed.title", brief_missing: "today.briefMissing.title", knowledge_missing: "today.knowledgeMissing.title", place_missing: "today.placeMissing.title", place_configuring: "today.placeConfiguring.title", working: "today.working.title", setup_blocked: "today.blocked.title", unavailable: "today.unavailable.title",
@@ -39,7 +40,7 @@ export function DashboardPage({ model, onNavigate, onRetry, onChooseCompany }: P
         <p>{t(messageDescription[model.message])}</p>
       </div>)}
       {!model.company && <p className="work-anchor__lead">{t(messageDescription[model.message])}</p>}
-      {actionAvailable && <button className="button button--primary next-action" type="button" onClick={activate}>{t(actionLabel[model.action.id])}</button>}
+      {actionAvailable && <Button className="next-action" onClick={activate}>{t(actionLabel[model.action.id])}</Button>}
       {model.action.id === "wait_for_company" && <p className="work-anchor__quiet" role="status">{t(actionLabel.wait_for_company)}</p>}
     </header>
     {model.evidence.length > 0 && <section className="readiness-evidence" aria-labelledby="readiness-evidence-title">

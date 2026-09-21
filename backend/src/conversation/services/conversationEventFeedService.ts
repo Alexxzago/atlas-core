@@ -6,15 +6,15 @@ export class ConversationEventFeedValidationError extends Error {}
 export class ConversationEventFeedNotFoundError extends Error {}
 export class ConversationEventFeedService {
   public constructor(private readonly conversations: ConversationRepositoryPort) {}
-  public read(context: WorkspaceContext, companyIdValue: unknown, afterValue: unknown, limitValue: unknown) {
+  public async read(context: WorkspaceContext, companyIdValue: unknown, afterValue: unknown, limitValue: unknown) {
     const companyId = parseCompanyId(companyIdValue);
-    if (!this.conversations.hasCompany(context, companyId)) throw new ConversationEventFeedNotFoundError();
-    const limit = parseLimit(limitValue), tail = this.conversations.conversationEventTail(context, companyId);
+    if (!await this.conversations.hasCompany(context, companyId)) throw new ConversationEventFeedNotFoundError();
+    const limit = parseLimit(limitValue), tail = await this.conversations.conversationEventTail(context, companyId);
     if (afterValue === undefined) return Object.freeze({ events: [], nextCursor: cursor(context, companyId, tail), hasMore: false, resyncRequired: false });
     let after: number;
     try { const decoded = decodeConversationEventFeedCursor(afterValue); if (decoded.w !== context.workspaceId || decoded.c !== companyId || decoded.s > tail) throw new Error(); after = decoded.s; }
     catch { return Object.freeze({ events: [], nextCursor: cursor(context, companyId, tail), hasMore: false, resyncRequired: true }); }
-    const rows = this.conversations.listConversationEventsAfter(context, companyId, after, limit + 1), events = rows.slice(0, limit);
+    const rows = await this.conversations.listConversationEventsAfter(context, companyId, after, limit + 1), events = rows.slice(0, limit);
     return Object.freeze({ events, nextCursor: cursor(context, companyId, events.length === 0 ? after : events[events.length - 1]!.sequence), hasMore: rows.length > limit, resyncRequired: false });
   }
 }

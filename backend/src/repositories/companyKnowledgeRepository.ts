@@ -1,12 +1,11 @@
 import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
-import type { KnowledgeRepositoryPort } from "../knowledge/application/ports.js";
 import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 import type { CompanyKnowledgeVersion, ExtractedBusinessKnowledge, KnowledgeSource, KnowledgeSourceKind, KnowledgeSourceRevision } from "../knowledge/domain/knowledge.js";
 import { KnowledgeDomainError, validateExtractedBusinessKnowledge, validateStoredCompanyKnowledgeJson } from "../knowledge/domain/knowledge.js";
 
 type Row = Record<string, string | number | null>;
-export class CompanyKnowledgeRepository implements KnowledgeRepositoryPort {
+export class CompanyKnowledgeRepository {
   public constructor(private readonly db: SynchronousDatabase, private readonly publicationFault?: (point:"version_insert"|"manifest_insert"|"publication_write"|"company_status")=>void) {}
   public listSources(c: WorkspaceContext, companyId: number): KnowledgeSource[] { return (this.db.prepare(`${SOURCE_SELECT} WHERE co.workspace_id=? AND co.id=? ORDER BY s.created_at DESC,s.id DESC`).all(c.workspaceId,companyId) as Row[]).map(source); }
   public findSource(c: WorkspaceContext, companyId: number, id: string): KnowledgeSource | null { const row=this.db.prepare(`${SOURCE_SELECT} WHERE co.workspace_id=? AND co.id=? AND s.id=?`).get(c.workspaceId,companyId,id) as Row|undefined; return row?source(row):null; }

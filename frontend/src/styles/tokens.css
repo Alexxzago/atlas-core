@@ -1,3 +1,4 @@
+/* Compatibility bridge only. New shared styles must use --atlas-* tokens directly. */
 :root {
   --color-bg-page: var(--atlas-color-canvas); --color-surface: var(--atlas-color-surface); --color-surface-subtle: var(--atlas-color-surface-subtle); --color-surface-selected: var(--atlas-color-surface-selected);
   --color-text-primary: var(--atlas-color-text); --color-text-secondary: var(--atlas-color-text-secondary); --color-text-muted: var(--atlas-color-text-muted); --color-text-disabled: var(--atlas-color-text-disabled);

@@ -16,7 +16,7 @@ test("renders Today with one primary next action and compact evidence", () => {
   expect(screen.getByRole("heading", { level: 1, name: "Today" })).toBeTruthy();
   expect(screen.getByText("Atlas for Company One")).toBeTruthy();
   expect(container.querySelector(".dashboard-grid")).toBeNull();
-  expect(container.querySelectorAll(".button--primary")).toHaveLength(1);
+  expect(container.querySelectorAll(".ds-button--primary")).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "Choose a place to work" }));
   expect(navigate).toEqual(["/companies/1/channels"]);
 });

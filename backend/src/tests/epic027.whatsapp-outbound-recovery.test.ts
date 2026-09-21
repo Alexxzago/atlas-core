@@ -23,7 +23,7 @@ function setup(failure: unknown | null, initial = delivery(), authorized = true)
     { findConversation: () => ({ id: conversation }), findMessage: () => message } as never,
     { findById: () => ({ id: connectionId, workspaceId: 1, companyId: 1, status: "active", phoneNumberId: "phone" }), findByIdForRecovery: () => ({ id: connectionId, workspaceId: 1, companyId: 1, status: "active", phoneNumberId: "phone" }) } as never,
     { create: (value: { id: string }) => { if (records.length) return null; records.push(value); return value; }, findByMessageAndConnection: () => records[0] ?? null, findById: () => ({ id: "pmr_0123456789abcdef0123456789abcdef", direction: "outbound", communicationChannel: "whatsapp", conversationMessageId: messageId }), attachExternalMessageId: () => null } as never,
-    { create: () => current, findByProviderMessageRecordAndConnection: () => current, leaseReady: (owner: string) => { current = reconstructOutboundDelivery({ ...current, state: "leased", attemptCount: current.attemptCount + 1, leaseOwner: owner, leaseExpiresAt: "2026-07-31T12:01:00.000Z" }); return [current]; }, authorizeLease: () => authorized, settleLease: (_id: string, _owner: string, outcome: OutboundDelivery["state"], next: string | null, category: string | null) => { attempts.push({ outcome, category, next }); current = { ...current, state: outcome, nextAttemptAt: next ?? current.nextAttemptAt, leaseOwner: null, leaseExpiresAt: null, safeErrorCategory: category }; return current; } } as never,
+    { create: () => current, findByProviderMessageRecordAndConnection: () => current, leaseReady: (owner: string) => { current = reconstructOutboundDelivery({ ...current, state: "leased", attemptCount: current.attemptCount + 1, leaseOwner: owner, leaseExpiresAt: "2026-07-31T12:01:00.000Z" }); return [current]; }, authorizeLease: () => authorized, beginSend: () => true, acceptSend: (_id: string, _owner: string) => { attempts.push({ outcome: "accepted", category: null, next: null }); current = { ...current, state: "accepted", leaseOwner: null, leaseExpiresAt: null }; return current; }, settleUncertainSend: (_id: string, _owner: string, category: string) => { attempts.push({ outcome: "uncertain", category, next: null }); current = { ...current, state: "uncertain", leaseOwner: null, leaseExpiresAt: null, safeErrorCategory: category }; return current; }, settleLease: (_id: string, _owner: string, outcome: OutboundDelivery["state"], next: string | null, category: string | null) => { attempts.push({ outcome, category, next }); current = { ...current, state: outcome, nextAttemptAt: next ?? current.nextAttemptAt, leaseOwner: null, leaseExpiresAt: null, safeErrorCategory: category }; return current; } } as never,
     { resolve: () => "token" } as never,
     () => ({ sendText: async () => { sends += 1; if (failure) throw failure; return "wamid-out"; } }) as never,
     { now: () => at },
@@ -33,8 +33,8 @@ function setup(failure: unknown | null, initial = delivery(), authorized = true)
   return { service, attempts, records, sends: () => sends };
 }
 
-test("EPIC-027 Phase 5 retries Meta 429, 5xx, and network failures with bounded persisted exponential backoff", async () => {
-  for (const failure of [new WhatsAppCloudApiError(429, 120_000), new WhatsAppCloudApiError(503, null), new WhatsAppCloudApiError(null, null)]) {
+test("EPIC-027 Phase 5 retries definitive Meta failures and preserves uncertain sends", async () => {
+  for (const failure of [new WhatsAppCloudApiError(429, 120_000), new WhatsAppCloudApiError(503, null)]) {
     const value = setup(failure);
     await value.service.dispatchReady("worker");
     assert.deepEqual(value.attempts[0], { outcome: "retryable", category: failure.status === 429 ? "rate_limited" : "provider_unavailable", next: failure.status === 429 ? "2026-07-31T12:02:00.000Z" : "2026-07-31T12:00:02.000Z" });
@@ -42,6 +42,9 @@ test("EPIC-027 Phase 5 retries Meta 429, 5xx, and network failures with bounded 
   const capped = setup(new WhatsAppCloudApiError(429, 600_000), delivery(3));
   await capped.service.dispatchReady("worker");
   assert.equal(capped.attempts[0]?.next, "2026-07-31T12:05:00.000Z");
+  const uncertain = setup(new WhatsAppCloudApiError(null, null));
+  await uncertain.service.dispatchReady("worker");
+  assert.deepEqual(uncertain.attempts[0], { outcome: "uncertain", category: "send_outcome_unknown", next: null });
 });
 
 test("EPIC-027 Phase 5 records terminal Meta 4xx and credential failures without retrying", async () => {

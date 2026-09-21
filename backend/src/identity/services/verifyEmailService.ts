@@ -12,20 +12,20 @@ export class VerifyEmailService {
     private readonly clock: Clock,
   ) {}
 
-  public verify(proofValue: string): VerifyEmailResult {
+  public async verify(proofValue: string): Promise<VerifyEmailResult> {
     let proof;
     try { proof = parseVerificationProof(proofValue); } catch { return "invalid_or_expired"; }
     const digest = this.hash.digest(proof, "email_verification");
-    return this.transaction.execute(({ users, verifications }) => {
-      const workflow = verifications.findByDigest("email_verification", this.hash.version, digest);
+    return this.transaction.execute(async ({ users, verifications }) => {
+      const workflow = await verifications.findByDigest("email_verification", this.hash.version, digest);
       const now = this.clock.now();
       if (!workflow || !isVerificationCurrent(workflow, now)) return "invalid_or_expired";
-      const user = users.findById(workflow.userId);
+      const user = await users.findById(workflow.userId);
       if (!user || user.status !== "pending_verification") return "invalid_or_expired";
       const activated = activateUserFromEmailVerification(user, authorizeCurrentEmailVerification(workflow, now), now);
       const consumed = consumeVerification(workflow, now);
-      if (!verifications.update(consumed, "pending")) return "invalid_or_expired";
-      if (!users.update(activated)) throw new Error("Verified User could not be persisted.");
+      if (!await verifications.update(consumed, "pending")) return "invalid_or_expired";
+      if (!await users.update(activated)) throw new Error("Verified User could not be persisted.");
       return "verified";
     });
   }

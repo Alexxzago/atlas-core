@@ -27,11 +27,13 @@ export function RouterProvider({ children }: { readonly children: ReactNode }): 
   }, []);
 
   const navigate = useCallback((path: string, options?: { readonly replace?: boolean }): void => {
-    if (path === window.location.pathname) return;
-    if (!path.startsWith("/companies") && !path.startsWith("/onboarding/") && path !== "/dashboard" && path !== "/conversations" && path !== "/analytics" && path !== "/billing" && path !== "/settings" && path !== "/activation-pending") setIntentionalWorkspaceAccess(false);
-    if (options?.replace) window.history.replaceState({}, "", path);
-    else window.history.pushState({}, "", path);
-    setRoute(parsePortalRoute(path)); setAppRoute(parseAppRoute(path)); setPathname(path); setSearch("");
+    const target = new URL(path, window.location.origin);
+    if (target.pathname === window.location.pathname && target.search === window.location.search) return;
+    if (!target.pathname.startsWith("/companies") && !target.pathname.startsWith("/onboarding/") && target.pathname !== "/dashboard" && target.pathname !== "/conversations" && target.pathname !== "/analytics" && target.pathname !== "/billing" && target.pathname !== "/settings" && target.pathname !== "/activation-pending") setIntentionalWorkspaceAccess(false);
+    const destination = `${target.pathname}${target.search}${target.hash}`;
+    if (options?.replace) window.history.replaceState({}, "", destination);
+    else window.history.pushState({}, "", destination);
+    setRoute(parsePortalRoute(target.pathname)); setAppRoute(parseAppRoute(target.pathname)); setPathname(target.pathname); setSearch(target.search);
   }, []);
   const navigateToOwnWorkspace = useCallback((): void => { setIntentionalWorkspaceAccess(true); navigate("/companies"); }, [navigate]);
 

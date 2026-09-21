@@ -13,19 +13,19 @@ export class ConversationControlConflictError extends Error {}
 export class ConversationControlService {
   public constructor(private readonly conversations: ConversationService, private readonly controls: ConversationRepositoryPort, private readonly clock: { now(): string }) {}
 
-  public takeOver(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown): ConversationControl {
+  public takeOver(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown): Promise<ConversationControl> {
     return this.apply(context, actorId, companyIdValue, conversationIdValue, input, "takeover");
   }
 
-  public release(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown): ConversationControl {
+  public release(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown): Promise<ConversationControl> {
     return this.apply(context, actorId, companyIdValue, conversationIdValue, input, "release");
   }
 
-  public resolve(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown): ConversationControl {
+  public resolve(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown): Promise<ConversationControl> {
     return this.apply(context, actorId, companyIdValue, conversationIdValue, input, "resolve");
   }
 
-  public resume(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown): ConversationControl {
+  public resume(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown): Promise<ConversationControl> {
     return this.apply(context, actorId, companyIdValue, conversationIdValue, input, "resume");
   }
 
@@ -40,10 +40,10 @@ export class ConversationControlService {
     } catch { throw new ConversationControlValidationError("Expected version and operation id are required."); }
   }
 
-  private apply(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown, operation: "takeover" | "release" | "resolve" | "resume"): ConversationControl {
+  private async apply(context: WorkspaceContext, actorId: UserId, companyIdValue: unknown, conversationIdValue: unknown, input: unknown, operation: "takeover" | "release" | "resolve" | "resume"): Promise<ConversationControl> {
     const { companyId, expectedVersion, operationId } = this.input(companyIdValue, conversationIdValue, input);
     if (typeof conversationIdValue !== "string") throw new ConversationControlValidationError("Conversation is invalid.");
-    const result = this.controls.applyConversationControlOperation(context, companyId, conversationIdValue as never, { operationId, operation, actorId, expectedVersion, occurredAt: this.clock.now() });
+    const result = await this.controls.applyConversationControlOperation(context, companyId, conversationIdValue as never, { operationId, operation, actorId, expectedVersion, occurredAt: this.clock.now() });
     if (result.kind === "not_found") throw new ConversationControlNotFoundError("Conversation was not found.");
     if (result.kind === "replay_mismatch") throw new ConversationControlConflictError("Conversation changed.");
     if ((result.kind === "rejected" || result.kind === "replayed") && result.outcome === "stale_version") throw new ConversationControlConflictError("Conversation changed.");

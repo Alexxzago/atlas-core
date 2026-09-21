@@ -5,6 +5,7 @@ import express from "express";
 import { createCompanyController, createDeleteCompanyController, createGetCompanyController, createListCompaniesController, createUpdateCompanyController } from "../controllers/companyController.js";
 import { createOnboardingController } from "../controllers/onboarding.js";
 import { createDatabase } from "../config/database.js";
+import { LocalSqlDatabase } from "../config/sqlDatabase.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
 import { KnowledgeRepository } from "../repositories/knowledgeRepository.js";
 import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
@@ -40,8 +41,9 @@ async function withApi(
   options?: { scraper?: WebsiteScraper }
 ): Promise<void> {
   const database = createDatabase(":memory:");
+  const sql = new LocalSqlDatabase(database);
   const companies = new CompanyRepository(database);
-  const knowledge = new KnowledgeRepository(database);
+  const knowledge = new KnowledgeRepository(sql);
   const context = createWorkspaceContext(new WorkspaceRepository(database).resolveDefault());
   const companyService = new CompanyService(companies);
   const defaultScraper: WebsiteScraper = {
@@ -83,7 +85,7 @@ async function withApi(
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
     });
-    database.close();
+    await sql.close();
   }
 }
 
@@ -139,7 +141,7 @@ test("DELETE removes the company and cascades related knowledge", async () => {
     const response = await fetch(`${baseUrl}/companies/${company.id}`, { method: "DELETE" });
     assert.equal(response.status, 204);
     assert.equal(companies.findById(context, company.id), null);
-    assert.equal(knowledge.load(context, company.id), null);
+    assert.equal(await knowledge.load(context, company.id), null);
   });
 });
 
@@ -157,7 +159,7 @@ test("company-targeted onboarding creates Knowledge without changing Company ide
     assert.equal(result.status, "ready");
     assert.equal(companies.list(context).length, 1);
     assert.equal(companies.findById(context, company.id)?.website, "https://old.test");
-    assert.ok(knowledge.load(context, company.id));
+    assert.ok(await knowledge.load(context, company.id));
   });
 });
 
@@ -200,6 +202,6 @@ test("failed onboarding returns a controlled error and exposes failed status", a
     assert.equal(onboardingResponse.status, 500);
     assert.equal(errorBody.error, "Unable to onboard company.");
     assert.equal(refreshed.status, "ready");
-    assert.ok(knowledge.load(context, company.id));
+    assert.ok(await knowledge.load(context, company.id));
   }, { scraper: failedScraper });
 });

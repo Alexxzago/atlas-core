@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { BillingProviderKind } from "../domain/billing.js";
 import { BillingWebhookRepository } from "../../repositories/billingWebhookRepository.js";
+import type { AsyncBillingProviderEventRepository } from "../infrastructure/asyncBillingPersistence.js";
 
 export interface BillingWebhookSecrets { readonly stripe: string; readonly mercadopago: string; }
 type Json = Record<string, unknown>;
@@ -14,6 +15,26 @@ export class BillingWebhookService {
     return this.repository.accept({ ...event, providerKind: provider, payloadDigest: createHash("sha256").update(raw).digest("hex") }, this.now());
   }
 
+  private validSignature(provider: BillingProviderKind, raw: Buffer, headers: Record<string, string | string[] | undefined>): boolean {
+    const secret = provider === "stripe" ? this.secrets.stripe : this.secrets.mercadopago;
+    if (!secret) return false;
+    const header = headerValue(headers, provider === "stripe" ? "stripe-signature" : "x-signature");
+    if (!header) return false;
+    if (provider === "stripe") return stripeSignature(secret, raw, header, this.now()).some((signature) => safeEqual(signature.digest, signature.signature));
+    const expected = mercadoPagoSignature(secret, raw, headers, header);
+    return expected !== null && safeEqual(expected.digest, expected.signature);
+  }
+}
+
+/** Async production webhook boundary. Signature validation remains local; persistence is awaited. */
+export class AsyncBillingWebhookService {
+  public constructor(private readonly secrets: BillingWebhookSecrets, private readonly repository: AsyncBillingProviderEventRepository, private readonly now: () => string = () => new Date().toISOString()) {}
+  public async receive(provider: BillingProviderKind, raw: Buffer, headers: Record<string, string | string[] | undefined>): Promise<"accepted" | "duplicate" | "ignored" | "invalid"> {
+    if (!this.validSignature(provider, raw, headers)) return "invalid";
+    const event = normalize(provider, raw);
+    if (!event) return "invalid";
+    return this.repository.accept({ ...event, providerKind: provider, payloadDigest: createHash("sha256").update(raw).digest("hex"), billingAccountId: null }, this.now());
+  }
   private validSignature(provider: BillingProviderKind, raw: Buffer, headers: Record<string, string | string[] | undefined>): boolean {
     const secret = provider === "stripe" ? this.secrets.stripe : this.secrets.mercadopago;
     if (!secret) return false;

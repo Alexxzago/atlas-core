@@ -52,16 +52,16 @@ export function PublicChatPage({ connectionPublicId }: { readonly connectionPubl
     const message = draft.normalize("NFKC").trim();
     if (!interactive || !message) { if (!message) setNotice("Revisá el mensaje e intentá nuevamente."); return; }
     if (Array.from(message).length > 4_000) { setNotice("El mensaje es demasiado largo."); return; }
-    setMessages((current) => [...current, { localId: nextLocalId.current++, role: "visitor", content: message }]);
     setDraft(""); setNotice(null); setStatus("sending");
     try {
-      const response = await publicWebChatApi.sendMessage(connectionPublicId, message);
-      setMessages((current) => [...current, { localId: nextLocalId.current++, role: "assistant", content: response.message }]);
+      const response = await publicWebChatApi.sendMessage(connectionPublicId, message, crypto.randomUUID().replaceAll("-", ""));
+      setMessages((current) => [...current, { localId: nextLocalId.current++, role: "visitor", content: message }, { localId: nextLocalId.current++, role: "assistant", content: response.message }]);
       setStatus("ready");
       window.setTimeout(() => textarea.current?.focus(), 0);
     } catch (error: unknown) {
       const code = error instanceof PublicWebChatApiError ? error.status : 503;
       const copy = messageError(code);
+      setDraft(message);
       setNotice(copy);
       setStatus(code === 404 ? "unavailable" : "error");
     }

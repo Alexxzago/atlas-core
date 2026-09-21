@@ -21,6 +21,7 @@ import { BillingAccountRepository, BillingCatalogRepository, BillingSubscription
 import { BillingWebhookRepository } from "../repositories/billingWebhookRepository.js";
 import { createBillingRouter } from "../routes/billing.js";
 import { createBillingWebhookRouter } from "../routes/billingWebhook.js";
+import { asyncBillingPersistence } from "./helpers/asyncBillingTestComposition.js";
 
 const at = "2026-09-01T00:00:00.000Z", stripeTimestamp = Math.floor(Date.parse(at) / 1_000);
 type CycleWorker = Pick<BillingReconciliationWorker, "runBatch">;
@@ -62,8 +63,9 @@ test("EPIC046 PASS4F6 e2e webhook acceptance wakes runtime to paused authority a
   const webhook = new BillingWebhookService({ stripe: "webhook-secret", mercadopago: "" }, new BillingWebhookRepository(db), () => at);
   const raw = Buffer.from(JSON.stringify({ id: "evt_runtime_paused", type: "customer.subscription.updated", data: { object: { id: "sub_runtime", customer: "cus_runtime" } } }));
   const signature = createHmac("sha256", "webhook-secret").update(`${stripeTimestamp}.`).update(raw).digest("hex");
-  const operations = new BillingOperationService(new BillingAccountRepository(db), new BillingCatalogRepository(db), new BillingSubscriptionRepository(db), new BillingOperationRepository(db), new BillingProviderRegistry([{ kind: "stripe", provider }]), () => at);
-  const service = new BillingApplicationService(db, operations, { checkoutSuccess: "https://atlas.test/success", checkoutCancel: "https://atlas.test/cancel", portalReturn: "https://atlas.test/portal" });
+  const billing = asyncBillingPersistence(db);
+  const operations = new BillingOperationService(billing.customer, billing.operations, new BillingProviderRegistry([{ kind: "stripe", provider }]), () => at, billing.payerIdentities);
+  const service = new BillingApplicationService(billing.customer, billing.payerIdentities, operations, { checkoutSuccess: "https://atlas.test/success", checkoutCancel: "https://atlas.test/cancel", portalReturn: "https://atlas.test/portal" }, () => at);
   const billingRouter = createBillingRouter({ authentication: { cookieName: () => "atlas", current: (value: string) => value === "manager" ? { userId: "manager", authenticationIdentityId: "manager-identity" } : null, validateCsrf: () => true } as never, users: { findById: () => ({ id: "manager", status: "active" }) } as never, authorization: { authorize: (_user: unknown, _workspace: string, permission: string) => ({ workspaceId, workspacePublicId: "default", userId: "manager", membershipId: "member", role: "owner", capabilities: new Set(["workspace:read", "workspace:manage"]), permission }) } as never, resolver: { resolve: () => ({ workspaceId, workspaceKey: "default" }) } as never, originPolicy: { allows: () => true } as never, controllers: createBillingControllers(service) });
   const empty = Router();
   const app = createApp({ authorizedCompaniesRouter: empty, billingRouter, billingWebhookRouter: createBillingWebhookRouter({ stripe: createBillingWebhookController(webhook, "stripe"), mercadoPago: createBillingWebhookController(webhook, "mercadopago") }), chatRouter: empty, companiesRouter: empty, identityRouter: empty, knowledgeRouter: empty, publicWebChatRouter: empty, scrapeRouter: empty, workspacesRouter: empty });

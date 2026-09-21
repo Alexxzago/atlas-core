@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import App from "../App";
 import { I18nProvider } from "../i18n/I18nContext";
@@ -7,14 +13,647 @@ import { RouterProvider } from "../routing/RouterProvider";
 import { AuthenticationProvider } from "../state/AuthenticationContext";
 import { ThemeProvider } from "../design-system/theme";
 
-function json(value:unknown,status=200):Response{return new Response(JSON.stringify(value),{status,headers:{"content-type":"application/json"}});}
-function renderApp():void{render(<ThemeProvider><I18nProvider><RouterProvider><AuthenticationProvider><App/></AuthenticationProvider></RouterProvider></I18nProvider></ThemeProvider>);}
-afterEach(()=>{cleanup();vi.unstubAllGlobals();window.history.replaceState({},"","/");});
-test("waits for one workspace selection before leaving administration",async()=>{window.history.replaceState({},"","/admin");const workspace={id:"workspace",name:"Default Workspace",role:"owner",capabilities:["company:read","company:manage"]};let persisted:null|typeof workspace=null,resolveSelect!:(value:Response)=>void,selects=0;vi.stubGlobal("fetch",vi.fn((input:string|URL|Request)=>{const url=String(input);if(url.endsWith("/session/bootstrap"))return Promise.resolve(json({status:"authenticated",identity:{userId:"admin",email:"admin@example.test",locale:"en",status:"active",isPlatformAdmin:true,idleExpiresAt:"2026-01-01",absoluteExpiresAt:"2026-01-01"},csrfToken:"csrf",csrfGeneration:1}));if(url.endsWith("/admin/overview"))return Promise.resolve(json({data:{totalUsers:1,totalWorkspaces:1,totalCompanies:0,totalAssistantProfiles:0,webChatConnections:0,whatsAppConnections:{total:0,active:0,healthy:0,degraded:0}}}));if(url.endsWith("/workspaces")&&!url.includes("selected"))return Promise.resolve(json([workspace]));if(url.endsWith("/workspaces/selected"))return Promise.resolve(json(persisted));if(url.endsWith("/workspaces/workspace/select")){selects+=1;persisted=workspace;return new Promise<Response>(resolve=>{resolveSelect=resolve;});}if(url.endsWith("/workspaces/workspace/companies"))return Promise.resolve(json({data:[]}));return Promise.resolve(json({},404));}));renderApp();await screen.findByRole("heading",{name:"Administración de Atlas"});fireEvent.click(screen.getByRole("button",{name:"Mi espacio"}));fireEvent.click(screen.getByRole("button",{name:"Mi espacio"}));await waitFor(()=>expect(selects).toBe(1));expect(window.location.pathname).toBe("/admin");resolveSelect(json(workspace));await waitFor(()=>expect(window.location.pathname).toBe("/companies"));expect(selects).toBe(1);});
-test("uses versioned workspace suspension with commercial audit",async()=>{window.history.replaceState({},"","/admin/workspaces/wsp_1");vi.stubGlobal("fetch",vi.fn((input:string|URL|Request,init?:RequestInit)=>{const url=String(input);if(url.endsWith("/session/bootstrap"))return Promise.resolve(json({status:"authenticated",identity:{userId:"admin",email:"admin@example.test",locale:"en",status:"active",isPlatformAdmin:true,idleExpiresAt:"2026-01-01",absoluteExpiresAt:"2026-01-01"},csrfToken:"csrf",csrfGeneration:1}));if(url.endsWith("/commercial-controls/audit"))return Promise.resolve(json({data:[]}));if(url.endsWith("/commercial-controls/suspend"))return Promise.resolve(json({error:"Conflict"},409));if(url.endsWith("/admin/workspaces/wsp_1/commercial-controls"))return Promise.resolve(json({data:{workspaceId:1,status:"active",maxCompanies:null,maxAssistantProfiles:4,maxActiveChannels:2,usage:{companies:3,assistantProfiles:1,activeChannels:2},version:1,createdAt:"2026-01-01",updatedAt:"2026-01-01",suspendedAt:null}}));return Promise.resolve(json({},404));}));renderApp();await screen.findByRole("heading",{name:"Workspace wsp_1"},{timeout:5_000});expect(screen.getByText("3 / Sin límite")).toBeTruthy();expect(screen.getByText("1 / 4")).toBeTruthy();expect(screen.getByText("2 / 2")).toBeTruthy();fireEvent.click(screen.getByRole("button",{name:"Suspender workspace"}));await screen.findByText("La información cambió. Revisá el estado actual e intentá nuevamente.");const call=vi.mocked(fetch).mock.calls.find(([input,init])=>String(input).endsWith("/commercial-controls/suspend")&&(init as RequestInit)?.method==="POST");expect(call?.[1]).toMatchObject({headers:{"x-csrf-token":"csrf"},body:JSON.stringify({expectedVersion:1})});});
-test("saves a versioned nullable owned-workspace allowance",async()=>{window.history.replaceState({},"","/admin/users/usr_1");vi.stubGlobal("fetch",vi.fn((input:string|URL|Request,init?:RequestInit)=>{const url=String(input);if(url.endsWith("/session/bootstrap"))return Promise.resolve(json({status:"authenticated",identity:{userId:"admin",email:"admin@example.test",locale:"en",status:"active",isPlatformAdmin:true,idleExpiresAt:"2026-01-01",absoluteExpiresAt:"2026-01-01"},csrfToken:"csrf",csrfGeneration:1}));if(url.endsWith("/commercial-controls/audit"))return Promise.resolve(json({data:[]}));if(url.endsWith("/admin/users/usr_1/commercial-controls")&&init?.method==="PUT")return Promise.resolve(json({data:{userId:"usr_1",maxOwnedWorkspaces:2,usage:{ownedWorkspaces:1},version:2,createdAt:"2026-01-01",updatedAt:"2026-01-02"}}));if(url.endsWith("/admin/users/usr_1/commercial-controls"))return Promise.resolve(json({data:{userId:"usr_1",maxOwnedWorkspaces:null,usage:{ownedWorkspaces:1},version:1,createdAt:"2026-01-01",updatedAt:"2026-01-01"}}));return Promise.resolve(json({},404));}));renderApp();await screen.findByRole("heading",{name:"Límite de workspaces"});expect(screen.getByText("1 / Sin límite")).toBeTruthy();fireEvent.change(screen.getByLabelText("Límite de workspaces propios"),{target:{value:"2"}});fireEvent.click(screen.getByRole("button",{name:"Guardar límite"}));await screen.findByText("El límite de workspaces propios fue actualizado.");const call=vi.mocked(fetch).mock.calls.find(([input,init])=>String(input).endsWith("/admin/users/usr_1/commercial-controls")&&(init as RequestInit)?.method==="PUT");expect(call?.[1]).toMatchObject({headers:{"x-csrf-token":"csrf"},body:JSON.stringify({maxOwnedWorkspaces:2,expectedVersion:1})});});
-test("renders a separate admin shell and safe overview for a platform admin",async()=>{window.history.replaceState({},"","/admin");vi.stubGlobal("fetch",vi.fn((input:string|URL|Request)=>{const url=String(input);if(url.endsWith("/session/bootstrap"))return Promise.resolve(json({status:"authenticated",identity:{userId:"admin",email:"admin@example.test",locale:"en",status:"active",isPlatformAdmin:true,idleExpiresAt:"2026-01-01",absoluteExpiresAt:"2026-01-01"},csrfToken:"csrf",csrfGeneration:1}));if(url.endsWith("/admin/overview"))return Promise.resolve(json({data:{totalUsers:2,totalWorkspaces:1,totalCompanies:1,totalAssistantProfiles:1,webChatConnections:1,whatsAppConnections:{total:1,active:1,healthy:1,degraded:0}}}));return Promise.resolve(json({},404));}));renderApp();await screen.findByRole("heading",{name:"Administración de Atlas"});expect(document.querySelector(".admin-shell")).toBeTruthy();expect(document.querySelector(".app-shell")).toBeNull();expect(screen.getByText("Usuarios registrados")).toBeTruthy();});
-test("does not render admin data for an authenticated non-admin",async()=>{window.history.replaceState({},"","/admin");vi.stubGlobal("fetch",vi.fn((input:string|URL|Request)=>{const url=String(input);if(url.endsWith("/session/bootstrap"))return Promise.resolve(json({status:"authenticated",identity:{userId:"customer",email:"customer@example.test",locale:"en",status:"active",isPlatformAdmin:false,idleExpiresAt:"2026-01-01",absoluteExpiresAt:"2026-01-01"},csrfToken:"csrf",csrfGeneration:1}));if(url.endsWith("/workspaces")&&!url.includes("selected"))return Promise.resolve(json([]));return Promise.resolve(json({},404));}));renderApp();await waitFor(()=>expect(window.location.pathname).toBe("/dashboard"));expect(screen.queryByText("Administración de Atlas")).toBeNull();expect(vi.mocked(fetch).mock.calls.some(([input])=>String(input).includes("/admin/overview"))).toBe(false);});
-test("redirects an unauthenticated admin route to the shared sign-in screen",async()=>{window.history.replaceState({},"","/admin");vi.stubGlobal("fetch",vi.fn(()=>Promise.resolve(json({},401))));renderApp();await screen.findByRole("heading",{name:"Welcome back"});expect(window.location.pathname).toBe("/sign-in");});
-test("redirects an admin session from the shared sign-in route to admin",async()=>{window.history.replaceState({},"","/sign-in");vi.stubGlobal("fetch",vi.fn((input:string|URL|Request)=>{const url=String(input);if(url.endsWith("/session/bootstrap"))return Promise.resolve(json({status:"authenticated",identity:{userId:"admin",email:"admin@example.test",locale:"en",status:"active",isPlatformAdmin:true,idleExpiresAt:"2026-01-01",absoluteExpiresAt:"2026-01-01"},csrfToken:"csrf",csrfGeneration:1}));if(url.endsWith("/admin/overview"))return Promise.resolve(json({data:{totalUsers:0,totalWorkspaces:0,totalCompanies:0,totalAssistantProfiles:0,webChatConnections:0,whatsAppConnections:{total:0,active:0,healthy:0,degraded:0}}}));return Promise.resolve(json({},404));}));renderApp();await waitFor(()=>expect(window.location.pathname).toBe("/admin"));await screen.findByRole("heading",{name:"Administración de Atlas"});});
-test("redirects a direct customer route for a platform admin to administration",async()=>{window.history.replaceState({},"","/companies");vi.stubGlobal("fetch",vi.fn((input:string|URL|Request)=>{const url=String(input);if(url.endsWith("/session/bootstrap"))return Promise.resolve(json({status:"authenticated",identity:{userId:"admin",email:"admin@example.test",locale:"en",status:"active",isPlatformAdmin:true,idleExpiresAt:"2026-01-01",absoluteExpiresAt:"2026-01-01"},csrfToken:"csrf",csrfGeneration:1}),);if(url.endsWith("/admin/overview"))return Promise.resolve(json({data:{totalUsers:0,totalWorkspaces:0,totalCompanies:0,totalAssistantProfiles:0,webChatConnections:0,whatsAppConnections:{total:0,active:0,healthy:0,degraded:0}}}),);return Promise.resolve(json({},404));}),);renderApp();await waitFor(()=>expect(window.location.pathname).toBe("/admin"));expect(vi.mocked(fetch).mock.calls.some(([input])=>String(input).endsWith("/workspaces")),).toBe(false);});test("renders admin users and uses the shared logout endpoint",async()=>{window.history.replaceState({},"","/admin/users");vi.stubGlobal("fetch",vi.fn((input:string|URL|Request)=>{const url=String(input);if(url.endsWith("/session/bootstrap"))return Promise.resolve(json({status:"authenticated",identity:{userId:"admin",email:"admin@example.test",locale:"en",status:"active",isPlatformAdmin:true,idleExpiresAt:"2026-01-01",absoluteExpiresAt:"2026-01-01"},csrfToken:"csrf",csrfGeneration:1}),);if(url.includes("/admin/users"))return Promise.resolve(json({data:{users:[{id:"usr_1",email:"user@example.test",createdAt:"2026-01-01",emailVerified:true,activeWorkspaceMembershipCount:1,hasActiveWorkspaceMembership:true}],nextCursor:null}}),);if(url.endsWith("/identity/logout"))return Promise.resolve(new Response(null,{status:204}));return Promise.resolve(json({},404));}),);renderApp();await screen.findByText("user@example.test");expect(screen.getByText("Mi espacio")).toBeTruthy();screen.getByText("Cerrar sesión").click();await waitFor(()=>expect(window.location.pathname).toBe("/sign-in"));expect(vi.mocked(fetch).mock.calls.some(([input])=>String(input).endsWith("/identity/logout")),).toBe(true);});test("enters the admin's sole active workspace through the normal selection path",async()=>{window.history.replaceState({},"","/admin");const workspace={id:"workspace",name:"Default Workspace",role:"owner",capabilities:["company:read","company:manage"]},company={id:1,name:"Existing Company",website:null,lifecycle:"operational",createdAt:"2026-01-01"};vi.stubGlobal("fetch",vi.fn((input:string|URL|Request,init?:RequestInit)=>{const url=String(input);if(url.endsWith("/session/bootstrap"))return Promise.resolve(json({status:"authenticated",identity:{userId:"admin",email:"admin@example.test",locale:"en",status:"active",isPlatformAdmin:true,idleExpiresAt:"2026-01-01",absoluteExpiresAt:"2026-01-01"},csrfToken:"csrf",csrfGeneration:1}),);if(url.endsWith("/admin/overview"))return Promise.resolve(json({data:{totalUsers:1,totalWorkspaces:1,totalCompanies:1,totalAssistantProfiles:0,webChatConnections:0,whatsAppConnections:{total:0,active:0,healthy:0,degraded:0}}}),);if(url.endsWith("/workspaces")&&!url.includes("selected"))return Promise.resolve(json([workspace]));if(url.endsWith("/workspaces/selected"))return Promise.resolve(json(null));if(url.endsWith("/workspaces/workspace/select")){expect(init?.method).toBe("POST");expect(init?.headers).toMatchObject({"x-csrf-token":"csrf"});return Promise.resolve(json(workspace));}if(url.endsWith("/workspaces/workspace/companies"))return Promise.resolve(json({data:[company]}));if(url.endsWith("/workspaces/workspace/companies/1"))return Promise.resolve(json({data:company}));if(url.endsWith("/assistant-profiles"))return Promise.resolve(json([]));if(url.endsWith("/assistant/readiness"))return Promise.resolve(json({assistantIdentifier:"default",workspaceId:1,companyId:1,status:"blocked",blockers:["default_assistant_missing"],knowledgeVersionId:null,assistantProfileId:null,evaluatedAt:"2026-01-01",policyVersion:"1",configurationDigest:"digest"}),);if(url.endsWith("/pilot-readiness"))return Promise.resolve(json({overall:"pilot_ready",classification:"pilot_ready",checks:[],nextAction:null,evaluatedAt:"2026-01-01T00:00:00.000Z",policyVersion:"pilot-readiness-v1"}),);if(url.endsWith("/web-chat-connections")||url.endsWith("/whatsapp-connections"))return Promise.resolve(json([]));return Promise.resolve(json({},404));}),);renderApp();await screen.findByRole("heading",{name:"Administración de Atlas"});fireEvent.click(screen.getByRole("button",{name:"Mi espacio"}));await screen.findByText("Tu piloto está listo");expect(window.location.pathname).toBe("/companies/1");expect(vi.mocked(fetch).mock.calls.some(([input,init])=>String(input).endsWith("/workspaces/workspace/select")&&(init as RequestInit).method==="POST",),).toBe(true);fireEvent.click(screen.getAllByRole("button",{name:"Workspace and account"})[0]!,);fireEvent.click(screen.getByRole("button",{name:"Volver a Administración"}),);await waitFor(()=>expect(window.location.pathname).toBe("/admin"));});
+function json(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+function renderApp(): void {
+  render(
+    <ThemeProvider>
+      <I18nProvider>
+        <RouterProvider>
+          <AuthenticationProvider>
+            <App />
+          </AuthenticationProvider>
+        </RouterProvider>
+      </I18nProvider>
+    </ThemeProvider>,
+  );
+}
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  window.history.replaceState({}, "", "/");
+});
+test("waits for one workspace selection before leaving administration", async () => {
+  window.history.replaceState({}, "", "/admin");
+  const workspace = {
+    id: "workspace",
+    name: "Default Workspace",
+    role: "owner",
+    capabilities: ["company:read", "company:manage"],
+  };
+  let persisted: null | typeof workspace = null,
+    resolveSelect!: (value: Response) => void,
+    selects = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/session/bootstrap"))
+        return Promise.resolve(
+          json({
+            status: "authenticated",
+            identity: {
+              userId: "admin",
+              email: "admin@example.test",
+              locale: "en",
+              status: "active",
+              isPlatformAdmin: true,
+              idleExpiresAt: "2026-01-01",
+              absoluteExpiresAt: "2026-01-01",
+            },
+            csrfToken: "csrf",
+            csrfGeneration: 1,
+          }),
+        );
+      if (url.endsWith("/admin/overview"))
+        return Promise.resolve(
+          json({
+            data: {
+              totalUsers: 1,
+              totalWorkspaces: 1,
+              totalCompanies: 0,
+              totalAssistantProfiles: 0,
+              webChatConnections: 0,
+              whatsAppConnections: {
+                total: 0,
+                active: 0,
+                healthy: 0,
+                degraded: 0,
+              },
+            },
+          }),
+        );
+      if (url.endsWith("/workspaces") && !url.includes("selected"))
+        return Promise.resolve(json([workspace]));
+      if (url.endsWith("/workspaces/selected"))
+        return Promise.resolve(json(persisted));
+      if (url.endsWith("/workspaces/workspace/select")) {
+        selects += 1;
+        persisted = workspace;
+        return new Promise<Response>((resolve) => {
+          resolveSelect = resolve;
+        });
+      }
+      if (url.endsWith("/workspaces/workspace/companies"))
+        return Promise.resolve(json({ data: [] }));
+      return Promise.resolve(json({}, 404));
+    }),
+  );
+  renderApp();
+  await screen.findByRole("heading", { name: "Administración de Atlas" });
+  fireEvent.click(screen.getByRole("button", { name: "Mi espacio" }));
+  fireEvent.click(screen.getByRole("button", { name: "Mi espacio" }));
+  await waitFor(() => expect(selects).toBe(1));
+  expect(window.location.pathname).toBe("/admin");
+  resolveSelect(json(workspace));
+  await waitFor(() => expect(window.location.pathname).toBe("/companies"));
+  expect(selects).toBe(1);
+});
+test("uses versioned workspace suspension with commercial audit", async () => {
+  window.history.replaceState({}, "", "/admin/workspaces/wsp_1");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/session/bootstrap"))
+        return Promise.resolve(
+          json({
+            status: "authenticated",
+            identity: {
+              userId: "admin",
+              email: "admin@example.test",
+              locale: "en",
+              status: "active",
+              isPlatformAdmin: true,
+              idleExpiresAt: "2026-01-01",
+              absoluteExpiresAt: "2026-01-01",
+            },
+            csrfToken: "csrf",
+            csrfGeneration: 1,
+          }),
+        );
+      if (url.endsWith("/commercial-controls/audit"))
+        return Promise.resolve(json({ data: [] }));
+      if (url.endsWith("/commercial-controls/suspend"))
+        return Promise.resolve(json({ error: "Conflict" }, 409));
+      if (url.endsWith("/admin/workspaces/wsp_1/commercial-controls"))
+        return Promise.resolve(
+          json({
+            data: {
+              workspaceId: 1,
+              status: "active",
+              maxCompanies: null,
+              maxAssistantProfiles: 4,
+              maxActiveChannels: 2,
+              usage: { companies: 3, assistantProfiles: 1, activeChannels: 2 },
+              version: 1,
+              createdAt: "2026-01-01",
+              updatedAt: "2026-01-01",
+              suspendedAt: null,
+            },
+          }),
+        );
+      return Promise.resolve(json({}, 404));
+    }),
+  );
+  renderApp();
+  await screen.findByRole(
+    "heading",
+    { name: "Workspace wsp_1" },
+    { timeout: 5_000 },
+  );
+  expect(screen.getByText("3 / Sin límite")).toBeTruthy();
+  expect(screen.getByText("1 / 4")).toBeTruthy();
+  expect(screen.getByText("2 / 2")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Suspender workspace" }));
+  await screen.findByText(
+    "La información cambió. Revisá el estado actual e intentá nuevamente.",
+  );
+  const call = vi
+    .mocked(fetch)
+    .mock.calls.find(
+      ([input, init]) =>
+        String(input).endsWith("/commercial-controls/suspend") &&
+        (init as RequestInit)?.method === "POST",
+    );
+  expect(call?.[1]).toMatchObject({
+    headers: { "x-csrf-token": "csrf" },
+    body: JSON.stringify({ expectedVersion: 1 }),
+  });
+});
+test("saves a versioned nullable owned-workspace allowance", async () => {
+  window.history.replaceState({}, "", "/admin/users/usr_1");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/session/bootstrap"))
+        return Promise.resolve(
+          json({
+            status: "authenticated",
+            identity: {
+              userId: "admin",
+              email: "admin@example.test",
+              locale: "en",
+              status: "active",
+              isPlatformAdmin: true,
+              idleExpiresAt: "2026-01-01",
+              absoluteExpiresAt: "2026-01-01",
+            },
+            csrfToken: "csrf",
+            csrfGeneration: 1,
+          }),
+        );
+      if (url.endsWith("/commercial-controls/audit"))
+        return Promise.resolve(json({ data: [] }));
+      if (
+        url.endsWith("/admin/users/usr_1/commercial-controls") &&
+        init?.method === "PUT"
+      )
+        return Promise.resolve(
+          json({
+            data: {
+              userId: "usr_1",
+              maxOwnedWorkspaces: 2,
+              usage: { ownedWorkspaces: 1 },
+              version: 2,
+              createdAt: "2026-01-01",
+              updatedAt: "2026-01-02",
+            },
+          }),
+        );
+      if (url.endsWith("/admin/users/usr_1/commercial-controls"))
+        return Promise.resolve(
+          json({
+            data: {
+              userId: "usr_1",
+              maxOwnedWorkspaces: null,
+              usage: { ownedWorkspaces: 1 },
+              version: 1,
+              createdAt: "2026-01-01",
+              updatedAt: "2026-01-01",
+            },
+          }),
+        );
+      return Promise.resolve(json({}, 404));
+    }),
+  );
+  renderApp();
+  await screen.findByRole("heading", { name: "Límite de workspaces" });
+  expect(screen.getByText("1 / Sin límite")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Límite de workspaces propios"), {
+    target: { value: "2" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Guardar límite" }));
+  await screen.findByText("El límite de workspaces propios fue actualizado.");
+  const call = vi
+    .mocked(fetch)
+    .mock.calls.find(
+      ([input, init]) =>
+        String(input).endsWith("/admin/users/usr_1/commercial-controls") &&
+        (init as RequestInit)?.method === "PUT",
+    );
+  expect(call?.[1]).toMatchObject({
+    headers: { "x-csrf-token": "csrf" },
+    body: JSON.stringify({ maxOwnedWorkspaces: 2, expectedVersion: 1 }),
+  });
+});
+test("renders a separate admin shell and safe overview for a platform admin", async () => {
+  window.history.replaceState({}, "", "/admin");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/session/bootstrap"))
+        return Promise.resolve(
+          json({
+            status: "authenticated",
+            identity: {
+              userId: "admin",
+              email: "admin@example.test",
+              locale: "en",
+              status: "active",
+              isPlatformAdmin: true,
+              idleExpiresAt: "2026-01-01",
+              absoluteExpiresAt: "2026-01-01",
+            },
+            csrfToken: "csrf",
+            csrfGeneration: 1,
+          }),
+        );
+      if (url.endsWith("/admin/overview"))
+        return Promise.resolve(
+          json({
+            data: {
+              totalUsers: 2,
+              totalWorkspaces: 1,
+              totalCompanies: 1,
+              totalAssistantProfiles: 1,
+              webChatConnections: 1,
+              whatsAppConnections: {
+                total: 1,
+                active: 1,
+                healthy: 1,
+                degraded: 0,
+              },
+            },
+          }),
+        );
+      return Promise.resolve(json({}, 404));
+    }),
+  );
+  renderApp();
+  await screen.findByRole("heading", { name: "Administración de Atlas" });
+  expect(document.querySelector(".admin-shell")).toBeTruthy();
+  expect(document.querySelector(".app-shell")).toBeNull();
+  expect(screen.getByText("Usuarios registrados")).toBeTruthy();
+});
+test("does not render admin data for an authenticated non-admin", async () => {
+  window.history.replaceState({}, "", "/admin");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/session/bootstrap"))
+        return Promise.resolve(
+          json({
+            status: "authenticated",
+            identity: {
+              userId: "customer",
+              email: "customer@example.test",
+              locale: "en",
+              status: "active",
+              isPlatformAdmin: false,
+              idleExpiresAt: "2026-01-01",
+              absoluteExpiresAt: "2026-01-01",
+            },
+            csrfToken: "csrf",
+            csrfGeneration: 1,
+          }),
+        );
+      if (url.endsWith("/workspaces") && !url.includes("selected"))
+        return Promise.resolve(json([]));
+      return Promise.resolve(json({}, 404));
+    }),
+  );
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
+  expect(screen.queryByText("Administración de Atlas")).toBeNull();
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(([input]) => String(input).includes("/admin/overview")),
+  ).toBe(false);
+});
+test("redirects an unauthenticated admin route to the shared sign-in screen", async () => {
+  window.history.replaceState({}, "", "/admin");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.resolve(json({}, 401))),
+  );
+  renderApp();
+  await screen.findByRole("heading", { name: "Welcome back" });
+  expect(window.location.pathname).toBe("/sign-in");
+});
+test("redirects an admin session from the shared sign-in route to admin", async () => {
+  window.history.replaceState({}, "", "/sign-in");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/session/bootstrap"))
+        return Promise.resolve(
+          json({
+            status: "authenticated",
+            identity: {
+              userId: "admin",
+              email: "admin@example.test",
+              locale: "en",
+              status: "active",
+              isPlatformAdmin: true,
+              idleExpiresAt: "2026-01-01",
+              absoluteExpiresAt: "2026-01-01",
+            },
+            csrfToken: "csrf",
+            csrfGeneration: 1,
+          }),
+        );
+      if (url.endsWith("/admin/overview"))
+        return Promise.resolve(
+          json({
+            data: {
+              totalUsers: 0,
+              totalWorkspaces: 0,
+              totalCompanies: 0,
+              totalAssistantProfiles: 0,
+              webChatConnections: 0,
+              whatsAppConnections: {
+                total: 0,
+                active: 0,
+                healthy: 0,
+                degraded: 0,
+              },
+            },
+          }),
+        );
+      return Promise.resolve(json({}, 404));
+    }),
+  );
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/admin"));
+  await screen.findByRole("heading", { name: "Administración de Atlas" });
+});
+test("redirects a direct customer route for a platform admin to administration", async () => {
+  window.history.replaceState({}, "", "/companies");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/session/bootstrap"))
+        return Promise.resolve(
+          json({
+            status: "authenticated",
+            identity: {
+              userId: "admin",
+              email: "admin@example.test",
+              locale: "en",
+              status: "active",
+              isPlatformAdmin: true,
+              idleExpiresAt: "2026-01-01",
+              absoluteExpiresAt: "2026-01-01",
+            },
+            csrfToken: "csrf",
+            csrfGeneration: 1,
+          }),
+        );
+      if (url.endsWith("/admin/overview"))
+        return Promise.resolve(
+          json({
+            data: {
+              totalUsers: 0,
+              totalWorkspaces: 0,
+              totalCompanies: 0,
+              totalAssistantProfiles: 0,
+              webChatConnections: 0,
+              whatsAppConnections: {
+                total: 0,
+                active: 0,
+                healthy: 0,
+                degraded: 0,
+              },
+            },
+          }),
+        );
+      return Promise.resolve(json({}, 404));
+    }),
+  );
+  renderApp();
+  await waitFor(() => expect(window.location.pathname).toBe("/admin"));
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(([input]) => String(input).endsWith("/workspaces")),
+  ).toBe(false);
+});
+test("renders admin users and uses the shared logout endpoint", async () => {
+  window.history.replaceState({}, "", "/admin/users");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/session/bootstrap"))
+        return Promise.resolve(
+          json({
+            status: "authenticated",
+            identity: {
+              userId: "admin",
+              email: "admin@example.test",
+              locale: "en",
+              status: "active",
+              isPlatformAdmin: true,
+              idleExpiresAt: "2026-01-01",
+              absoluteExpiresAt: "2026-01-01",
+            },
+            csrfToken: "csrf",
+            csrfGeneration: 1,
+          }),
+        );
+      if (url.includes("/admin/users"))
+        return Promise.resolve(
+          json({
+            data: {
+              users: [
+                {
+                  id: "usr_1",
+                  email: "user@example.test",
+                  createdAt: "2026-01-01",
+                  emailVerified: true,
+                  activeWorkspaceMembershipCount: 1,
+                  hasActiveWorkspaceMembership: true,
+                },
+              ],
+              nextCursor: null,
+            },
+          }),
+        );
+      if (url.endsWith("/identity/logout"))
+        return Promise.resolve(new Response(null, { status: 204 }));
+      return Promise.resolve(json({}, 404));
+    }),
+  );
+  renderApp();
+  await screen.findByText("user@example.test");
+  expect(screen.getByText("Mi espacio")).toBeTruthy();
+  screen.getByText("Cerrar sesión").click();
+  await waitFor(() => expect(window.location.pathname).toBe("/sign-in"));
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(([input]) => String(input).endsWith("/identity/logout")),
+  ).toBe(true);
+});
+test("enters the admin's sole active workspace through the normal selection path", async () => {
+  window.history.replaceState({}, "", "/admin");
+  const workspace = {
+      id: "workspace",
+      name: "Default Workspace",
+      role: "owner",
+      capabilities: ["company:read", "company:manage"],
+    },
+    company = {
+      id: 1,
+      name: "Existing Company",
+      website: null,
+      lifecycle: "operational",
+      createdAt: "2026-01-01",
+    };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/session/bootstrap"))
+        return Promise.resolve(
+          json({
+            status: "authenticated",
+            identity: {
+              userId: "admin",
+              email: "admin@example.test",
+              locale: "en",
+              status: "active",
+              isPlatformAdmin: true,
+              idleExpiresAt: "2026-01-01",
+              absoluteExpiresAt: "2026-01-01",
+            },
+            csrfToken: "csrf",
+            csrfGeneration: 1,
+          }),
+        );
+      if (url.endsWith("/admin/overview"))
+        return Promise.resolve(
+          json({
+            data: {
+              totalUsers: 1,
+              totalWorkspaces: 1,
+              totalCompanies: 1,
+              totalAssistantProfiles: 0,
+              webChatConnections: 0,
+              whatsAppConnections: {
+                total: 0,
+                active: 0,
+                healthy: 0,
+                degraded: 0,
+              },
+            },
+          }),
+        );
+      if (url.endsWith("/workspaces") && !url.includes("selected"))
+        return Promise.resolve(json([workspace]));
+      if (url.endsWith("/workspaces/selected"))
+        return Promise.resolve(json(null));
+      if (url.endsWith("/workspaces/workspace/select")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.headers).toMatchObject({ "x-csrf-token": "csrf" });
+        return Promise.resolve(json(workspace));
+      }
+      if (url.endsWith("/workspaces/workspace/companies"))
+        return Promise.resolve(json({ data: [company] }));
+      if (url.endsWith("/workspaces/workspace/companies/1"))
+        return Promise.resolve(json({ data: company }));
+      if (url.endsWith("/assistant-profiles")) return Promise.resolve(json([]));
+      if (url.endsWith("/assistant/readiness"))
+        return Promise.resolve(
+          json({
+            assistantIdentifier: "default",
+            workspaceId: 1,
+            companyId: 1,
+            status: "blocked",
+            blockers: ["default_assistant_missing"],
+            knowledgeVersionId: null,
+            assistantProfileId: null,
+            evaluatedAt: "2026-01-01",
+            policyVersion: "1",
+            configurationDigest: "digest",
+          }),
+        );
+      if (url.endsWith("/activation"))
+        return Promise.resolve(
+          json({
+            stages: [
+              ["company", "complete_company", "/companies/1"],
+              ["knowledge", "publish_knowledge", "/companies/1/knowledge"],
+              ["assistant", "configure_assistant", "/companies/1/assistant"],
+              ["web_chat", "activate_web_chat", "/companies/1/channels/web-chat"],
+              ["verification", "start_verification", null],
+              ["pilot_ready", "resolve_pilot_readiness", null],
+              ["human_ops", "review_human_operations", "/conversations"],
+            ].map(([id, action, actionPath]) => ({ id, status: "complete", state: "complete", owner: null, reasonCode: null, action, actionPath })),
+            nextAction: "review_human_operations",
+            evaluatedAt: "2026-01-01T00:00:00.000Z",
+            policyVersion: "activation-projection-v1",
+          }),
+        );
+      if (url.endsWith("/pilot-readiness"))
+        return Promise.resolve(
+          json({
+            overall: "pilot_ready",
+            classification: "pilot_ready",
+            checks: [],
+            nextAction: null,
+            evaluatedAt: "2026-01-01T00:00:00.000Z",
+            policyVersion: "pilot-readiness-v1",
+          }),
+        );
+      if (
+        url.endsWith("/web-chat-connections") ||
+        url.endsWith("/whatsapp-connections")
+      )
+        return Promise.resolve(json([]));
+      return Promise.resolve(json({}, 404));
+    }),
+  );
+  renderApp();
+  await screen.findByRole("heading", { name: "Administración de Atlas" });
+  fireEvent.click(screen.getByRole("button", { name: "Mi espacio" }));
+  await screen.findByText("Tu piloto está listo");
+  expect(window.location.pathname).toBe("/companies/1");
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(
+        ([input, init]) =>
+          String(input).endsWith("/workspaces/workspace/select") &&
+          (init as RequestInit).method === "POST",
+      ),
+  ).toBe(true);
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "Workspace and account" })[0]!,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Volver a Administración" }),
+  );
+  await waitFor(() => expect(window.location.pathname).toBe("/admin"));
+});

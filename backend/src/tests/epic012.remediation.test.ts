@@ -33,9 +33,9 @@ test("never-settling and late-settling extraction time out, persist failure, and
 
 test("A to B to A historical digest is controlled and leaves B current",async()=>{
   const db=createDatabase(":memory:"),context=createWorkspaceContext(new WorkspaceRepository(db).resolveDefault()),companies=new CompanyRepository(db),company=companies.create(context,{name:"History",website:"https://history.test"}),repository=new CompanyKnowledgeRepository(db),service=new KnowledgeService(companies,repository,{acquire:async()=>{throw 0;}},{extract:async()=>{throw 0;}},{extract:async()=>extracted},new SystemClock());
-  const a=await service.create(context,actor,company.id,"manual_text",{name:"A",text:"a"}),publishedA=service.publish(context,actor,company.id,{sourceRevisionIds:[a.revision.id],expectedKnowledgeVersionId:null}).version!;
-  const b=await service.create(context,actor,company.id,"manual_text",{name:"B",text:"b"}),publishedB=service.publish(context,actor,company.id,{sourceRevisionIds:[b.revision.id],expectedKnowledgeVersionId:publishedA.id}).version!;
-  assert.throws(()=>service.publish(context,actor,company.id,{sourceRevisionIds:[a.revision.id],expectedKnowledgeVersionId:publishedB.id}),(error:unknown)=>error instanceof KnowledgeDomainError&&error.code==="knowledge_historical_version_conflict");
+  const a=await service.create(context,actor,company.id,"manual_text",{name:"A",text:"a"}),publishedA=(await service.publish(context,actor,company.id,{sourceRevisionIds:[a.revision.id],expectedKnowledgeVersionId:null})).version!;
+  const b=await service.create(context,actor,company.id,"manual_text",{name:"B",text:"b"}),publishedB=(await service.publish(context,actor,company.id,{sourceRevisionIds:[b.revision.id],expectedKnowledgeVersionId:publishedA.id})).version!;
+  await assert.rejects(service.publish(context,actor,company.id,{sourceRevisionIds:[a.revision.id],expectedKnowledgeVersionId:publishedB.id}),(error:unknown)=>error instanceof KnowledgeDomainError&&error.code==="knowledge_historical_version_conflict");
   assert.equal(repository.loadCurrentVersion(context,company.id)?.id,publishedB.id);db.close();
 });
 
@@ -49,7 +49,7 @@ test("publication transaction rolls back after every frozen write step",async()=
     const repository=new CompanyKnowledgeRepository(db,p=>{if(p===point)throw new Error(`fault:${point}`);});
     const service=new KnowledgeService(companies,repository,{acquire:async()=>{throw 0;}},{extract:async()=>{throw 0;}},{extract:async()=>extracted},new SystemClock());
     const created=await service.create(context,actor,company.id,"manual_text",{name:"Facts",text:"facts"});
-    assert.throws(()=>service.publish(context,actor,company.id,{sourceRevisionIds:[created.revision.id],expectedKnowledgeVersionId:null}),new RegExp(`fault:${point}`));
+    await assert.rejects(service.publish(context,actor,company.id,{sourceRevisionIds:[created.revision.id],expectedKnowledgeVersionId:null}),new RegExp(`fault:${point}`));
     assert.equal((db.prepare("SELECT COUNT(*) count FROM company_knowledge_versions").get()as{count:number}).count,0);
     assert.equal((db.prepare("SELECT COUNT(*) count FROM company_knowledge_version_sources").get()as{count:number}).count,0);
     assert.equal((db.prepare("SELECT COUNT(*) count FROM company_knowledge_publications").get()as{count:number}).count,0);
@@ -61,10 +61,10 @@ test("publication transaction rolls back after every frozen write step",async()=
 test("publication rollback preserves an existing current publication and ready Company",async()=>{
   for(const point of ["version_insert","manifest_insert","publication_write","company_status"] as const){
     const db=createDatabase(":memory:"),context=createWorkspaceContext(new WorkspaceRepository(db).resolveDefault()),companies=new CompanyRepository(db),company=companies.create(context,{name:`Existing ${point}`,website:`https://existing-${point}.test`}),baseRepository=new CompanyKnowledgeRepository(db),baseService=new KnowledgeService(companies,baseRepository,{acquire:async()=>{throw 0;}},{extract:async()=>{throw 0;}},{extract:async()=>extracted},new SystemClock());
-    const first=await baseService.create(context,actor,company.id,"manual_text",{name:"First",text:"first"}),published=baseService.publish(context,actor,company.id,{sourceRevisionIds:[first.revision.id],expectedKnowledgeVersionId:null}).version!;
+    const first=await baseService.create(context,actor,company.id,"manual_text",{name:"First",text:"first"}),published=(await baseService.publish(context,actor,company.id,{sourceRevisionIds:[first.revision.id],expectedKnowledgeVersionId:null})).version!;
     const second=await baseService.create(context,actor,company.id,"manual_text",{name:"Second",text:"second"}),repository=new CompanyKnowledgeRepository(db,p=>{if(p===point)throw new Error(`fault:${point}`);}),service=new KnowledgeService(companies,repository,{acquire:async()=>{throw 0;}},{extract:async()=>{throw 0;}},{extract:async()=>extracted},new SystemClock());
     const beforeVersions=(db.prepare("SELECT COUNT(*) count FROM company_knowledge_versions").get()as{count:number}).count,beforeManifest=(db.prepare("SELECT COUNT(*) count FROM company_knowledge_version_sources").get()as{count:number}).count;
-    assert.throws(()=>service.publish(context,actor,company.id,{sourceRevisionIds:[second.revision.id],expectedKnowledgeVersionId:published.id}),new RegExp(`fault:${point}`));
+    await assert.rejects(service.publish(context,actor,company.id,{sourceRevisionIds:[second.revision.id],expectedKnowledgeVersionId:published.id}),new RegExp(`fault:${point}`));
     assert.equal(repository.loadCurrentVersion(context,company.id)?.id,published.id);assert.equal(companies.findById(context,company.id)?.status,"ready");assert.equal((db.prepare("SELECT COUNT(*) count FROM company_knowledge_versions").get()as{count:number}).count,beforeVersions);assert.equal((db.prepare("SELECT COUNT(*) count FROM company_knowledge_version_sources").get()as{count:number}).count,beforeManifest);assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(),[]);db.close();
   }
 });

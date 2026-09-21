@@ -12,8 +12,8 @@ import { AbuseLimitExceededError, companyOnboardingActorLimit, companyOnboarding
 export function createOnboardingController(service: OnboardingService, context: WorkspaceContext, actor?: ActorContext, limits?: RateLimitService): RequestHandler {
   return async (req, res): Promise<void> => {
     try {
-      service.validateTarget(context, req.params.companyId, req.body?.url);
-      if (actor && limits) { const companyId = Number(req.params.companyId); limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actor.userId), "actor", companyOnboardingActorLimit); limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", companyOnboardingCompanyLimit); }
+      await service.validateTarget(context, req.params.companyId, req.body?.url);
+      if (actor && limits) { const companyId = Number(req.params.companyId); await limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actor.userId), "actor", companyOnboardingActorLimit); await limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", companyOnboardingCompanyLimit); }
       const result = await service.onboard(context, req.params.companyId, req.body?.url, actor);
       res.json(result);
     } catch (error: unknown) {

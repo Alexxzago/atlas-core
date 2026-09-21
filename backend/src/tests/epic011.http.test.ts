@@ -9,6 +9,7 @@ import { OperationalAssistantRuntime } from "../assistant/services/operationalAs
 import { AssistantProfileService } from "../assistant/services/assistantProfileService.js";
 import { AtlasAgent } from "../agents/atlas.js";
 import { createDatabase } from "../config/database.js";
+import { LocalSqlDatabase } from "../config/sqlDatabase.js";
 import { createAssistantPreviewController } from "../controllers/assistantPreviewController.js";
 import type { CredentialEnrollmentDeliveryPort, CredentialEnrollmentDeliveryRequest } from "../identity/application/ports.js";
 import { reconstructUser, type UserId } from "../identity/domain/user.js";
@@ -65,7 +66,7 @@ test("real Assistant Preview endpoint freezes authentication, authorization, HTT
   const membership: Membership = { id: "mem_preview_http" as MembershipId, workspaceId: workspace.id, userId, role: "owner", status: "active", version: 1, createdAt: now, activatedAt: now, suspendedAt: null, reactivatedAt: null, removedAt: null, roleChangedAt: null };
   memberships.create(membership);
 
-  const companies = new CompanyRepository(database), knowledge = new KnowledgeRepository(database), profiles = new AssistantProfileRepository(database);
+  const companies = new CompanyRepository(database), knowledge = new KnowledgeRepository(new LocalSqlDatabase(database)), profiles = new AssistantProfileRepository(database);
   const context = { workspaceId: workspace.id, workspaceKey: workspace.key }, foreignContext = { workspaceId: foreignWorkspace.id, workspaceKey: foreignWorkspace.key };
   const readyCompany = companies.create(context, { name: "Ready", website: "https://ready.test", status: "ready" });
   const processingCompany = companies.create(context, { name: "Processing", website: "https://processing.test", status: "processing" });
@@ -77,17 +78,17 @@ test("real Assistant Preview endpoint freezes authentication, authorization, HTT
 
   const profileService = new AssistantProfileService(profiles, new SystemClock());
   let profileSequence = 0;
-  const createProfile = (companyId: number, makeReady: boolean) => {
-    let profile = profileService.create(companyId === foreignCompany.id ? foreignContext : context, companyId, { name: `Profile ${companyId}-${++profileSequence}`, assistantLanguage: "en", businessRole: "Sales", objective: "Help customers", welcomeMessage: "Welcome", fallbackMessage: "Safe fallback" });
-    if (makeReady) profile = profileService.transition(companyId === foreignCompany.id ? foreignContext : context, companyId, profile.id, "ready");
+  const createProfile = async (companyId: number, makeReady: boolean) => {
+    let profile = await profileService.create(companyId === foreignCompany.id ? foreignContext : context, companyId, { name: `Profile ${companyId}-${++profileSequence}`, assistantLanguage: "en", businessRole: "Sales", objective: "Help customers", welcomeMessage: "Welcome", fallbackMessage: "Safe fallback" });
+    if (makeReady) profile = await profileService.transition(companyId === foreignCompany.id ? foreignContext : context, companyId, profile.id, "ready");
     return profile;
   };
-  const readyProfile = createProfile(readyCompany.id, true);
-  const draftProfile = createProfile(readyCompany.id, false);
-  const processingProfile = createProfile(processingCompany.id, true);
-  const noKnowledgeProfile = createProfile(noKnowledgeCompany.id, true);
-  const otherProfile = createProfile(otherCompany.id, true);
-  const foreignProfile = createProfile(foreignCompany.id, true);
+  const readyProfile = await createProfile(readyCompany.id, true);
+  const draftProfile = await createProfile(readyCompany.id, false);
+  const processingProfile = await createProfile(processingCompany.id, true);
+  const noKnowledgeProfile = await createProfile(noKnowledgeCompany.id, true);
+  const otherProfile = await createProfile(otherCompany.id, true);
+  const foreignProfile = await createProfile(foreignCompany.id, true);
 
   const generator = new ControlledGenerator();
   const previewService = new AssistantPreviewService(companies, knowledge, profiles, new OperationalAssistantRuntime(new AtlasAgent(generator), new AssistantExecutionRecordRepository(database), new SystemClock()), "test");

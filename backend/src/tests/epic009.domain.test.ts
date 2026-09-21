@@ -10,18 +10,18 @@ import { AssistantProfileConflictError, AssistantProfileService, AssistantProfil
 class FixedClock implements Clock { public constructor(private value = "2026-07-16T12:00:00.000Z") {} public now(): string { return this.value; } public set(value: string): void { this.value = value; } }
 class MemoryProfiles implements AssistantProfileRepositoryPort {
   public values: AssistantProfile[] = [];
-  public listActive(_context: WorkspaceContext, companyId: number) { return { status: "found" as const, profiles: this.values.filter((p) => p.companyId === companyId && p.status !== "archived") }; }
-  public findById(_context: WorkspaceContext, companyId: number, id: AssistantProfileId): AssistantProfile | null { return this.values.find((p) => p.companyId === companyId && p.id === id) ?? null; }
-  public create(_context: WorkspaceContext, _companyId: number, profile: AssistantProfile): CreateAssistantProfileResult { this.values.push(profile); return { status: "created", profile }; }
-  public update(_context: WorkspaceContext, _companyId: number, profile: AssistantProfile): UpdateAssistantProfileResult { const index = this.values.findIndex((p) => p.id === profile.id); if (index < 0) return { status: "not_found" }; this.values[index] = profile; return { status: "updated", profile }; }
+  public async listActive(_context: WorkspaceContext, companyId: number) { return { status: "found" as const, profiles: this.values.filter((p) => p.companyId === companyId && p.status !== "archived") }; }
+  public async findById(_context: WorkspaceContext, companyId: number, id: AssistantProfileId): Promise<AssistantProfile | null> { return this.values.find((p) => p.companyId === companyId && p.id === id) ?? null; }
+  public async create(_context: WorkspaceContext, _companyId: number, profile: AssistantProfile): Promise<CreateAssistantProfileResult> { this.values.push(profile); return { status: "created", profile }; }
+  public async update(_context: WorkspaceContext, _companyId: number, profile: AssistantProfile): Promise<UpdateAssistantProfileResult> { const index = this.values.findIndex((p) => p.id === profile.id); if (index < 0) return { status: "not_found" }; this.values[index] = profile; return { status: "updated", profile }; }
 }
 const context = Object.freeze({ workspaceId: 1, workspaceKey: "test" });
 function setup(): { service: AssistantProfileService; repository: MemoryProfiles; clock: FixedClock } { const repository = new MemoryProfiles(), clock = new FixedClock(); return { repository, clock, service: new AssistantProfileService(repository, clock) }; }
 function readyFields() { return { businessRole: "Sales assistant", objective: "Qualify customer requests", welcomeMessage: "Welcome", audience: null }; }
 
-test("Assistant Profile creation uses asp IDs, deterministic normalization and frozen defaults", () => {
+test("Assistant Profile creation uses asp IDs, deterministic normalization and frozen defaults", async () => {
   const { service } = setup();
-  const profile = service.create(context, 1, { name: "  SALES Ñ  ", assistantLanguage: "en" });
+  const profile = await service.create(context, 1, { name: "  SALES Ñ  ", assistantLanguage: "en" });
   assert.match(profile.id, /^asp_[0-9a-f]{32}$/);
   assert.equal(profile.name, "SALES Ñ");
   assert.equal(profile.normalizedName, "sales ñ");
@@ -33,59 +33,59 @@ test("Assistant Profile creation uses asp IDs, deterministic normalization and f
   assert.equal(profile.fallbackMessage, "I do not have enough information to answer safely.");
 });
 
-test("field shape, nullability, unknown fields and Unicode code-point limits are enforced", () => {
+test("field shape, nullability, unknown fields and Unicode code-point limits are enforced", async () => {
   const { service } = setup();
-  assert.throws(() => service.create(context, 1, { id: "asp_00000000000000000000000000000000", name: "A", assistantLanguage: "en" }), AssistantProfileValidationError);
-  assert.throws(() => service.create(context, 1, { name: "😀".repeat(81), assistantLanguage: "en" }), AssistantProfileValidationError);
-  const profile = service.create(context, 1, { name: "😀".repeat(80), assistantLanguage: "es", description: null, audience: null });
+  await assert.rejects(() => service.create(context, 1, { id: "asp_00000000000000000000000000000000", name: "A", assistantLanguage: "en" }), AssistantProfileValidationError);
+  await assert.rejects(() => service.create(context, 1, { name: "😀".repeat(81), assistantLanguage: "en" }), AssistantProfileValidationError);
+  const profile = await service.create(context, 1, { name: "😀".repeat(80), assistantLanguage: "es", description: null, audience: null });
   assert.equal(Array.from(profile.name).length, 80);
-  assert.throws(() => service.update(context, 1, profile.id, { fallbackMessage: null }), AssistantProfileValidationError);
-  assert.throws(() => service.update(context, 1, profile.id, { status: "ready" }), AssistantProfileValidationError);
+  await assert.rejects(() => service.update(context, 1, profile.id, { fallbackMessage: null }), AssistantProfileValidationError);
+  await assert.rejects(() => service.update(context, 1, profile.id, { status: "ready" }), AssistantProfileValidationError);
 });
 
-test("ReadyPolicy and the complete lifecycle including archived restore are enforced", () => {
+test("ReadyPolicy and the complete lifecycle including archived restore are enforced", async () => {
   const { service, clock } = setup();
-  let profile = service.create(context, 1, { name: "Sales", assistantLanguage: "en" });
-  assert.throws(() => service.transition(context, 1, profile.id, "ready"), AssistantProfileConflictError);
-  profile = service.update(context, 1, profile.id, readyFields());
-  profile = service.transition(context, 1, profile.id, "ready");
+  let profile = await service.create(context, 1, { name: "Sales", assistantLanguage: "en" });
+  await assert.rejects(() => service.transition(context, 1, profile.id, "ready"), AssistantProfileConflictError);
+  profile = await service.update(context, 1, profile.id, readyFields());
+  profile = await service.transition(context, 1, profile.id, "ready");
   assert.equal(profile.status, "ready");
-  assert.throws(() => service.update(context, 1, profile.id, { objective: null }), AssistantProfileConflictError);
-  profile = service.update(context, 1, profile.id, { objective: "Handle qualified requests" });
-  profile = service.transition(context, 1, profile.id, "disabled");
-  profile = service.transition(context, 1, profile.id, "draft");
-  assert.throws(() => service.transition(context, 1, profile.id, "disabled"), AssistantProfileConflictError);
+  await assert.rejects(() => service.update(context, 1, profile.id, { objective: null }), AssistantProfileConflictError);
+  profile = await service.update(context, 1, profile.id, { objective: "Handle qualified requests" });
+  profile = await service.transition(context, 1, profile.id, "disabled");
+  profile = await service.transition(context, 1, profile.id, "draft");
+  await assert.rejects(() => service.transition(context, 1, profile.id, "disabled"), AssistantProfileConflictError);
   clock.set("2026-07-16T13:00:00.000Z");
-  profile = service.transition(context, 1, profile.id, "archived");
+  profile = await service.transition(context, 1, profile.id, "archived");
   assert.equal(profile.archivedAt, "2026-07-16T13:00:00.000Z");
-  assert.throws(() => service.update(context, 1, profile.id, { name: "Other" }), AssistantProfileConflictError);
-  assert.throws(() => service.transition(context, 1, profile.id, "archived"), AssistantProfileConflictError);
-  profile = service.transition(context, 1, profile.id, "draft");
+  await assert.rejects(() => service.update(context, 1, profile.id, { name: "Other" }), AssistantProfileConflictError);
+  await assert.rejects(() => service.transition(context, 1, profile.id, "archived"), AssistantProfileConflictError);
+  profile = await service.transition(context, 1, profile.id, "draft");
   assert.equal(profile.archivedAt, null);
   assert.equal(profile.status, "draft");
 });
 
-test("updatedAt advances for later, equal and earlier Clock values while createdAt remains immutable", () => {
+test("updatedAt advances for later, equal and earlier Clock values while createdAt remains immutable", async () => {
   const { service, clock } = setup();
-  let profile = service.create(context, 1, { name: "Timeline", assistantLanguage: "en" });
+  let profile = await service.create(context, 1, { name: "Timeline", assistantLanguage: "en" });
   const createdAt = profile.createdAt;
   clock.set("2026-07-16T12:00:01.000Z");
-  profile = service.update(context, 1, profile.id, { description: "Later" });
+  profile = await service.update(context, 1, profile.id, { description: "Later" });
   assert.equal(profile.updatedAt, "2026-07-16T12:00:01.000Z");
   clock.set(profile.updatedAt);
-  profile = service.update(context, 1, profile.id, { description: "Equal" });
+  profile = await service.update(context, 1, profile.id, { description: "Equal" });
   assert.equal(profile.updatedAt, "2026-07-16T12:00:01.001Z");
   clock.set("2026-07-16T11:00:00.000Z");
   const beforeEarlier = profile.updatedAt;
-  profile = service.update(context, 1, profile.id, { description: "Earlier" });
+  profile = await service.update(context, 1, profile.id, { description: "Earlier" });
   assert.ok(profile.updatedAt > beforeEarlier);
   const firstFixed = profile.updatedAt;
-  profile = service.update(context, 1, profile.id, { description: "Fixed again" });
+  profile = await service.update(context, 1, profile.id, { description: "Fixed again" });
   assert.ok(profile.updatedAt > firstFixed);
-  profile = service.transition(context, 1, profile.id, "archived");
+  profile = await service.transition(context, 1, profile.id, "archived");
   assert.equal(profile.archivedAt, profile.updatedAt);
   const archivedUpdatedAt = profile.updatedAt;
-  profile = service.transition(context, 1, profile.id, "draft");
+  profile = await service.transition(context, 1, profile.id, "draft");
   assert.ok(profile.updatedAt > archivedUpdatedAt);
   assert.equal(profile.archivedAt, null);
   assert.equal(profile.createdAt, createdAt);

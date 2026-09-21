@@ -1,0 +1,55 @@
+import type { SqlDatabase } from "../../config/sqlDatabase.js";
+import type { NormalizedEmail } from "../../identity/domain/email.js";
+import type { UserId } from "../../identity/domain/user.js";
+import type { Invitation } from "../domain/invitation.js";
+import type { Membership, MembershipId } from "../domain/membership.js";
+import type { Workspace } from "../../types/workspace.js";
+import type { WorkspacePublicId } from "../domain/membership.js";
+
+type Row = Record<string, unknown>;
+
+function workspace(row: Row): Workspace { return Object.freeze({ id:Number(row.id),publicId:String(row.public_id),key:String(row.key),name:String(row.name),timezone:row.timezone as string|null,defaultLocale:row.default_locale as Workspace["defaultLocale"],createdAt:String(row.created_at) }); }
+
+export class AsyncWorkspaceRepository {
+  public constructor(private readonly database: SqlDatabase) {}
+  public async findById(id: number): Promise<Workspace | null> { return this.one("id=?", [id]); }
+  public async findByPublicId(id: WorkspacePublicId): Promise<Workspace | null> { return this.one("public_id=?", [id]); }
+  public async findByKey(key: string): Promise<Workspace | null> { return this.one("key=?", [key]); }
+  public async resolveDefault(): Promise<Workspace> { const value=await this.findByKey("default");if(!value)throw new Error("Default workspace is not available.");return value; }
+  public async create(input: { publicId: WorkspacePublicId; key: string; name: string; timezone: string | null; defaultLocale: "en" | "es" | null }): Promise<Workspace> { const result=await this.database.execute("INSERT INTO workspaces(public_id,key,name,timezone,default_locale) VALUES(?,?,?,?,?)",[input.publicId,input.key,input.name,input.timezone,input.defaultLocale]); const created=await this.findById(Number(result.lastInsertRowid)); if(!created)throw new Error("Workspace could not be created."); return created; }
+  private async one(where: string, args: readonly (string | number)[]): Promise<Workspace | null> { const rows=await this.database.query<Row>(`SELECT id,public_id,key,name,timezone,default_locale,created_at FROM workspaces WHERE ${where}`,args); return rows[0] ? workspace(rows[0]) : null; }
+}
+
+function membership(row: Row): Membership { return { id: String(row.id) as MembershipId, workspaceId: Number(row.workspace_id), userId: String(row.user_id) as UserId, role: row.role as Membership["role"], status: row.status as Membership["status"], version: Number(row.version), createdAt: String(row.created_at), activatedAt: String(row.activated_at), suspendedAt: row.suspended_at as string | null, reactivatedAt: row.reactivated_at as string | null, removedAt: row.removed_at as string | null, roleChangedAt: row.role_changed_at as string | null }; }
+function invitation(row: Row): Invitation { return { id: String(row.id), workspaceId: Number(row.workspace_id), issuerMembershipId: String(row.issuer_membership_id) as Invitation["issuerMembershipId"], issuerUserId: String(row.issuer_user_id) as UserId, recipient: String(row.recipient_normalized_email) as NormalizedEmail, proposedRole: row.proposed_role as Invitation["proposedRole"], purpose: "workspace_invitation", digestVersion: "sha256-v1", proofDigest: String(row.proof_digest), status: row.status as Invitation["status"], deliveryStatus: row.delivery_status as Invitation["deliveryStatus"], version: Number(row.version), issuedAt: String(row.issued_at), expiresAt: String(row.expires_at), acceptedAt: row.accepted_at as string | null, acceptedByUserId: row.accepted_by_user_id as UserId | null, acceptedIp: row.accepted_ip as string | null, acceptedUserAgent: row.accepted_user_agent as string | null, rejectedAt: row.rejected_at as string | null, revokedAt: row.revoked_at as string | null, supersededAt: row.superseded_at as string | null, updatedAt: String(row.updated_at) }; }
+
+/** Async persistence slice. It is intentionally separate from the synchronous workspace service ports. */
+export class AsyncMembershipRepository {
+  public constructor(private readonly database: SqlDatabase) {}
+  public async findById(id: MembershipId): Promise<Membership | null> { const rows = await this.database.query<Row>("SELECT * FROM memberships WHERE id=?", [id]); return rows[0] ? membership(rows[0]) : null; }
+  public async findCurrent(userId: UserId, workspaceId: number): Promise<Membership | null> { const rows = await this.database.query<Row>("SELECT * FROM memberships WHERE user_id=? AND workspace_id=? AND status!='removed'", [userId, workspaceId]); return rows[0] ? membership(rows[0]) : null; }
+  public async listForUser(userId: UserId): Promise<readonly Membership[]> { return (await this.database.query<Row>("SELECT * FROM memberships WHERE user_id=? AND status='active' ORDER BY created_at", [userId])).map(membership); }
+  public async listForWorkspace(workspaceId: number): Promise<readonly Membership[]> { return (await this.database.query<Row>("SELECT * FROM memberships WHERE workspace_id=? ORDER BY created_at", [workspaceId])).map(membership); }
+  public async countActiveOwners(workspaceId: number): Promise<number> { return Number((await this.database.query<Row>("SELECT COUNT(*) AS count FROM memberships WHERE workspace_id=? AND role='owner' AND status='active'", [workspaceId]))[0]?.count ?? 0); }
+  public async create(value: Membership): Promise<Membership> { await this.database.execute("INSERT INTO memberships(id,workspace_id,user_id,role,status,version,created_at,activated_at,suspended_at,reactivated_at,removed_at,role_changed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", [value.id,value.workspaceId,value.userId,value.role,value.status,value.version,value.createdAt,value.activatedAt,value.suspendedAt,value.reactivatedAt,value.removedAt,value.roleChangedAt]); return value; }
+  public async update(value: Membership, expectedVersion: number): Promise<boolean> { return Number((await this.database.execute("UPDATE memberships SET role=?,status=?,version=version+1,suspended_at=?,reactivated_at=?,removed_at=?,role_changed_at=? WHERE id=? AND version=?", [value.role,value.status,value.suspendedAt,value.reactivatedAt,value.removedAt,value.roleChangedAt,value.id,expectedVersion])).rowsAffected) === 1; }
+}
+
+export class AsyncInvitationRepository {
+  public constructor(private readonly database: SqlDatabase) {}
+  public async findById(id: string): Promise<Invitation | null> { return this.one("id=?", [id]); }
+  public async findByDigest(digest: string): Promise<Invitation | null> { return this.one("purpose='workspace_invitation' AND digest_version='sha256-v1' AND proof_digest=?", [digest]); }
+  public async findCurrent(workspaceId: number, email: NormalizedEmail): Promise<Invitation | null> { return this.one("workspace_id=? AND recipient_normalized_email=? AND status='pending'", [workspaceId, email]); }
+  public async listForWorkspace(workspaceId: number): Promise<readonly Invitation[]> { return (await this.database.query<Row>("SELECT * FROM workspace_invitations WHERE workspace_id=? ORDER BY issued_at DESC", [workspaceId])).map(invitation); }
+  public async create(value: Invitation): Promise<Invitation> { await this.database.execute("INSERT INTO workspace_invitations(id,workspace_id,issuer_membership_id,issuer_user_id,recipient_normalized_email,proposed_role,purpose,digest_version,proof_digest,status,delivery_status,version,issued_at,expires_at,accepted_at,accepted_by_user_id,accepted_ip,accepted_user_agent,rejected_at,revoked_at,superseded_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [value.id,value.workspaceId,value.issuerMembershipId,value.issuerUserId,value.recipient,value.proposedRole,value.purpose,value.digestVersion,value.proofDigest,value.status,value.deliveryStatus,value.version,value.issuedAt,value.expiresAt,value.acceptedAt,value.acceptedByUserId,value.acceptedIp,value.acceptedUserAgent,value.rejectedAt,value.revokedAt,value.supersededAt,value.updatedAt]); return value; }
+  public async update(value: Invitation, expectedVersion: number): Promise<boolean> { return Number((await this.database.execute("UPDATE workspace_invitations SET status=?,delivery_status=?,version=version+1,accepted_at=?,accepted_by_user_id=?,accepted_ip=?,accepted_user_agent=?,rejected_at=?,revoked_at=?,superseded_at=?,updated_at=? WHERE id=? AND version=?", [value.status,value.deliveryStatus,value.acceptedAt,value.acceptedByUserId,value.acceptedIp,value.acceptedUserAgent,value.rejectedAt,value.revokedAt,value.supersededAt,value.updatedAt,value.id,expectedVersion])).rowsAffected) === 1; }
+  public async setDeliveryStatus(id: string, status: Invitation["deliveryStatus"], at: string): Promise<boolean> { return Number((await this.database.execute("UPDATE workspace_invitations SET delivery_status=?,updated_at=?,version=version+1 WHERE id=? AND status='pending'", [status,at,id])).rowsAffected) === 1; }
+  private async one(where: string, args: readonly (string | number)[]): Promise<Invitation | null> { const rows = await this.database.query<Row>(`SELECT * FROM workspace_invitations WHERE ${where}`, args); return rows[0] ? invitation(rows[0]) : null; }
+}
+
+export class AsyncWorkspaceSelectionRepository {
+  public constructor(private readonly database: SqlDatabase) {}
+  public async find(userId: UserId): Promise<number | null> { const rows = await this.database.query<Row>("SELECT workspace_id FROM workspace_selections WHERE user_id=?", [userId]); return rows[0] ? Number(rows[0].workspace_id) : null; }
+  public async save(userId: UserId, workspaceId: number, at: string): Promise<void> { await this.database.execute("INSERT INTO workspace_selections(user_id,workspace_id,selected_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET workspace_id=excluded.workspace_id,selected_at=excluded.selected_at", [userId,workspaceId,at]); }
+  public async clear(userId: UserId, workspaceId?: number): Promise<void> { await this.database.execute(workspaceId === undefined ? "DELETE FROM workspace_selections WHERE user_id=?" : "DELETE FROM workspace_selections WHERE user_id=? AND workspace_id=?", workspaceId === undefined ? [userId] : [userId,workspaceId]); }
+}

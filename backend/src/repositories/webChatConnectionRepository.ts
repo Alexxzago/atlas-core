@@ -1,13 +1,13 @@
 import { assistantProfileId } from "../assistant/domain/assistantProfile.js";
 import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
-import type { WebChatConnectionRepositoryPort } from "../webChat/application/ports.js";
+import type { SynchronousWebChatConnectionRepositoryPort } from "../webChat/application/ports.js";
 import { reconstructWebChatConnection, type WebChatConnection, type WebChatConnectionId, type WebChatConnectionPublicId, type WebChatConnectionStatus } from "../webChat/domain/webChatConnection.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 
 interface Row { id:string; public_id:string; workspace_id:number; company_id:number; assistant_profile_id:string; status:WebChatConnectionStatus; created_at:string; updated_at:string; }
 function connection(row: Row): WebChatConnection { return reconstructWebChatConnection({ id: row.id as WebChatConnectionId, publicId: row.public_id as WebChatConnectionPublicId, workspaceId: row.workspace_id, companyId: row.company_id, assistantProfileId: assistantProfileId(row.assistant_profile_id), status: row.status, createdAt: row.created_at, updatedAt: row.updated_at }); }
 
-export class WebChatConnectionRepository implements WebChatConnectionRepositoryPort {
+export class WebChatConnectionRepository implements SynchronousWebChatConnectionRepositoryPort {
   public constructor(private readonly db: SynchronousDatabase) {}
 
   public create(context: WorkspaceContext, value: WebChatConnection): WebChatConnection | null {

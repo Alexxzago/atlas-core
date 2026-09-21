@@ -37,75 +37,75 @@ export interface CompanyCoreControllers {
 
 export function createCompanyCoreControllers(service: CompanyApplicationService): CompanyCoreControllers {
   return {
-    list: (context) => (req, res) => {
+    list: (context) => async (req, res) => {
       try {
         parseListCompaniesQuery(req.query);
-        const result = service.listCompanies(context);
+        const result = await service.listCompanies(context);
         if (result.status === "success") res.status(200).json({ data: result.companies.map(toCompanyResponse) }); else respondApplication(res, result);
       } catch (error: unknown) { respondError(res, error); }
     },
-    create: (context, actor) => (req, res) => {
+    create: (context, actor) => async (req, res) => {
       try {
         const request = parseCreateCompanyRequest(req.body);
-        const result = service.createCompany(context, { ...request, id: randomInt(1, 2_147_483_647), actorId: actor.userId });
+        const result = await service.createCompany(context, { ...request, id: randomInt(1, 2_147_483_647), actorId: actor.userId });
         if (result.status === "success") res.status(201).json({ data: toCompanyResponse(result.company) }); else respondApplication(res, result);
       } catch (error: unknown) { respondError(res, error); }
     },
-    createOnboarding: (context, actor) => (req, res) => {
+    createOnboarding: (context, actor) => async (req, res) => {
       try {
         const request = parseCreateOnboardingCompanyRequest(req.body);
-        const result = service.createOnboardingCompany(context, { ...request, actorId: actor.userId });
+        const result = await service.createOnboardingCompany(context, { ...request, actorId: actor.userId });
         if (result.status === "success") res.status(201).json({ data: toCompanyResponse(result.company) }); else respondApplication(res, result);
       } catch (error: unknown) { respondError(res, error); }
     },
-    get: (context) => (req, res) => {
+    get: (context) => async (req, res) => {
       try {
-        const result = service.getCompanyById(context, { companyId: parseCompanyId(req.params.companyId) });
+        const result = await service.getCompanyById(context, { companyId: parseCompanyId(req.params.companyId) });
         if (result.status === "found") res.status(200).json({ data: toCompanyResponse(result.company) }); else respondApplication(res, result);
       } catch (error: unknown) { respondError(res, error); }
     },
-    getBySlug: (context) => (req, res) => {
+    getBySlug: (context) => async (req, res) => {
       try {
-        const result = service.getCompanyBySlug(context, { slug: parseSlug(req.params.slug) });
+        const result = await service.getCompanyBySlug(context, { slug: parseSlug(req.params.slug) });
         if (result.status === "found") res.status(200).json({ data: toCompanyResponse(result.company) }); else respondApplication(res, result);
       } catch (error: unknown) { respondError(res, error); }
     },
-    updateIdentity: (context, actor) => mutation(context, actor, (req) => { const request = parseUpdateIdentityRequest(req.body); return service.updateCompanyIdentity(context, { ...request, companyId: parseCompanyId(req.params.companyId), actorId: actor.userId }); }),
-    updateBranding: (context, actor) => mutation(context, actor, (req) => { const request = parseUpdateBrandingRequest(req.body); return service.updateCompanyBranding(context, { ...request, companyId: parseCompanyId(req.params.companyId), actorId: actor.userId }); }),
-    updateConfiguration: (context, actor) => mutation(context, actor, (req) => { const request = parseUpdateConfigurationRequest(req.body); return service.updateCompanyConfiguration(context, { ...request, companyId: parseCompanyId(req.params.companyId), actorId: actor.userId }); }),
-    evaluateReadiness: (context) => (req, res) => {
+    updateIdentity: (context, actor) => mutation(context, actor, async (req) => { const request = parseUpdateIdentityRequest(req.body); return await service.updateCompanyIdentity(context, { ...request, companyId: parseCompanyId(req.params.companyId), actorId: actor.userId }); }),
+    updateBranding: (context, actor) => mutation(context, actor, async (req) => { const request = parseUpdateBrandingRequest(req.body); return await service.updateCompanyBranding(context, { ...request, companyId: parseCompanyId(req.params.companyId), actorId: actor.userId }); }),
+    updateConfiguration: (context, actor) => mutation(context, actor, async (req) => { const request = parseUpdateConfigurationRequest(req.body); return await service.updateCompanyConfiguration(context, { ...request, companyId: parseCompanyId(req.params.companyId), actorId: actor.userId }); }),
+    evaluateReadiness: (context) => async (req, res) => {
       try {
-        const result = service.evaluateCompanyReadiness(context, { companyId: parseCompanyId(req.params.companyId) });
+        const result = await service.evaluateCompanyReadiness(context, { companyId: parseCompanyId(req.params.companyId) });
         if (result.status === "success") res.status(200).json({ data: readinessResponse(result.assessment) }); else respondApplication(res, result);
       } catch (error: unknown) { respondError(res, error); }
     },
-    applyReadiness: (context, actor) => (req, res) => {
+    applyReadiness: (context, actor) => async (req, res) => {
       try {
         const request = parseVersionedRequest(req.body), companyId = parseCompanyId(req.params.companyId);
-        const assessment = service.evaluateCompanyReadiness(context, { companyId });
+        const assessment = await service.evaluateCompanyReadiness(context, { companyId });
         if (assessment.status !== "success") { respondApplication(res, assessment); return; }
         if (assessment.assessment.action === "none") {
-          const company = service.getCompanyById(context, { companyId });
+          const company = await service.getCompanyById(context, { companyId });
           if (company.status === "found") { res.status(200).json({ data: { company: toCompanyResponse(company.company), assessment: readinessResponse(assessment.assessment), persisted: false } }); return; }
           respondApplication(res, company);
           return;
         }
-        const result = service.applyReadinessAssessment(context, { ...request, companyId, assessment: assessment.assessment, actorId: actor.userId });
+        const result = await service.applyReadinessAssessment(context, { ...request, companyId, assessment: assessment.assessment, actorId: actor.userId });
         if (result.status === "success") res.status(200).json({ data: { company: toCompanyResponse(result.company), assessment: readinessResponse(result.assessment), persisted: result.persisted } }); else respondApplication(res, result);
       } catch (error: unknown) { respondError(res, error); }
     },
-    suspend: (context, actor) => lifecycle(context, actor, (companyId, expectedVersion) => service.suspendCompany(context, { companyId, expectedVersion, actorId: actor.userId })),
-    restore: (context, actor) => lifecycle(context, actor, (companyId, expectedVersion) => service.restoreCompany(context, { companyId, expectedVersion, actorId: actor.userId })),
-    archive: (context, actor) => lifecycle(context, actor, (companyId, expectedVersion) => service.archiveCompany(context, { companyId, expectedVersion, actorId: actor.userId })),
+    suspend: (context, actor) => lifecycle(context, actor, async (companyId, expectedVersion) => await service.suspendCompany(context, { companyId, expectedVersion, actorId: actor.userId })),
+    restore: (context, actor) => lifecycle(context, actor, async (companyId, expectedVersion) => await service.restoreCompany(context, { companyId, expectedVersion, actorId: actor.userId })),
+    archive: (context, actor) => lifecycle(context, actor, async (companyId, expectedVersion) => await service.archiveCompany(context, { companyId, expectedVersion, actorId: actor.userId })),
   };
 }
 
 function mutation(context: WorkspaceContext, actor: ActorContext, operation: (req: Parameters<RequestHandler>[0]) => ReturnType<CompanyApplicationService["updateCompanyIdentity"]>): RequestHandler {
-  return (req, res): void => { try { const result = operation(req); if (result.status === "success") res.status(200).json({ data: toCompanyResponse(result.company) }); else respondApplication(res, result); } catch (error: unknown) { respondError(res, error); } };
+  return async (req, res): Promise<void> => { try { const result = await operation(req); if (result.status === "success") res.status(200).json({ data: toCompanyResponse(result.company) }); else respondApplication(res, result); } catch (error: unknown) { respondError(res, error); } };
 }
 
 function lifecycle(context: WorkspaceContext, actor: ActorContext, operation: (companyId: number, expectedVersion: number) => ReturnType<CompanyApplicationService["suspendCompany"]>): RequestHandler {
-  return (req, res): void => { try { const request = parseVersionedRequest(req.body), result = operation(parseCompanyId(req.params.companyId), request.expectedVersion); if (result.status === "success") res.status(200).json({ data: toCompanyResponse(result.company) }); else respondApplication(res, result); } catch (error: unknown) { respondError(res, error); } };
+  return async (req, res): Promise<void> => { try { const request = parseVersionedRequest(req.body), result = await operation(parseCompanyId(req.params.companyId), request.expectedVersion); if (result.status === "success") res.status(200).json({ data: toCompanyResponse(result.company) }); else respondApplication(res, result); } catch (error: unknown) { respondError(res, error); } };
 }
 
 function toCompanyResponse(company: Company): CompanyResponseDto {

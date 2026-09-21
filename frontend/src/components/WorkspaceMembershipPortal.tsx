@@ -5,50 +5,758 @@ import { shouldApplyWorkspaceRefresh } from "../state/authenticatedPortalState";
 import type { WorkspaceSummary } from "../types/api";
 import { PageHeader } from "./AppShell";
 import { ContextBackLink } from "./ContextBackLink";
+import {
+  Alert,
+  Button,
+  ConfirmDialog,
+  Input,
+  Select,
+  StatusBadge,
+} from "../design-system/primitives";
 
-interface Member { id:string; userId:string; role:string; status:string }
-interface Invitation { id:string; recipient:string; role:string; status:string; expiresAt:string }
-interface Props { csrf:string; currentUserId?:string|undefined; currentUserEmail?:string|undefined; workspaces:WorkspaceSummary[]; selectedWorkspace:WorkspaceSummary|null; pendingWorkspaceId:string|null; loading:boolean; error:boolean; onSelectWorkspace:(id:string)=>void; onWorkspacesChanged:()=>void; onActiveWorkspaceLeft:()=>void; onNavigateDashboard?:()=>void }
-type Flow={kind:"overview"}|{kind:"create"}|{kind:"invite"}|{kind:"role";member:Member}|{kind:"transfer"};
-type ConfirmAction={kind:"leave"}|{kind:"remove";member:Member}|{kind:"transfer";member:Member};
+interface Member {
+  id: string;
+  userId: string;
+  role: string;
+  status: string;
+}
+interface Invitation {
+  id: string;
+  recipient: string;
+  role: string;
+  status: string;
+  expiresAt: string;
+}
+interface Props {
+  csrf: string;
+  currentUserId?: string | undefined;
+  currentUserEmail?: string | undefined;
+  workspaces: WorkspaceSummary[];
+  selectedWorkspace: WorkspaceSummary | null;
+  pendingWorkspaceId: string | null;
+  loading: boolean;
+  error: boolean;
+  onSelectWorkspace: (id: string) => void;
+  onWorkspacesChanged: () => void;
+  onActiveWorkspaceLeft: () => void;
+  onNavigateDashboard?: () => void;
+}
+type Flow =
+  | { kind: "overview" }
+  | { kind: "create" }
+  | { kind: "invite" }
+  | { kind: "role"; member: Member }
+  | { kind: "transfer" };
+type ConfirmAction =
+  | { kind: "leave" }
+  | { kind: "remove"; member: Member }
+  | { kind: "transfer"; member: Member };
 
-export function WorkspaceMembershipPortal(props:Props):React.JSX.Element {
-  const {t}=useI18n(),selected=props.selectedWorkspace;
-  const [members,setMembers]=useState<Member[]>([]),[membersLoaded,setMembersLoaded]=useState(false),[invitations,setInvitations]=useState<Invitation[]>([]),[error,setError]=useState(""),[notice,setNotice]=useState(""),[flow,setFlow]=useState<Flow>({kind:"overview"}),[confirm,setConfirm]=useState<ConfirmAction|null>(null),[workspaceName,setWorkspaceName]=useState(""),[inviteEmail,setInviteEmail]=useState(""),[inviteRole,setInviteRole]=useState("viewer"),[role,setRole]=useState("viewer"),[transferId,setTransferId]=useState(""),[working,setWorking]=useState(false);
-  const activeWorkspaceId=useRef<string|null>(selected?.id??null),activeRefreshId=useRef(0),refreshAbort=useRef<AbortController|null>(null),mounted=useRef(true),flowTrigger=useRef<HTMLButtonElement|null>(null);
-  activeWorkspaceId.current=selected?.id??null;
-  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;refreshAbort.current?.abort();activeRefreshId.current+=1}},[]);
-  useEffect(()=>{refreshAbort.current?.abort();activeRefreshId.current+=1;setFlow({kind:"overview"});setConfirm(null);setMembersLoaded(false);if(!selected){setMembers([]);setInvitations([]);return}void refresh(selected.id)},[selected?.id]);
-  const refresh=async(workspaceId:string):Promise<void>=>{if(!mounted.current||activeWorkspaceId.current!==workspaceId)return;refreshAbort.current?.abort();const controller=new AbortController(),requestId=++activeRefreshId.current;refreshAbort.current=controller;setError("");try{const [nextMembers,nextInvitations]=await Promise.all([atlasApi.listMemberships(workspaceId,controller.signal),atlasApi.listInvitations(workspaceId,controller.signal)]);if(shouldApplyWorkspaceRefresh(activeWorkspaceId.current,workspaceId,activeRefreshId.current,requestId,mounted.current)){setMembers(nextMembers);setInvitations(nextInvitations);setMembersLoaded(true)}}catch(cause){if(!(cause instanceof DOMException&&cause.name==="AbortError")&&shouldApplyWorkspaceRefresh(activeWorkspaceId.current,workspaceId,activeRefreshId.current,requestId,mounted.current))setError(t("workspaceTeam.unavailable"))}};
-  const closeFlow=():void=>{setFlow({kind:"overview"});window.setTimeout(()=>flowTrigger.current?.focus(),0)};
-  const openFlow=(next:Flow,event:React.MouseEvent<HTMLButtonElement>):void=>{flowTrigger.current=event.currentTarget;setError("");setNotice("");setFlow(next)};
-  const create=async(event:React.FormEvent):Promise<void>=>{event.preventDefault();if(working)return;setWorking(true);setError("");try{await atlasApi.createWorkspace(props.csrf,workspaceName);setWorkspaceName("");closeFlow();setNotice(t("workspaceTeam.created"));props.onWorkspacesChanged()}catch{setError(t("workspaceTeam.unavailable"))}finally{setWorking(false)}};
-  const invite=async(event:React.FormEvent):Promise<void>=>{event.preventDefault();if(!selected||working)return;setWorking(true);setError("");try{await atlasApi.inviteMember(props.csrf,selected.id,inviteEmail,inviteRole);setInviteEmail("");setInviteRole("viewer");closeFlow();setNotice(t("workspaceTeam.invited"));await refresh(selected.id)}catch{setError(t("workspaceTeam.unavailable"))}finally{setWorking(false)}};
-  const saveRole=async(event:React.FormEvent):Promise<void>=>{event.preventDefault();if(!selected||flow.kind!=="role"||working)return;setWorking(true);try{await atlasApi.changeMembershipRole(props.csrf,selected.id,flow.member.id,role);closeFlow();await refresh(selected.id)}catch{setError(t("workspaceTeam.unavailable"))}finally{setWorking(false)}};
-  const executeConfirm=async():Promise<void>=>{if(!selected||!confirm||working)return;const action=confirm;setWorking(true);try{if(action.kind==="leave"){await atlasApi.leaveWorkspace(props.csrf,selected.id);props.onActiveWorkspaceLeft();props.onWorkspacesChanged();return}if(action.kind==="remove")await atlasApi.changeMembershipStatus(props.csrf,selected.id,action.member.id,"remove");else await atlasApi.transferOwnership(props.csrf,selected.id,action.member.id,"administrator");setConfirm(null);setFlow({kind:"overview"});await refresh(selected.id)}catch{setError(t("workspaceTeam.unavailable"))}finally{setWorking(false)}};
-  const soleOwner=selected?.role==="owner"&&members.filter(member=>member.role==="owner"&&member.status==="active").length===1?members.find(member=>member.role==="owner"&&member.status==="active")??null:null;
-  const currentUserId=props.currentUserId??soleOwner?.userId??null,eligibleRecipients=members.filter(member=>member.userId!==currentUserId&&member.status==="active"&&member.role!=="owner"),canManage=selected?.capabilities.includes("membership:manage")??false,canInvite=selected?.capabilities.includes("membership:invite")??false,canTransfer=selected?.capabilities.includes("owner:transfer")??false;
-  const identity=(member:Member):string=>member.userId===currentUserId&&props.currentUserEmail?props.currentUserEmail:t("workspaceTeam.memberFallback");
+export function WorkspaceMembershipPortal(props: Props): React.JSX.Element {
+  const { t } = useI18n(),
+    selected = props.selectedWorkspace;
+  const [members, setMembers] = useState<Member[]>([]),
+    [membersLoaded, setMembersLoaded] = useState(false),
+    [invitations, setInvitations] = useState<Invitation[]>([]),
+    [error, setError] = useState(""),
+    [notice, setNotice] = useState(""),
+    [flow, setFlow] = useState<Flow>({ kind: "overview" }),
+    [confirm, setConfirm] = useState<ConfirmAction | null>(null),
+    [workspaceName, setWorkspaceName] = useState(""),
+    [inviteEmail, setInviteEmail] = useState(""),
+    [inviteRole, setInviteRole] = useState("viewer"),
+    [role, setRole] = useState("viewer"),
+    [transferId, setTransferId] = useState(""),
+    [working, setWorking] = useState(false);
+  const activeWorkspaceId = useRef<string | null>(selected?.id ?? null),
+    activeRefreshId = useRef(0),
+    refreshAbort = useRef<AbortController | null>(null),
+    mounted = useRef(true),
+    flowTrigger = useRef<HTMLButtonElement | null>(null);
+  activeWorkspaceId.current = selected?.id ?? null;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      refreshAbort.current?.abort();
+      activeRefreshId.current += 1;
+    };
+  }, []);
+  useEffect(() => {
+    refreshAbort.current?.abort();
+    activeRefreshId.current += 1;
+    setFlow({ kind: "overview" });
+    setConfirm(null);
+    setMembersLoaded(false);
+    if (!selected) {
+      setMembers([]);
+      setInvitations([]);
+      return;
+    }
+    void refresh(selected.id);
+  }, [selected?.id]);
+  const refresh = async (workspaceId: string): Promise<void> => {
+    if (!mounted.current || activeWorkspaceId.current !== workspaceId) return;
+    refreshAbort.current?.abort();
+    const controller = new AbortController(),
+      requestId = ++activeRefreshId.current;
+    refreshAbort.current = controller;
+    setError("");
+    try {
+      const [nextMembers, nextInvitations] = await Promise.all([
+        atlasApi.listMemberships(workspaceId, controller.signal),
+        atlasApi.listInvitations(workspaceId, controller.signal),
+      ]);
+      if (
+        shouldApplyWorkspaceRefresh(
+          activeWorkspaceId.current,
+          workspaceId,
+          activeRefreshId.current,
+          requestId,
+          mounted.current,
+        )
+      ) {
+        setMembers(nextMembers);
+        setInvitations(nextInvitations);
+        setMembersLoaded(true);
+      }
+    } catch (cause) {
+      if (
+        !(cause instanceof DOMException && cause.name === "AbortError") &&
+        shouldApplyWorkspaceRefresh(
+          activeWorkspaceId.current,
+          workspaceId,
+          activeRefreshId.current,
+          requestId,
+          mounted.current,
+        )
+      )
+        setError(t("workspaceTeam.unavailable"));
+    }
+  };
+  const closeFlow = (): void => {
+    setFlow({ kind: "overview" });
+    window.setTimeout(() => flowTrigger.current?.focus(), 0);
+  };
+  const openFlow = (
+    next: Flow,
+    event: React.MouseEvent<HTMLButtonElement>,
+  ): void => {
+    flowTrigger.current = event.currentTarget;
+    setError("");
+    setNotice("");
+    setFlow(next);
+  };
+  const create = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault();
+    if (working) return;
+    setWorking(true);
+    setError("");
+    try {
+      await atlasApi.createWorkspace(props.csrf, workspaceName);
+      setWorkspaceName("");
+      closeFlow();
+      setNotice(t("workspaceTeam.created"));
+      props.onWorkspacesChanged();
+    } catch {
+      setError(t("workspaceTeam.unavailable"));
+    } finally {
+      setWorking(false);
+    }
+  };
+  const invite = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault();
+    if (!selected || working) return;
+    setWorking(true);
+    setError("");
+    try {
+      await atlasApi.inviteMember(
+        props.csrf,
+        selected.id,
+        inviteEmail,
+        inviteRole,
+      );
+      setInviteEmail("");
+      setInviteRole("viewer");
+      closeFlow();
+      setNotice(t("workspaceTeam.invited"));
+      await refresh(selected.id);
+    } catch {
+      setError(t("workspaceTeam.unavailable"));
+    } finally {
+      setWorking(false);
+    }
+  };
+  const saveRole = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault();
+    if (!selected || flow.kind !== "role" || working) return;
+    setWorking(true);
+    try {
+      await atlasApi.changeMembershipRole(
+        props.csrf,
+        selected.id,
+        flow.member.id,
+        role,
+      );
+      closeFlow();
+      await refresh(selected.id);
+    } catch {
+      setError(t("workspaceTeam.unavailable"));
+    } finally {
+      setWorking(false);
+    }
+  };
+  const executeConfirm = async (): Promise<void> => {
+    if (!selected || !confirm || working) return;
+    const action = confirm;
+    setWorking(true);
+    try {
+      if (action.kind === "leave") {
+        await atlasApi.leaveWorkspace(props.csrf, selected.id);
+        props.onActiveWorkspaceLeft();
+        props.onWorkspacesChanged();
+        return;
+      }
+      if (action.kind === "remove")
+        await atlasApi.changeMembershipStatus(
+          props.csrf,
+          selected.id,
+          action.member.id,
+          "remove",
+        );
+      else
+        await atlasApi.transferOwnership(
+          props.csrf,
+          selected.id,
+          action.member.id,
+          "administrator",
+        );
+      setConfirm(null);
+      setFlow({ kind: "overview" });
+      await refresh(selected.id);
+    } catch {
+      setError(t("workspaceTeam.unavailable"));
+    } finally {
+      setWorking(false);
+    }
+  };
+  const soleOwner =
+    selected?.role === "owner" &&
+    members.filter(
+      (member) => member.role === "owner" && member.status === "active",
+    ).length === 1
+      ? (members.find(
+          (member) => member.role === "owner" && member.status === "active",
+        ) ?? null)
+      : null;
+  const currentUserId = props.currentUserId ?? soleOwner?.userId ?? null,
+    eligibleRecipients = members.filter(
+      (member) =>
+        member.userId !== currentUserId &&
+        member.status === "active" &&
+        member.role !== "owner",
+    ),
+    canManage = selected?.capabilities.includes("membership:manage") ?? false,
+    canInvite = selected?.capabilities.includes("membership:invite") ?? false,
+    canTransfer = selected?.capabilities.includes("owner:transfer") ?? false;
+  const identity = (member: Member): string =>
+    member.userId === currentUserId && props.currentUserEmail
+      ? props.currentUserEmail
+      : t("workspaceTeam.memberFallback");
 
-  if(flow.kind!=="overview")return <div className="workspace-focused"><ContextBackLink label={t("workspaceTeam.back")} onBack={closeFlow}/><PageHeader trail={t("workspaceTeam.section")} title={flow.kind==="create"?t("workspaceTeam.createTitle"):flow.kind==="invite"?t("workspaceTeam.invite"):flow.kind==="role"?t("workspaceTeam.changeRole"):t("workspaceTeam.transfer")} description={flow.kind==="create"?t("workspaceTeam.createHelp"):flow.kind==="invite"?t("workspaceTeam.inviteHelp"):flow.kind==="role"?t("workspaceTeam.roleHelp"):t("workspaceTeam.transferHelp")}/>
-    {error&&<div className="inline-message inline-message--error" role="alert">{error}</div>}
-    {flow.kind==="create"&&<form className="workspace-focused__form" onSubmit={create}><label className="form-field"><span>{t("workspaceTeam.name")}</span><input autoFocus required value={workspaceName} onChange={event=>setWorkspaceName(event.target.value)}/></label><FlowActions working={working} submit={t("workspaceTeam.create")} cancel={t("common.cancel")} onCancel={closeFlow}/></form>}
-    {flow.kind==="invite"&&<form className="workspace-focused__form" onSubmit={invite}><label className="form-field"><span>{t("workspaceTeam.email")}</span><input autoFocus type="email" required value={inviteEmail} onChange={event=>setInviteEmail(event.target.value)}/></label><RoleField value={inviteRole} onChange={setInviteRole} t={t}/><FlowActions working={working} submit={t("workspaceTeam.invite")} cancel={t("common.cancel")} onCancel={closeFlow}/></form>}
-    {flow.kind==="role"&&<form className="workspace-focused__form" onSubmit={saveRole}><p><strong>{identity(flow.member)}</strong></p><RoleField value={role} onChange={setRole} t={t}/><FlowActions working={working} submit={t("common.save")} cancel={t("common.cancel")} onCancel={closeFlow}/></form>}
-    {flow.kind==="transfer"&&<section className="workspace-focused__form">{eligibleRecipients.length===0?<p>{t("workspaceTeam.noTransferRecipient")}</p>:<><fieldset><legend>{t("workspaceTeam.chooseRecipient")}</legend>{eligibleRecipients.map(member=><label className="workspace-recipient" key={member.id}><input type="radio" name="recipient" checked={transferId===member.id} onChange={()=>setTransferId(member.id)}/><span><strong>{identity(member)}</strong><small>{roleLabel(member.role,t)}</small></span></label>)}</fieldset><button className="button button--primary" type="button" disabled={!transferId} onClick={()=>{const member=eligibleRecipients.find(item=>item.id===transferId);if(member)setConfirm({kind:"transfer",member})}}>{t("workspaceTeam.continueTransfer")}</button></>}</section>}
-    {confirm&&<Confirmation action={confirm} identity={identity} working={working} t={t} onConfirm={()=>void executeConfirm()} onCancel={()=>setConfirm(null)}/>}</div>;
+  if (flow.kind !== "overview")
+    return (
+      <div className="workspace-focused">
+        <ContextBackLink label={t("workspaceTeam.back")} onBack={closeFlow} />
+        <PageHeader
+          trail={t("workspaceTeam.section")}
+          title={
+            flow.kind === "create"
+              ? t("workspaceTeam.createTitle")
+              : flow.kind === "invite"
+                ? t("workspaceTeam.invite")
+                : flow.kind === "role"
+                  ? t("workspaceTeam.changeRole")
+                  : t("workspaceTeam.transfer")
+          }
+          description={
+            flow.kind === "create"
+              ? t("workspaceTeam.createHelp")
+              : flow.kind === "invite"
+                ? t("workspaceTeam.inviteHelp")
+                : flow.kind === "role"
+                  ? t("workspaceTeam.roleHelp")
+                  : t("workspaceTeam.transferHelp")
+          }
+        />
+        {error && <Alert tone="danger">{error}</Alert>}
+        {flow.kind === "create" && (
+          <form className="workspace-focused__form" onSubmit={create}>
+            <label className="ds-field">
+              <span>{t("workspaceTeam.name")}</span>
+              <Input
+                autoFocus
+                required
+                value={workspaceName}
+                onChange={(event) => setWorkspaceName(event.target.value)}
+              />
+            </label>
+            <FlowActions
+              working={working}
+              submit={t("workspaceTeam.create")}
+              cancel={t("common.cancel")}
+              onCancel={closeFlow}
+            />
+          </form>
+        )}
+        {flow.kind === "invite" && (
+          <form className="workspace-focused__form" onSubmit={invite}>
+            <label className="ds-field">
+              <span>{t("workspaceTeam.email")}</span>
+              <Input
+                autoFocus
+                type="email"
+                required
+                value={inviteEmail}
+                onChange={(event) => setInviteEmail(event.target.value)}
+              />
+            </label>
+            <RoleField value={inviteRole} onChange={setInviteRole} t={t} />
+            <FlowActions
+              working={working}
+              submit={t("workspaceTeam.invite")}
+              cancel={t("common.cancel")}
+              onCancel={closeFlow}
+            />
+          </form>
+        )}
+        {flow.kind === "role" && (
+          <form className="workspace-focused__form" onSubmit={saveRole}>
+            <p>
+              <strong>{identity(flow.member)}</strong>
+            </p>
+            <RoleField value={role} onChange={setRole} t={t} />
+            <FlowActions
+              working={working}
+              submit={t("common.save")}
+              cancel={t("common.cancel")}
+              onCancel={closeFlow}
+            />
+          </form>
+        )}
+        {flow.kind === "transfer" && (
+          <section className="workspace-focused__form">
+            {eligibleRecipients.length === 0 ? (
+              <p>{t("workspaceTeam.noTransferRecipient")}</p>
+            ) : (
+              <>
+                <fieldset>
+                  <legend>{t("workspaceTeam.chooseRecipient")}</legend>
+                  {eligibleRecipients.map((member) => (
+                    <label className="workspace-recipient" key={member.id}>
+                      <input
+                        type="radio"
+                        name="recipient"
+                        checked={transferId === member.id}
+                        onChange={() => setTransferId(member.id)}
+                      />
+                      <span>
+                        <strong>{identity(member)}</strong>
+                        <StatusBadge tone="warning">
+                          {roleLabel(member.role, t)}
+                        </StatusBadge>
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+                <Button
+                  disabled={!transferId}
+                  onClick={() => {
+                    const member = eligibleRecipients.find(
+                      (item) => item.id === transferId,
+                    );
+                    if (member) setConfirm({ kind: "transfer", member });
+                  }}
+                >
+                  {t("workspaceTeam.continueTransfer")}
+                </Button>
+              </>
+            )}
+          </section>
+        )}
+        {confirm && (
+          <Confirmation
+            action={confirm}
+            identity={identity}
+            working={working}
+            t={t}
+            onConfirm={() => void executeConfirm()}
+            onCancel={() => setConfirm(null)}
+          />
+        )}
+      </div>
+    );
 
-  return <div className="workspace-settings">{props.onNavigateDashboard&&<ContextBackLink href="/dashboard" label="Volver al inicio" onNavigate={event=>{event.preventDefault();props.onNavigateDashboard?.();}}/>}<PageHeader trail={t("workspaceTeam.section")} title={t("workspaceTeam.title")} description={t("workspaceTeam.description")}/>{notice&&<p role="status" className="inline-message inline-message--success">{notice}</p>}{(props.error||error)&&<div className="inline-message inline-message--error" role="alert"><p>{error||t("workspaceTeam.unavailable")}</p>{selected&&<button className="button button--secondary" onClick={()=>void refresh(selected.id)}>{t("common.retry")}</button>}</div>}
-    <section className="workspace-summary"><div><p>{t("workspaceTeam.current")}</p><h2>{selected?.name??t("workspaceTeam.none")}</h2>{selected&&<span>{t("workspaceTeam.yourRole")}: {roleLabel(selected.role,t)}</span>}</div><button className="button button--secondary" type="button" onClick={event=>openFlow({kind:"create"},event)}>{t("workspaceTeam.createAnother")}</button></section>
-    {props.workspaces.length>1&&<section className="settings-section"><header><h2>{t("workspaceTeam.changeWorkspace")}</h2><p>{t("workspaceTeam.description")}</p></header><label className="form-field"><span>{t("workspaceTeam.changeWorkspace")}</span><select value={selected?.id??""} disabled={props.pendingWorkspaceId!==null} onChange={event=>{if(event.target.value)props.onSelectWorkspace(event.target.value)}}>{props.workspaces.map(workspace=><option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label></section>}
-    {selected&&<><section className="settings-section"><header><h2>{t("workspaceTeam.members")}</h2><p>{t("workspaceTeam.membersHelp")}</p></header><div>{members.length===0?<p className="settings-empty">{t("workspaceTeam.noMembers")}</p>:<ul className="settings-rows">{members.map(member=>{const self=member.userId===currentUserId;return <li key={member.id}><div className="settings-row__identity"><strong>{identity(member)}</strong><span>{roleLabel(member.role,t)} · {statusLabel(member.status,t)}{self?` · ${t("workspaceTeam.currentAccount")}`:""}</span>{!self&&<small>{t("workspaceTeam.accountReference")}: {member.userId}</small>}</div>{canManage&&!self&&member.role!=="owner"&&<div className="settings-row__actions"><button type="button" onClick={event=>{setRole(member.role);openFlow({kind:"role",member},event)}}>{t("workspaceTeam.changeRole")}</button><button type="button" onClick={()=>setConfirm({kind:"remove",member})}>{t("workspaceTeam.remove")}</button></div>}</li>})}</ul>}</div></section>
-      <section className="settings-section"><header><h2>{t("workspaceTeam.invitations")}</h2><p>{t("workspaceTeam.invitationsHelp")}</p></header><div>{canInvite&&<button className="button button--primary" type="button" onClick={event=>openFlow({kind:"invite"},event)}>{t("workspaceTeam.invite")}</button>}{invitations.length===0?<p className="settings-empty">{t("workspaceTeam.noInvitations")}</p>:<ul className="settings-rows">{invitations.map(invitation=><li key={invitation.id}><div className="settings-row__identity"><strong>{invitation.recipient}</strong><span>{roleLabel(invitation.role,t)} · {statusLabel(invitation.status,t)}</span></div>{canInvite&&invitation.status==="pending"&&<button type="button" onClick={()=>void atlasApi.revokeInvitation(props.csrf,selected.id,invitation.id).then(()=>refresh(selected.id))}>{t("workspaceTeam.revoke")}</button>}</li>)}</ul>}</div></section>
-       <section className="settings-section settings-section--danger"><header><h2>Zona de riesgo</h2><p>{t("workspaceTeam.dangerHelp")}</p></header><div className="settings-danger-actions">{canTransfer&&<button className="button button--secondary" type="button" onClick={event=>{setTransferId("");openFlow({kind:"transfer"},event)}}>{t("workspaceTeam.transfer")}</button>}{!membersLoaded?<p role="status">Verificando propiedad antes de habilitar la salida.</p>:soleOwner?<p role="status">Transferí la propiedad antes de salir del espacio.</p>:<button className="button button--danger-quiet" type="button" onClick={()=>setConfirm({kind:"leave"})}>{t("workspaceTeam.leave")}</button>}</div></section></>}
-    {confirm&&<Confirmation action={confirm} identity={identity} working={working} t={t} onConfirm={()=>void executeConfirm()} onCancel={()=>setConfirm(null)}/>}</div>;
+  return (
+    <div className="workspace-settings">
+      {props.onNavigateDashboard && (
+        <ContextBackLink
+          href="/dashboard"
+          label="Volver al inicio"
+          onNavigate={(event) => {
+            event.preventDefault();
+            props.onNavigateDashboard?.();
+          }}
+        />
+      )}
+      <PageHeader
+        trail={t("workspaceTeam.section")}
+        title={t("workspaceTeam.title")}
+        description={t("workspaceTeam.description")}
+      />
+      {notice && <Alert tone="success">{notice}</Alert>}
+      {(props.error || error) && (
+        <Alert tone="danger">
+          {error || t("workspaceTeam.unavailable")}
+          {selected && (
+            <Button
+              variant="secondary"
+              onClick={() => void refresh(selected.id)}
+            >
+              {t("common.retry")}
+            </Button>
+          )}
+        </Alert>
+      )}
+      <section className="workspace-summary">
+        <div>
+          <p>{t("workspaceTeam.current")}</p>
+          <h2>{selected?.name ?? t("workspaceTeam.none")}</h2>
+          {selected && (
+            <StatusBadge tone="info">
+              {t("workspaceTeam.yourRole")}: {roleLabel(selected.role, t)}
+            </StatusBadge>
+          )}
+        </div>
+        <Button
+          variant="secondary"
+          onClick={(event) => openFlow({ kind: "create" }, event)}
+        >
+          {t("workspaceTeam.createAnother")}
+        </Button>
+      </section>
+      {props.workspaces.length > 1 && (
+        <section className="settings-section">
+          <header>
+            <h2>{t("workspaceTeam.changeWorkspace")}</h2>
+            <p>{t("workspaceTeam.description")}</p>
+          </header>
+          <label className="ds-field">
+            <span>{t("workspaceTeam.changeWorkspace")}</span>
+            <Select
+              value={selected?.id ?? ""}
+              disabled={props.pendingWorkspaceId !== null}
+              onChange={(event) => {
+                if (event.target.value)
+                  props.onSelectWorkspace(event.target.value);
+              }}
+            >
+              {props.workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+        </section>
+      )}
+      {selected && (
+        <>
+          <section className="settings-section">
+            <header>
+              <h2>{t("workspaceTeam.members")}</h2>
+              <p>{t("workspaceTeam.membersHelp")}</p>
+            </header>
+            <div>
+              {members.length === 0 ? (
+                <p className="settings-empty">{t("workspaceTeam.noMembers")}</p>
+              ) : (
+                <ul className="settings-rows">
+                  {members.map((member) => {
+                    const self = member.userId === currentUserId;
+                    return (
+                      <li key={member.id}>
+                        <div className="settings-row__identity">
+                          <strong>{identity(member)}</strong>
+                          <span>
+                            <StatusBadge
+                              tone={
+                                member.status === "active"
+                                  ? "success"
+                                  : member.status === "suspended"
+                                    ? "danger"
+                                    : "warning"
+                              }
+                            >
+                              {roleLabel(member.role, t)} ·{" "}
+                              {statusLabel(member.status, t)}
+                              {self
+                                ? ` · ${t("workspaceTeam.currentAccount")}`
+                                : ""}
+                            </StatusBadge>
+                          </span>
+                          {!self && (
+                            <small>
+                              {t("workspaceTeam.accountReference")}:{" "}
+                              {member.userId}
+                            </small>
+                          )}
+                        </div>
+                        {canManage && !self && member.role !== "owner" && (
+                          <div className="settings-row__actions">
+                            <Button
+                              size="sm"
+                              variant="quiet"
+                              onClick={(event) => {
+                                setRole(member.role);
+                                openFlow({ kind: "role", member }, event);
+                              }}
+                            >
+                              {t("workspaceTeam.changeRole")}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() =>
+                                setConfirm({ kind: "remove", member })
+                              }
+                            >
+                              {t("workspaceTeam.remove")}
+                            </Button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </section>
+          <section className="settings-section">
+            <header>
+              <h2>{t("workspaceTeam.invitations")}</h2>
+              <p>{t("workspaceTeam.invitationsHelp")}</p>
+            </header>
+            <div>
+              {canInvite && (
+                <Button
+                  onClick={(event) => openFlow({ kind: "invite" }, event)}
+                >
+                  {t("workspaceTeam.invite")}
+                </Button>
+              )}
+              {invitations.length === 0 ? (
+                <p className="settings-empty">
+                  {t("workspaceTeam.noInvitations")}
+                </p>
+              ) : (
+                <ul className="settings-rows">
+                  {invitations.map((invitation) => (
+                    <li key={invitation.id}>
+                      <div className="settings-row__identity">
+                        <strong>{invitation.recipient}</strong>
+                        <span>
+                          <StatusBadge
+                            tone={
+                              invitation.status === "pending"
+                                ? "warning"
+                                : "neutral"
+                            }
+                          >
+                            {roleLabel(invitation.role, t)} ·{" "}
+                            {statusLabel(invitation.status, t)}
+                          </StatusBadge>
+                        </span>
+                      </div>
+                      {canInvite && invitation.status === "pending" && (
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() =>
+                            void atlasApi
+                              .revokeInvitation(
+                                props.csrf,
+                                selected.id,
+                                invitation.id,
+                              )
+                              .then(() => refresh(selected.id))
+                          }
+                        >
+                          {t("workspaceTeam.revoke")}
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+          <section className="settings-section settings-section--danger">
+            <header>
+              <h2>Zona de riesgo</h2>
+              <p>{t("workspaceTeam.dangerHelp")}</p>
+            </header>
+            <div className="settings-danger-actions">
+              {canTransfer && (
+                <Button
+                  variant="secondary"
+                  onClick={(event) => {
+                    setTransferId("");
+                    openFlow({ kind: "transfer" }, event);
+                  }}
+                >
+                  {t("workspaceTeam.transfer")}
+                </Button>
+              )}
+              {!membersLoaded ? (
+                <StatusBadge tone="info">
+                  Verificando propiedad antes de habilitar la salida.
+                </StatusBadge>
+              ) : soleOwner ? (
+                <StatusBadge tone="warning">
+                  Transferí la propiedad antes de salir del espacio.
+                </StatusBadge>
+              ) : (
+                <Button
+                  variant="danger"
+                  onClick={() => setConfirm({ kind: "leave" })}
+                >
+                  {t("workspaceTeam.leave")}
+                </Button>
+              )}
+            </div>
+          </section>
+        </>
+      )}
+      {confirm && (
+        <Confirmation
+          action={confirm}
+          identity={identity}
+          working={working}
+          t={t}
+          onConfirm={() => void executeConfirm()}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+    </div>
+  );
 }
 
-function FlowActions({working,submit,cancel,onCancel}:{working:boolean;submit:string;cancel:string;onCancel:()=>void}):React.JSX.Element{return <div className="action-row"><button className="button button--primary" disabled={working}>{submit}</button><button className="button button--secondary" type="button" disabled={working} onClick={onCancel}>{cancel}</button></div>}
-function RoleField({value,onChange,t}:{value:string;onChange:(value:string)=>void;t:ReturnType<typeof useI18n>["t"]}):React.JSX.Element{return <label className="form-field"><span>{t("workspaceTeam.role")}</span><select value={value} onChange={event=>onChange(event.target.value)}><option value="administrator">{t("workspaceTeam.role.administrator")}</option><option value="operator">{t("workspaceTeam.role.operator")}</option><option value="viewer">{t("workspaceTeam.role.viewer")}</option></select><small>{t("workspaceTeam.roleHelp")}</small></label>}
-function Confirmation({action,identity,working,t,onConfirm,onCancel}:{action:ConfirmAction;identity:(member:Member)=>string;working:boolean;t:ReturnType<typeof useI18n>["t"];onConfirm:()=>void;onCancel:()=>void}):React.JSX.Element{const target=action.kind==="leave"?null:identity(action.member),message=action.kind==="leave"?t("workspaceTeam.confirmLeave"):action.kind==="remove"?t("workspaceTeam.confirmRemove",{name:target!}):t("workspaceTeam.confirmTransfer",{name:target!});return <div className="confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="settings-confirm-title"><h2 id="settings-confirm-title">{t("workspaceTeam.confirm")}</h2><p>{message}</p>{action.kind==="transfer"&&<p>{t("workspaceTeam.transferRoleResult")}</p>}<div className="action-row"><button className="button button--danger" disabled={working} onClick={onConfirm}>{t("common.confirm")}</button><button className="button button--secondary" disabled={working} onClick={onCancel}>{t("common.cancel")}</button></div></div>}
-function roleLabel(role:string,t:ReturnType<typeof useI18n>["t"]):string{const values=["owner","administrator","operator","viewer"] as const;return values.includes(role as typeof values[number])?t(`workspaceTeam.role.${role as typeof values[number]}`):t("workspaceTeam.role.unknown")}
-function statusLabel(status:string,t:ReturnType<typeof useI18n>["t"]):string{const values=["active","suspended","pending","accepted","revoked"] as const;return values.includes(status as typeof values[number])?t(`workspaceTeam.status.${status as typeof values[number]}`):t("workspaceTeam.status.unknown")}
+function FlowActions({
+  working,
+  submit,
+  cancel,
+  onCancel,
+}: {
+  working: boolean;
+  submit: string;
+  cancel: string;
+  onCancel: () => void;
+}): React.JSX.Element {
+  return (
+    <div className="action-row">
+      <Button disabled={working}>{submit}</Button>
+      <Button
+        variant="secondary"
+        type="button"
+        disabled={working}
+        onClick={onCancel}
+      >
+        {cancel}
+      </Button>
+    </div>
+  );
+}
+function RoleField({
+  value,
+  onChange,
+  t,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  t: ReturnType<typeof useI18n>["t"];
+}): React.JSX.Element {
+  return (
+    <label className="ds-field">
+      <span>{t("workspaceTeam.role")}</span>
+      <Select value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="administrator">
+          {t("workspaceTeam.role.administrator")}
+        </option>
+        <option value="operator">{t("workspaceTeam.role.operator")}</option>
+        <option value="viewer">{t("workspaceTeam.role.viewer")}</option>
+      </Select>
+      <small>{t("workspaceTeam.roleHelp")}</small>
+    </label>
+  );
+}
+function Confirmation({
+  action,
+  identity,
+  working,
+  t,
+  onConfirm,
+  onCancel,
+}: {
+  action: ConfirmAction;
+  identity: (member: Member) => string;
+  working: boolean;
+  t: ReturnType<typeof useI18n>["t"];
+  onConfirm: () => void;
+  onCancel: () => void;
+}): React.JSX.Element {
+  const target = action.kind === "leave" ? null : identity(action.member),
+    message =
+      action.kind === "leave"
+        ? t("workspaceTeam.confirmLeave")
+        : action.kind === "remove"
+          ? t("workspaceTeam.confirmRemove", { name: target! })
+          : t("workspaceTeam.confirmTransfer", { name: target! });
+  return (
+    <ConfirmDialog
+      cancelLabel={t("common.cancel")}
+      confirmDisabled={working}
+      confirmLabel={t("common.confirm")}
+      description={
+        action.kind === "transfer"
+          ? `${message} ${t("workspaceTeam.transferRoleResult")}`
+          : message
+      }
+      open
+      title={t("workspaceTeam.confirm")}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
+  );
+}
+function roleLabel(role: string, t: ReturnType<typeof useI18n>["t"]): string {
+  const values = ["owner", "administrator", "operator", "viewer"] as const;
+  return values.includes(role as (typeof values)[number])
+    ? t(`workspaceTeam.role.${role as (typeof values)[number]}`)
+    : t("workspaceTeam.role.unknown");
+}
+function statusLabel(
+  status: string,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  const values = [
+    "active",
+    "suspended",
+    "pending",
+    "accepted",
+    "revoked",
+  ] as const;
+  return values.includes(status as (typeof values)[number])
+    ? t(`workspaceTeam.status.${status as (typeof values)[number]}`)
+    : t("workspaceTeam.status.unknown");
+}

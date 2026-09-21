@@ -40,7 +40,7 @@ test("EPIC-025 registration atomically stores a pending named user, credential, 
   assert.equal((database.prepare("SELECT COUNT(*) AS count FROM password_credentials").get() as { count: number }).count, 1);
   assert.equal((database.prepare("SELECT token_digest FROM email_verifications").get() as { token_digest: string }).token_digest.includes("a sufficiently"), false);
   const proof = new URL(delivery.verification!.verificationUrl).searchParams.get("proof")!;
-  assert.equal(new VerifyEmailService(new SqliteIdentityTransaction(database), hash, clock).verify(proof), "verified");
+  assert.equal(await new VerifyEmailService(new SqliteIdentityTransaction(database), hash, clock).verify(proof), "verified");
   database.close();
 });
 
@@ -48,7 +48,7 @@ test("EPIC-025 password reset is purpose-separated, superseded, single-use, and 
   const database = createDatabase(":memory:"), clock = new FixedClock(), random = new SecureRandomProvider(), hash = new Sha256VerificationHashProvider(), passwords = new ScryptPasswordProvider(), delivery = new Delivery();
   const registration = new RegistrationService(new SqliteIdentityTransaction(database), random, hash, clock, delivery, "http://atlas.test", 3_600_000, passwords);
   await registration.register("reset@example.test", "en", "Reset User", "an initial sufficiently long password", "an initial sufficiently long password");
-  new VerifyEmailService(new SqliteIdentityTransaction(database), hash, clock).verify(new URL(delivery.verification!.verificationUrl).searchParams.get("proof")!);
+  await new VerifyEmailService(new SqliteIdentityTransaction(database), hash, clock).verify(new URL(delivery.verification!.verificationUrl).searchParams.get("proof")!);
   const reset = new PasswordResetService(new SqliteAuthenticationTransaction(database), random, hash, passwords, clock, delivery, "http://atlas.test");
   await reset.request("reset@example.test", "en");
   const first = new URL(delivery.reset!.resetUrl).searchParams.get("proof")!;

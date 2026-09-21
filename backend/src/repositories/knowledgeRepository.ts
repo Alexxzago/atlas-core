@@ -1,15 +1,13 @@
-import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
+import type { SqlDatabase } from "../config/sqlDatabase.js";
 import type { KnowledgeRepositoryPort } from "../application/ports/repositories.js";
-import { database } from "../config/database.js";
 import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
-import { CompanyKnowledgeRepository } from "./companyKnowledgeRepository.js";
+import { AsyncCompanyKnowledgeRepository } from "../knowledge/infrastructure/asyncKnowledgePersistence.js";
 
-/** Compatibility adapter for released Chat/Preview/tests. Runtime reads use only the frozen publication projection. */
+/** Legacy application read port backed by the asynchronous knowledge persistence. */
 export class KnowledgeRepository implements KnowledgeRepositoryPort {
-  private readonly frozen: CompanyKnowledgeRepository;
-  public constructor(private readonly db: SynchronousDatabase) { this.frozen = new CompanyKnowledgeRepository(db); }
-  public load(context: WorkspaceContext, companyId: number): CompanyKnowledge | null { return this.frozen.loadPublished(context, companyId); }
-  public loadCurrentVersion(context: WorkspaceContext, companyId: number) { return this.frozen.loadCurrentVersion(context, companyId); }
+  private readonly frozen: AsyncCompanyKnowledgeRepository;
+  public constructor(database: SqlDatabase) { this.frozen = new AsyncCompanyKnowledgeRepository(database); }
+  public async load(context: WorkspaceContext, companyId: number): Promise<CompanyKnowledge | null> { return this.frozen.loadPublished(context, companyId); }
+  public async loadCurrentVersion(context: WorkspaceContext, companyId: number) { return this.frozen.loadCurrentVersion(context, companyId); }
 }
-export const knowledgeRepository = new KnowledgeRepository(database);

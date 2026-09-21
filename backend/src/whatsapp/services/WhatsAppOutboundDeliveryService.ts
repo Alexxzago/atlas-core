@@ -6,12 +6,13 @@ import type { OutboundDeliveryRepositoryPort, ProviderMessageRecordRepositoryPor
 import { outboundDeliveryId, providerMessageRecordId, reconstructOutboundDelivery, reconstructProviderMessageRecord, type OutboundDelivery } from "../../transport/domain/providerDelivery.js";
 import type { WhatsAppConnectionId } from "../domain/whatsappConnection.js";
 import { WhatsAppCloudApiError, type WhatsAppCloudApiPort, type WhatsAppOutboundFailureDiagnostic } from "../providers/WhatsAppCloudApiProvider.js";
-import type { WhatsAppConnectionRepositoryPort, WhatsAppConversationRepositoryPort, WhatsAppCredentialResolverPort } from "../application/ports.js";
+import type { AsyncWhatsAppConnectionRepositoryPort, AsyncWhatsAppConversationRepositoryPort, AsyncWhatsAppCredentialResolverPort, WhatsAppConnectionRepositoryPort, WhatsAppConversationRepositoryPort, WhatsAppCredentialResolverPort } from "../application/ports.js";
 import type { WhatsAppConnectionService } from "./WhatsAppConnectionService.js";
-import type { VoiceRepositoryPort } from "../application/voicePorts.js";
+import type { AsyncVoiceLookupPort, VoiceRepositoryPort } from "../application/voicePorts.js";
 import type { VoiceDeferredSemanticRecoveryService } from "./voiceDeferredSemanticRecoveryService.js";
 import type { ProactiveSemanticRecoveryService } from "../../proactive/services/proactiveSemanticRecoveryService.js";
 import { operationalLogger } from "../../observability/operationalLogger.js";
+import type { AsyncOutboundDeliveryRepositoryPort, AsyncProviderMessageRecordRepositoryPort } from "../infrastructure/asyncWhatsAppOutboundPersistence.js";
 
 export class WhatsAppOutboundDeliveryValidationError extends Error {}
 
@@ -24,83 +25,83 @@ type OutboundFailureLog = { readonly event: "whatsapp_provider_outbound_failed";
 export class WhatsAppOutboundDeliveryService {
   public constructor(
     private readonly conversations: ConversationRepositoryPort,
-    private readonly connections: WhatsAppConnectionRepositoryPort,
-    private readonly providerMessages: ProviderMessageRecordRepositoryPort,
-    private readonly deliveries: OutboundDeliveryRepositoryPort,
-    private readonly credentials: WhatsAppCredentialResolverPort,
+    private readonly connections: WhatsAppConnectionRepositoryPort | AsyncWhatsAppConnectionRepositoryPort,
+    private readonly providerMessages: ProviderMessageRecordRepositoryPort | AsyncProviderMessageRecordRepositoryPort,
+    private readonly deliveries: OutboundDeliveryRepositoryPort | AsyncOutboundDeliveryRepositoryPort,
+    private readonly credentials: WhatsAppCredentialResolverPort | AsyncWhatsAppCredentialResolverPort,
     private readonly apiFactory: (accessToken: string) => WhatsAppCloudApiPort,
     private readonly clock: { now(): string },
     private readonly operationalState?: WhatsAppConnectionService,
-    private readonly bindings?: WhatsAppConversationRepositoryPort,
-    private readonly voices?: Pick<VoiceRepositoryPort, "findUploadedProviderMediaId">,
+    private readonly bindings?: WhatsAppConversationRepositoryPort | AsyncWhatsAppConversationRepositoryPort,
+    private readonly voices?: Pick<AsyncVoiceLookupPort, "findUploadedProviderMediaId"> | Pick<VoiceRepositoryPort, "findUploadedProviderMediaId">,
     private readonly semanticRecovery?: VoiceDeferredSemanticRecoveryService,
     private readonly proactiveSemanticRecovery?: ProactiveSemanticRecoveryService,
   ) {}
 
   public async deliverWhatsAppText(context: WorkspaceContext, companyId: number, input: { conversationId: ConversationId; conversationMessageId: ConversationMessageId; whatsAppConnectionId: WhatsAppConnectionId; recipientWaId: string }): Promise<WhatsAppOutboundDeliveryResult> {
-    const conversation = this.conversations.findConversation(context, companyId, input.conversationId);
-    const message = this.conversations.findMessage(context, companyId, input.conversationMessageId);
-    const connection = this.connections.findById(context, companyId, input.whatsAppConnectionId);
+    const conversation = await this.conversations.findConversation(context, companyId, input.conversationId);
+    const message = await this.conversations.findMessage(context, companyId, input.conversationMessageId);
+    const connection = await this.connections.findById(context, companyId, input.whatsAppConnectionId);
     if (!conversation || !message || message.conversationId !== conversation.id || message.direction !== "outbound" || !connection || connection.status !== "active") throw new WhatsAppOutboundDeliveryValidationError("WhatsApp outbound delivery is invalid.");
     const now = this.clock.now();
-    const createdRecord = this.providerMessages.create(reconstructProviderMessageRecord({ id: providerMessageRecordId(`pmr_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", direction: "outbound", transportConnectionId: connection.id, conversationMessageId: message.id, externalMessageId: null, createdAt: now, updatedAt: now }));
-    const record = createdRecord ?? this.providerMessages.findByMessageAndConnection("meta_whatsapp_cloud", connection.id, message.id);
+    const createdRecord = await this.providerMessages.create(reconstructProviderMessageRecord({ id: providerMessageRecordId(`pmr_${randomUUID().replaceAll("-", "")}`), communicationChannel: "whatsapp", transportProvider: "meta_whatsapp_cloud", direction: "outbound", transportConnectionId: connection.id, conversationMessageId: message.id, externalMessageId: null, createdAt: now, updatedAt: now }));
+    const record = createdRecord ?? await this.providerMessages.findByMessageAndConnection("meta_whatsapp_cloud", connection.id, message.id);
     if (!record) throw new WhatsAppOutboundDeliveryValidationError("WhatsApp provider message could not be persisted.");
-    const createdDelivery = this.deliveries.create(reconstructOutboundDelivery({ id: outboundDeliveryId(`odl_${randomUUID().replaceAll("-", "")}`), providerMessageRecordId: record.id, transportConnectionId: connection.id, state: "pending", attemptCount: 0, nextAttemptAt: now, leaseOwner: null, leaseExpiresAt: null, safeErrorCategory: null, createdAt: now, updatedAt: now }));
-    const delivery = createdDelivery ?? this.deliveries.findByProviderMessageRecordAndConnection(record.id, connection.id);
+    const createdDelivery = await this.deliveries.create(reconstructOutboundDelivery({ id: outboundDeliveryId(`odl_${randomUUID().replaceAll("-", "")}`), providerMessageRecordId: record.id, transportConnectionId: connection.id, state: "pending", attemptCount: 0, nextAttemptAt: now, leaseOwner: null, leaseExpiresAt: null, safeErrorCategory: null, createdAt: now, updatedAt: now }));
+    const delivery = createdDelivery ?? await this.deliveries.findByProviderMessageRecordAndConnection(record.id, connection.id);
     if (!delivery) throw new WhatsAppOutboundDeliveryValidationError("WhatsApp delivery could not be persisted.");
     return safe(createdDelivery ?? delivery);
   }
 
   public async dispatchReady(owner: string, limit = 25): Promise<void> {
     const now = this.clock.now(), expiresAt = new Date(Date.parse(now) + 60_000).toISOString();
-    for (const delivery of this.deliveries.leaseReady(owner, now, expiresAt, limit)) await this.dispatch(owner, delivery);
+    for (const delivery of await this.deliveries.leaseReady(owner, now, expiresAt, limit)) await this.dispatch(owner, delivery);
   }
 
   private async dispatch(owner: string, delivery: OutboundDelivery): Promise<void> {
     if (delivery.payloadKind !== "text" && delivery.payloadKind !== "audio") return;
     if (delivery.payloadKind === "audio" && !this.voices) return;
-    if (!this.deliveries.authorizeLease(delivery.id, owner, this.clock.now())) return;
-    const record = this.providerMessages.findById(delivery.providerMessageRecordId);
-    const connection = this.connections.findByIdForRecovery(delivery.transportConnectionId as WhatsAppConnectionId);
+    if (!await this.deliveries.authorizeLease(delivery.id, owner, this.clock.now())) return;
+    const record = await this.providerMessages.findById(delivery.providerMessageRecordId);
+    const connection = await this.connections.findByIdForRecovery(delivery.transportConnectionId as WhatsAppConnectionId);
     if (!record || record.direction !== "outbound" || record.communicationChannel !== "whatsapp" || !connection || connection.status !== "active") {
-      this.settle(owner, delivery, { outcome: "retryable", safeErrorCategory: "provider_unavailable" });
+      await this.settle(owner, delivery, { outcome: "retryable", safeErrorCategory: "provider_unavailable" });
       return;
     }
     const context: WorkspaceContext = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" };
-    const message = this.conversations.findMessage(context, connection.companyId, record.conversationMessageId);
-    const binding = message ? this.bindings?.findBindingByConversation(context, connection.companyId, message.conversationId) : null;
+    const message = await this.conversations.findMessage(context, connection.companyId, record.conversationMessageId);
+    const binding = message && this.bindings ? await this.bindings.findBindingByConversation(context, connection.companyId, message.conversationId) : null;
     if (!message || !binding || binding.whatsAppConnectionId !== connection.id) {
-      this.settle(owner, delivery, { outcome: "retryable", safeErrorCategory: "provider_unavailable" });
+      await this.settle(owner, delivery, { outcome: "retryable", safeErrorCategory: "provider_unavailable" });
       return;
     }
     let started = false;
     try {
-      const token = this.credentials.resolve(context, connection.companyId, connection.id);
+      const token = await this.credentials.resolve(context, connection.companyId, connection.id);
       if (!token) throw new Error("WhatsApp credentials are unavailable.");
-      const providerMediaId = delivery.payloadKind === "audio" ? this.voices?.findUploadedProviderMediaId(context, connection.companyId, delivery.id) ?? null : null;
-      if (delivery.payloadKind === "audio" && !providerMediaId) { this.settle(owner, delivery, { outcome: "retryable", safeErrorCategory: "media_unavailable" }); return; }
-      if (this.deliveries.beginSend && !this.deliveries.beginSend(delivery.id, owner, this.clock.now())) return;
+      const providerMediaId = delivery.payloadKind === "audio" ? await this.voices?.findUploadedProviderMediaId(context, connection.companyId, delivery.id) ?? null : null;
+      if (delivery.payloadKind === "audio" && !providerMediaId) { await this.settle(owner, delivery, { outcome: "retryable", safeErrorCategory: "media_unavailable" }); return; }
+      if (!await this.deliveries.beginSend(delivery.id, owner, this.clock.now())) return;
       started = true;
       const api = this.apiFactory(token);
       const externalMessageId = delivery.payloadKind === "audio" ? await (api.sendAudio?.(connection.phoneNumberId, binding.waId, providerMediaId!) ?? Promise.reject(new Error("WhatsApp audio sending is unavailable."))) : await api.sendText(connection.phoneNumberId, binding.waId, message.content);
-      const accepted = this.deliveries.acceptSend ? this.deliveries.acceptSend(delivery.id, owner, externalMessageId, this.clock.now()) : (this.providerMessages.attachExternalMessageId(record.id, externalMessageId, this.clock.now()), this.deliveries.settleLease(delivery.id, owner, "accepted", null, null, this.clock.now()));
+      const accepted = await this.deliveries.acceptSend(delivery.id, owner, externalMessageId, this.clock.now());
       if (accepted?.responsePolicy === "deferred_voice") await this.semanticRecovery?.recover(context, connection.companyId);
       if (accepted) await this.proactiveSemanticRecovery?.recover(context, connection.companyId);
-      this.operationalState?.recordProviderActivity(context, connection.companyId, connection.id);
+      await this.operationalState?.recordProviderActivity(context, connection.companyId, connection.id);
     } catch (error: unknown) {
       this.logFailure(error, connection.id, delivery.id);
-      if (started && error instanceof WhatsAppCloudApiError && error.status !== null) this.settle(owner, delivery, classify(error));
-      else if (started && this.deliveries.settleUncertainSend) this.deliveries.settleUncertainSend(delivery.id, owner, "send_outcome_unknown", this.clock.now());
-      else this.settle(owner, delivery, classify(error));
-      this.operationalState?.recordProviderFailure(context, connection.companyId, connection.id);
+      if (started && error instanceof WhatsAppCloudApiError && error.status !== null) await this.settle(owner, delivery, classify(error));
+      else if (started) await this.deliveries.settleUncertainSend(delivery.id, owner, "send_outcome_unknown", this.clock.now());
+      else await this.settle(owner, delivery, classify(error));
+      await this.operationalState?.recordProviderFailure(context, connection.companyId, connection.id);
     }
   }
-  private settle(owner: string, delivery: OutboundDelivery, result: DeliveryResult): void {
+  private async settle(owner: string, delivery: OutboundDelivery, result: DeliveryResult): Promise<void> {
     const now = this.clock.now();
     const outcome = result.outcome === "retryable" && delivery.attemptCount >= maximumAttempts ? "permanent_failure" : result.outcome;
     const nextAttemptAt = outcome === "retryable" ? retryAt(now, delivery.attemptCount, result.retryAfterMilliseconds) : null;
-    this.deliveries.settleLease(delivery.id, owner, outcome, nextAttemptAt, result.safeErrorCategory, now);
+    await this.deliveries.settleLease(delivery.id, owner, outcome, nextAttemptAt, result.safeErrorCategory, now);
   }
   private logFailure(error: unknown, connectionId: string, outboundDeliveryId: string): void { const diagnostic = error instanceof WhatsAppCloudApiError ? error.diagnostic : null; operationalLogger.warn("provider_call_failed", { provider: "meta_whatsapp", operation: "send_message", whatsAppConnectionId: connectionId, outboundDeliveryId, ...(diagnostic?.httpStatus !== null && diagnostic?.httpStatus !== undefined ? { httpStatus: diagnostic.httpStatus } : {}), safeErrorCategory: diagnostic?.sanitizedReason === "rate_limited" ? "rate_limited" : "provider_rejected", outcome: "failed" }); }
 }

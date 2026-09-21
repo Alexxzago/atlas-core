@@ -22,8 +22,21 @@ export interface CompanyRepositoryPort {
   updateStatus(context: WorkspaceContext, companyId: number, status: CompanyStatus): Company | null;
 }
 
+/** Async compatibility seam while legacy Company callers migrate incrementally. */
+export interface AsyncCompanyRepositoryPort {
+  findById(context: WorkspaceContext, companyId: number): Promise<Company | null>;
+  findByWebsite(context: WorkspaceContext, website: string): Promise<Company | null>;
+  list(context: WorkspaceContext): Promise<Company[]>;
+  create(context: WorkspaceContext, input: CompanyCreateInput): Promise<Company>;
+  update(context: WorkspaceContext, companyId: number, input: CompanyPersistenceInput): Promise<Company | null>;
+  delete(context: WorkspaceContext, companyId: number): Promise<boolean>;
+  updateStatus(context: WorkspaceContext, companyId: number, status: CompanyStatus): Promise<Company | null>;
+}
+
+export type CompanyPersistencePort = CompanyRepositoryPort | AsyncCompanyRepositoryPort;
+
 export interface KnowledgeRepositoryPort {
-  load(context: WorkspaceContext, companyId: number): CompanyKnowledge | null;
+  load(context: WorkspaceContext, companyId: number): Promise<CompanyKnowledge | null>;
 }
 
 export interface WorkspaceRepositoryPort {

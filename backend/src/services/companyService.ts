@@ -1,4 +1,4 @@
-import type { CompanyRepositoryPort } from "../application/ports/repositories.js";
+import type { CompanyPersistencePort } from "../application/ports/repositories.js";
 import type { Company } from "../types/company.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 import { assertBillingEntitlement, BillingEntitlementDeniedError, type BillingEntitlementPort } from "../billing/services/billingEntitlementService.js";
@@ -19,40 +19,40 @@ interface CompanyUpdate {
 }
 
 export class CompanyService {
-  public constructor(private readonly companies: CompanyRepositoryPort, private readonly entitlements?: BillingEntitlementPort) {}
-  public list(context: WorkspaceContext): Company[] { return this.companies.list(context); }
+  public constructor(private readonly companies: CompanyPersistencePort, private readonly entitlements?: BillingEntitlementPort) {}
+  public async list(context: WorkspaceContext): Promise<Company[]> { return await this.companies.list(context); }
 
-  public get(context: WorkspaceContext, companyIdValue: unknown): Company {
+  public async get(context: WorkspaceContext, companyIdValue: unknown): Promise<Company> {
     const companyId = parseCompanyId(companyIdValue);
-    const company = this.companies.findById(context, companyId);
+    const company = await this.companies.findById(context, companyId);
     if (!company) throw new CompanyNotFoundError("Company was not found.");
     return company;
   }
 
-  public create(context: WorkspaceContext, value: unknown): Company {
+  public async create(context: WorkspaceContext, value: unknown): Promise<Company> {
     const input = this.validateCreate(value);
-    if (input.website !== null && this.companies.findByWebsite(context, input.website)) {
+    if (input.website !== null && await this.companies.findByWebsite(context, input.website)) {
       throw new DuplicateWebsiteError("A company already uses this website.");
     }
-    try { this.assertCompanyCapacity(context); }
+    try { await this.assertCompanyCapacity(context); }
     catch (error: unknown) { if (error instanceof BillingEntitlementDeniedError) throw new CompanyCapacityError(error.message); throw error; }
-    return this.companies.create(context, input);
+    return await this.companies.create(context, input);
   }
 
-  private assertCompanyCapacity(context: WorkspaceContext): void {
-    if (this.entitlements) assertBillingEntitlement(this.entitlements.mayCreateCompany(context.workspaceId));
+  private async assertCompanyCapacity(context: WorkspaceContext): Promise<void> {
+    if (this.entitlements) assertBillingEntitlement(await this.entitlements.mayCreateCompany(context.workspaceId));
   }
 
-  public update(context: WorkspaceContext, companyIdValue: unknown, value: unknown): Company {
-    const current = this.get(context, companyIdValue);
+  public async update(context: WorkspaceContext, companyIdValue: unknown, value: unknown): Promise<Company> {
+    const current = await this.get(context, companyIdValue);
     const changes = this.validateUpdate(value);
     const website = changes.website === undefined ? current.website : changes.website;
-    const websiteOwner = website === null ? null : this.companies.findByWebsite(context, website);
+    const websiteOwner = website === null ? null : await this.companies.findByWebsite(context, website);
     if (websiteOwner && websiteOwner.id !== current.id) {
       throw new DuplicateWebsiteError("A company already uses this website.");
     }
 
-    const updated = this.companies.update(context, current.id, {
+    const updated = await this.companies.update(context, current.id, {
       name: changes.name ?? current.name,
       website,
       phone: changes.phone ?? current.phone,
@@ -63,9 +63,9 @@ export class CompanyService {
     return updated;
   }
 
-  public delete(context: WorkspaceContext, companyIdValue: unknown): void {
+  public async delete(context: WorkspaceContext, companyIdValue: unknown): Promise<void> {
     const companyId = parseCompanyId(companyIdValue);
-    if (!this.companies.delete(context, companyId)) {
+    if (!await this.companies.delete(context, companyId)) {
       throw new CompanyNotFoundError("Company was not found.");
     }
   }

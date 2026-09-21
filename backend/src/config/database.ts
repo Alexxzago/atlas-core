@@ -3,8 +3,9 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runMigrations } from "./migrations.js";
-import { createLibsqlDatabase, type SqlDatabase } from "./sqlDatabase.js";
-import { SynchronousLibsqlDatabase, type SynchronousDatabase } from "./synchronousDatabase.js";
+import { runAsyncMigrations } from "./asyncMigrations.js";
+import { createLibsqlDatabase, DeferredSqlDatabase, LocalSqlDatabase, type SqlDatabase } from "./sqlDatabase.js";
+import type { SynchronousDatabase, SqlStatement } from "./synchronousDatabase.js";
 import { productionConfiguration, productionDatabaseConfiguration, type ProductionConfiguration, type ProductionDatabaseConfiguration } from "./productionConfiguration.js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -27,7 +28,14 @@ export { productionDatabaseConfiguration, type ProductionDatabaseConfiguration }
 
 export async function createProductionDatabase(environment: NodeJS.ProcessEnv = process.env): Promise<SqlDatabase> {
   const configuration = productionDatabaseConfiguration(environment);
-  return createLibsqlDatabase(configuration.url, configuration.authToken);
+  const database = createLibsqlDatabase(configuration.url, configuration.authToken);
+  try {
+    await runAsyncMigrations(database);
+    return database;
+  } catch (error: unknown) {
+    await database.close();
+    throw error;
+  }
 }
 
 export interface ProductionRuntimeDatabase { readonly database: SynchronousDatabase; readonly configuration: ProductionConfiguration; }
@@ -40,12 +48,26 @@ export function createProductionRuntimeDatabase(environment: NodeJS.ProcessEnv, 
   catch (error: unknown) { instance.close(); throw error; }
 }
 
-function createRuntimeDatabase(): { readonly database: SynchronousDatabase; readonly configuration: ProductionConfiguration | null } {
-  if (process.env.NODE_ENV !== "production") return Object.freeze({ database: createDatabase(databasePath), configuration: null });
-  const runtime = createProductionRuntimeDatabase(process.env, (configuration) => new SynchronousLibsqlDatabase(configuration.url, configuration.authToken));
-  return Object.freeze(runtime);
+class LocalSynchronousDatabase implements SynchronousDatabase {
+  private database: SynchronousDatabase | null = null;
+
+  private current(): SynchronousDatabase {
+    if (process.env.NODE_ENV === "production") throw new Error("Synchronous database access is unavailable in production.");
+    this.database ??= createDatabase(databasePath);
+    return this.database;
+  }
+
+  public prepare(sql: string): SqlStatement { return this.current().prepare(sql); }
+  public exec(sql: string): void { this.current().exec(sql); }
+  public get isTransaction(): boolean { return this.current().isTransaction; }
+  public close(): void { this.database?.close(); }
 }
 
-const runtime = createRuntimeDatabase();
-export const database = runtime.database;
-export const runtimeProductionConfiguration = runtime.configuration;
+const production = process.env.NODE_ENV === "production";
+const runtimeConfiguration = production ? productionConfiguration(process.env) : null;
+export const database: SynchronousDatabase = new LocalSynchronousDatabase();
+export const sqlDatabase: SqlDatabase = production
+  ? new DeferredSqlDatabase(() => createProductionDatabase())
+  : new LocalSqlDatabase(createDatabase(databasePath));
+export async function initializeSqlDatabase(): Promise<void> { if (sqlDatabase instanceof DeferredSqlDatabase) await sqlDatabase.initialize(); }
+export const runtimeProductionConfiguration = runtimeConfiguration;

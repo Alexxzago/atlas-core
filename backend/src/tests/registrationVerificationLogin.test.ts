@@ -53,7 +53,7 @@ test("registration verification and login journey succeeds with original passwor
   const proof = verificationUrl.searchParams.get("proof")!;
 
   // 3. Verify email
-  const verifyResult = verificationService.verify(proof);
+  const verifyResult = await verificationService.verify(proof);
   assert.equal(verifyResult, "verified");
 
   // 4. Verify DB state

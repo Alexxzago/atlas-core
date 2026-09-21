@@ -67,9 +67,9 @@ function createAction(value: ReturnType<typeof fixture>, digit: string) {
   return created.action;
 }
 
-function lease(value: ReturnType<typeof fixture>, id: string) {
+async function lease(value: ReturnType<typeof fixture>, id: string) {
   const worker = new ProactiveDueWorkerService(value.repository, { now: () => at });
-  const result = worker.claimDue("pass4b-worker").find((item) => item.action.id === id);
+  const result = (await worker.claimDue("pass4b-worker")).find((item) => item.action.id === id);
   assert.ok(result);
   return result;
 }
@@ -80,43 +80,43 @@ function execution(value: ReturnType<typeof fixture>, actionId: string, digit: s
   return id;
 }
 
-test("EPIC045 PASS4B selects one valid proactive result and rejects invalid purpose and scope", () => {
+test("EPIC045 PASS4B selects one valid proactive result and rejects invalid purpose and scope", async () => {
   const value = fixture();
   try {
-    const created = createAction(value, "a"), currentLease = lease(value, created.id), valid = execution(value, created.id, "a");
+    const created = createAction(value, "a"), currentLease = await lease(value, created.id), valid = execution(value, created.id, "a");
     const selected = value.repository.selectCompletedExecution(value.context, value.company.id, { actionId: created.id, executionRecordId: valid, leaseToken: currentLease.leaseToken, now: at })!;
     assert.equal(selected.state, "runtime_completed"); assert.equal(selected.assistantExecutionRecordId, valid); assert.equal(selected.leaseToken, null);
     assert.equal(value.repository.findSelectedExecution(value.context, value.company.id, created.id)?.result, "Result a");
     assert.throws(() => value.db.prepare("UPDATE proactive_actions SET assistant_execution_record_id=NULL WHERE id=?").run(created.id));
     assert.throws(() => value.db.prepare("UPDATE proactive_actions SET state='ready' WHERE id=?").run(created.id));
-    assert.equal(new ProactiveDueWorkerService(value.repository, { now: () => at }).claimDue("another").some((item) => item.action.id === created.id), false);
+    assert.equal((await new ProactiveDueWorkerService(value.repository, { now: () => at }).claimDue("another")).some((item) => item.action.id === created.id), false);
     assert.equal((value.db.prepare("SELECT COUNT(*) count FROM outbound_deliveries").get() as { count: number }).count, 0);
     assert.equal((value.db.prepare("SELECT COUNT(*) count FROM proactive_action_visibility").get() as { count: number }).count, 0);
     assert.throws(() => value.db.prepare("INSERT INTO assistant_execution_records(id,company_id,assistant_profile_id,profile_snapshot_json,knowledge_version_id,execution_snapshot_json,provider,purpose,state,fallback_used,result,input_tokens,output_tokens,error_code,started_at,completed_at,duration_milliseconds) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run("aex_ffffffffffffffffffffffffffffffff", value.company.id, value.profileId, "{}", value.knowledgeId, "{}", "test", "unknown", "answered", 0, "Result", null, null, null, at, at, 0));
-    const other = createAction(value, "b"), otherLease = lease(value, other.id), preview = execution(value, other.id, "b", "preview");
+    const other = createAction(value, "b"), otherLease = await lease(value, other.id), preview = execution(value, other.id, "b", "preview");
     assert.equal(value.repository.selectCompletedExecution(value.context, value.company.id, { actionId: other.id, executionRecordId: preview, leaseToken: otherLease.leaseToken, now: at }), null);
     assert.equal(value.repository.selectCompletedExecution(value.context, value.company.id, { actionId: other.id, executionRecordId: valid, leaseToken: otherLease.leaseToken, now: at }), null);
   } finally { value.db.close(); }
 });
 
-test("EPIC045 PASS4B fences authority, assignment, window, and stale leases before selection", () => {
+test("EPIC045 PASS4B fences authority, assignment, window, and stale leases before selection", async () => {
   const cases: Array<{ readonly mutate: (value: ReturnType<typeof fixture>) => void; readonly reason: string }> = [
     { mutate: (value) => { value.db.prepare("UPDATE conversation_controls SET authority_generation=2 WHERE conversation_id=?").run(value.conversation.id); }, reason: "authority_lost" },
     { mutate: (value) => { value.db.prepare("UPDATE whatsapp_connections SET status='inactive' WHERE id=?").run(value.connectionId); }, reason: "whatsapp_connection_unavailable" },
   ];
   for (const [index, item] of cases.entries()) {
     const value = fixture();
-    try { const created = createAction(value, (index + 3).toString(16)), currentLease = lease(value, created.id), record = execution(value, created.id, (index + 5).toString(16)); item.mutate(value); assert.equal(value.repository.selectCompletedExecution(value.context, value.company.id, { actionId: created.id, executionRecordId: record, leaseToken: currentLease.leaseToken, now: at }), null); assert.equal(value.repository.findAction(value.context, value.company.id, created.id)?.safeReasonCode, item.reason); } finally { value.db.close(); }
+    try { const created = createAction(value, (index + 3).toString(16)), currentLease = await lease(value, created.id), record = execution(value, created.id, (index + 5).toString(16)); item.mutate(value); assert.equal(value.repository.selectCompletedExecution(value.context, value.company.id, { actionId: created.id, executionRecordId: record, leaseToken: currentLease.leaseToken, now: at }), null); assert.equal(value.repository.findAction(value.context, value.company.id, created.id)?.safeReasonCode, item.reason); } finally { value.db.close(); }
   }
   const stale = fixture();
-  try { const created = createAction(stale, "e"), currentLease = lease(stale, created.id), record = execution(stale, created.id, "e"); assert.equal(stale.repository.selectCompletedExecution(stale.context, stale.company.id, { actionId: created.id, executionRecordId: record, leaseToken: "pal_stale", now: at }), null); assert.equal(stale.repository.findAction(stale.context, stale.company.id, created.id)?.state, "leased"); assert.ok(currentLease); } finally { stale.db.close(); }
+  try { const created = createAction(stale, "e"), currentLease = await lease(stale, created.id), record = execution(stale, created.id, "e"); assert.equal(stale.repository.selectCompletedExecution(stale.context, stale.company.id, { actionId: created.id, executionRecordId: record, leaseToken: "pal_stale", now: at }), null); assert.equal(stale.repository.findAction(stale.context, stale.company.id, created.id)?.state, "leased"); assert.ok(currentLease); } finally { stale.db.close(); }
 });
 
 test("EPIC045 PASS4B serializes result selection and preserves the chosen result across restart", async () => {
   const directory = mkdtempSync(join(tmpdir(), "atlas-epic045-pass4b-")), path = join(directory, "atlas.sqlite"), first = fixture(path);
   let second: DatabaseSync | null = null;
   try {
-    const created = createAction(first, "c"), currentLease = lease(first, created.id), left = execution(first, created.id, "c"), right = execution(first, created.id, "d");
+    const created = createAction(first, "c"), currentLease = await lease(first, created.id), left = execution(first, created.id, "c"), right = execution(first, created.id, "d");
     second = new DatabaseSync(path); second.exec("PRAGMA foreign_keys=ON"); const other = new ProactiveActionRepository(second);
     assert.ok(first.repository.selectCompletedExecution(first.context, first.company.id, { actionId: created.id, executionRecordId: left, leaseToken: currentLease.leaseToken, now: at }));
     assert.equal(other.selectCompletedExecution(first.context, first.company.id, { actionId: created.id, executionRecordId: right, leaseToken: currentLease.leaseToken, now: at }), null);
@@ -179,10 +179,10 @@ test("EPIC045 PASS6A operation ledger matches the durable action vocabulary and 
   } finally { value.db.close(); }
 });
 
-test("EPIC045 PASS6A durably replays a stale cancellation against runtime_completed", () => {
+test("EPIC045 PASS6A durably replays a stale cancellation against runtime_completed", async () => {
   const value = fixture();
   try {
-    const created = createAction(value, "e"), claimed = lease(value, created.id), record = execution(value, created.id, "e"), selected = value.repository.selectCompletedExecution(value.context, value.company.id, { actionId: created.id, executionRecordId: record, leaseToken: claimed.leaseToken, now: at })!;
+    const created = createAction(value, "e"), claimed = await lease(value, created.id), record = execution(value, created.id, "e"), selected = value.repository.selectCompletedExecution(value.context, value.company.id, { actionId: created.id, executionRecordId: record, leaseToken: claimed.leaseToken, now: at })!;
     const input = { actorId: "usr_pass6a", operationId: "cancel-runtime-completed", expectedVersion: created.version, occurredAt: at };
     assert.equal(value.repository.requestCancel(value.context, value.company.id, selected.id, input).kind, "stale_version");
     assert.equal(value.repository.requestCancel(value.context, value.company.id, selected.id, input).kind, "replayed_stale");
@@ -197,7 +197,7 @@ test("EPIC045 PASS4 executes a real proactive runtime without inbound, outbound,
   try {
     value.db.prepare("UPDATE companies SET status='ready' WHERE id=?").run(value.company.id);
     value.db.prepare("UPDATE assistant_profiles SET business_role='Advisor',objective='Help customers',welcome_message='Welcome' WHERE id=?").run(value.profileId);
-    const created = createAction(value, "4"), claimed = lease(value, created.id);
+    const created = createAction(value, "4"), claimed = await lease(value, created.id);
     const before = value.db.prepare("SELECT (SELECT COUNT(*) FROM conversation_messages WHERE direction='inbound') inbound,(SELECT COUNT(*) FROM conversation_messages WHERE direction='outbound') outbound,(SELECT COUNT(*) FROM channel_provider_events) events,(SELECT COUNT(*) FROM provider_message_records) records,(SELECT COUNT(*) FROM outbound_deliveries) deliveries,(SELECT COUNT(*) FROM proactive_action_visibility) visibility,(SELECT COUNT(*) FROM conversation_intelligence_applied_messages) intelligence").get() as Record<string, number>;
     const requests: AssistantExecutionRequest[] = [];
     const runtime = new OperationalAssistantRuntime({ execute: async (request) => { requests.push(request); return { outcome: "answered" as const, answer: "A useful follow-up." }; } }, new AssistantExecutionRecordRepository(value.db), { now: () => at });
@@ -238,7 +238,7 @@ function proactiveRuntime(value: ReturnType<typeof fixture>, execute: (request: 
 test("EPIC045 PASS4 heartbeat durably retains a long in-flight lease without extra attempts or audits", async () => {
   const directory = mkdtempSync(join(tmpdir(), "atlas-epic045-heartbeat-")), path = join(directory, "atlas.sqlite"), value = fixture(path); let second: DatabaseSync | null = null;
   try {
-    const clock = { value: at, now() { return this.value; } }, created = createAction(value, "5"), claimed = lease(value, created.id);
+    const clock = { value: at, now() { return this.value; } }, created = createAction(value, "5"), claimed = await lease(value, created.id);
     let resolve!: () => void; const runtime = proactiveRuntime(value, async () => new Promise((done) => { resolve = () => done({ outcome: "answered", answer: "late" }); }), clock, 1);
     const running = runtime.execute(claimed); await new Promise((done) => setTimeout(done, 5));
     clock.value = "2026-08-28T12:00:20.000Z"; await new Promise((done) => setTimeout(done, 3));
@@ -256,7 +256,7 @@ test("EPIC045 PASS4 heartbeat durably retains a long in-flight lease without ext
 test("EPIC045 PASS4 stale in-flight runtime cannot select after lease recovery", async () => {
   const value = fixture();
   try {
-    const clock = { value: at, now() { return this.value; } }, created = createAction(value, "6"), claimed = lease(value, created.id);
+    const clock = { value: at, now() { return this.value; } }, created = createAction(value, "6"), claimed = await lease(value, created.id);
     let resolve!: () => void; const runtime = proactiveRuntime(value, async () => new Promise((done) => { resolve = () => done({ outcome: "answered", answer: "stale" }); }), clock, 999_999);
     const running = runtime.execute(claimed); await new Promise((done) => setTimeout(done, 1));
     clock.value = "2026-08-28T12:01:01.000Z";
@@ -272,7 +272,7 @@ test("EPIC045 PASS4 preserves completed evidence across a crash before selection
   try {
     value.db.prepare("UPDATE companies SET status='ready' WHERE id=?").run(value.company.id);
     value.db.prepare("UPDATE assistant_profiles SET business_role='Advisor',objective='Help customers',welcome_message='Welcome' WHERE id=?").run(value.profileId);
-    const created = createAction(value, "a"), claimed = lease(value, created.id), profile = new AssistantProfileRepository(value.db).findById(value.context, value.company.id, claimed.action.assistantProfileId as never)!;
+    const created = createAction(value, "a"), claimed = await lease(value, created.id), profile = new AssistantProfileRepository(value.db).findById(value.context, value.company.id, claimed.action.assistantProfileId as never)!;
     const knowledge: CompanyKnowledgeVersion = { id: value.knowledgeId, companyId: value.company.id, versionNumber: 1, compilerVersion: "company-knowledge-compiler-v1", snapshotDigest: "a".repeat(64), publishedByActorId: "system", publishedAt: at, publicationVersion: 1, sourceRevisionIds: [], knowledge: { company: { name: value.company.name, website: value.company.website, phone: "", email: "" }, business: { services: [], hours: "", locations: [] }, faq: [] } };
     const record = await new OperationalAssistantRuntime({ execute: async () => ({ outcome: "answered" as const, answer: "durable before selection" }) }, new AssistantExecutionRecordRepository(value.db), { now: () => at }).execute(new CompanyRepository(value.db).findById(value.context, value.company.id)!, profile, knowledge, "code-owned", [], { purpose: "proactive_execution", provider: "test", fallbackOnUnavailable: true, proactiveActionId: created.id, snapshotContext: { conversationId: created.conversationId, whatsAppConnectionId: created.whatsAppConnectionId, authorityGeneration: 1, channelProvider: "whatsapp" } });
     value.db.close(); reopened = new DatabaseSync(path); reopened.exec("PRAGMA foreign_keys=ON"); runMigrations(reopened);
@@ -291,7 +291,7 @@ test("EPIC045 PASS4 final selection suppresses deferred runtime after authority 
   for (const item of cases) {
     const value = fixture();
     try {
-      const clock = { value: at, now() { return this.value; } }, created = createAction(value, item.digit), claimed = lease(value, created.id);
+      const clock = { value: at, now() { return this.value; } }, created = createAction(value, item.digit), claimed = await lease(value, created.id);
       let resolve!: () => void; const runtime = proactiveRuntime(value, async () => new Promise((done) => { resolve = () => done({ outcome: "answered", answer: "late" }); }), clock, 999_999), before = value.db.prepare("SELECT (SELECT COUNT(*) FROM conversation_messages WHERE direction='outbound') outbound,(SELECT COUNT(*) FROM provider_message_records) records,(SELECT COUNT(*) FROM outbound_deliveries) deliveries,(SELECT COUNT(*) FROM proactive_action_visibility) visibility,(SELECT COUNT(*) FROM conversation_intelligence_applied_messages) intelligence").get();
       const running = runtime.execute(claimed); await new Promise((done) => setTimeout(done, 1)); item.mutate(value, clock); resolve(); await running;
       const current = value.repository.findAction(value.context, value.company.id, created.id)!;
@@ -304,7 +304,7 @@ test("EPIC045 PASS4 final selection suppresses deferred runtime after authority 
 test("EPIC045 PASS4 keeps its heartbeat through an in-flight service-window expiry and suppresses without effects", async () => {
   const directory = mkdtempSync(join(tmpdir(), "atlas-epic045-window-race-")), path = join(directory, "atlas.sqlite"), value = fixture(path); let second: DatabaseSync | null = null;
   try {
-    const clock = { value: at, now() { return this.value; } }, created = createAction(value, "b"), claimed = lease(value, created.id);
+    const clock = { value: at, now() { return this.value; } }, created = createAction(value, "b"), claimed = await lease(value, created.id);
     let resolve!: () => void, tick: () => void = () => { throw new Error("Heartbeat was not started."); };
     const runtime = proactiveRuntime(value, async () => new Promise((done) => { resolve = () => done({ outcome: "answered", answer: "too late" }); }), clock, 20_000, (callback) => { tick = callback; return () => {}; });
     const before = value.db.prepare("SELECT (SELECT COUNT(*) FROM conversation_messages WHERE direction='outbound') outbound,(SELECT COUNT(*) FROM provider_message_records) records,(SELECT COUNT(*) FROM outbound_deliveries) deliveries,(SELECT COUNT(*) FROM proactive_action_visibility) visibility,(SELECT COUNT(*) FROM conversation_intelligence_applied_messages) intelligence").get();
@@ -325,10 +325,10 @@ test("EPIC045 PASS4 keeps its heartbeat through an in-flight service-window expi
   } finally { if (value.db.isOpen) value.db.close(); if (second?.isOpen) second.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test("EPIC045 PASS5 materializes once and atomically settles proactive acceptance with visibility", () => {
+test("EPIC045 PASS5 materializes once and atomically settles proactive acceptance with visibility", async () => {
   const value = fixture();
   try {
-    const created = createAction(value, "9"), claimed = lease(value, created.id), record = execution(value, created.id, "9");
+    const created = createAction(value, "9"), claimed = await lease(value, created.id), record = execution(value, created.id, "9");
     assert.ok(value.repository.selectCompletedExecution(value.context, value.company.id, { actionId: created.id, executionRecordId: record, leaseToken: claimed.leaseToken, now: at }));
     assert.equal(value.repository.materializeCompleted(at, 25).length, 1);
     const reserved = value.repository.findAction(value.context, value.company.id, created.id)!;
@@ -344,8 +344,8 @@ test("EPIC045 PASS5 materializes once and atomically settles proactive acceptanc
   } finally { value.db.close(); }
 });
 
-function reserveForPass5(value: ReturnType<typeof fixture>, digit: string) {
-  const created = createAction(value, digit), claimed = lease(value, created.id), record = execution(value, created.id, digit);
+async function reserveForPass5(value: ReturnType<typeof fixture>, digit: string) {
+  const created = createAction(value, digit), claimed = await lease(value, created.id), record = execution(value, created.id, digit);
   assert.ok(value.repository.selectCompletedExecution(value.context, value.company.id, { actionId: created.id, executionRecordId: record, leaseToken: claimed.leaseToken, now: at }));
   assert.equal(value.repository.materializeCompleted(at, 25).length, 1);
   return value.repository.findAction(value.context, value.company.id, created.id)!;
@@ -355,7 +355,7 @@ function outboundService(value: ReturnType<typeof fixture>, provider: FakeWhatsA
   return new WhatsAppOutboundDeliveryService(new ConversationRepository(value.db), new WhatsAppConnectionRepository(value.db), new ProviderMessageRecordRepository(value.db), new OutboundDeliveryRepository(value.db), { resolve: () => "token" } as never, () => provider, { now: () => at }, undefined, new WhatsAppConversationRepository(value.db));
 }
 
-test("EPIC045 PASS5B fences takeover, assignment, and service-window races at send start", () => {
+test("EPIC045 PASS5B fences takeover, assignment, and service-window races at send start", async () => {
   const cases: Array<{ readonly digit: string; readonly mutate: (value: ReturnType<typeof fixture>) => void; readonly reason: string }> = [
     { digit: "a", mutate: (value) => { value.db.prepare("UPDATE conversation_controls SET state='human_required',authority_generation=2 WHERE conversation_id=?").run(value.conversation.id); }, reason: "authority_lost" },
     { digit: "b", mutate: (value) => { value.db.prepare("UPDATE whatsapp_connections SET assistant_profile_id='asp_changed' WHERE id=?").run(value.connectionId); }, reason: "assistant_assignment_changed" },
@@ -365,7 +365,7 @@ test("EPIC045 PASS5B fences takeover, assignment, and service-window races at se
     const value = fixture();
     try {
       if (item.digit === "b") value.db.prepare("INSERT INTO assistant_profiles(id,company_id,name,normalized_name,tone,assistant_language,fallback_message,status,created_at,updated_at) VALUES('asp_changed',?,'Changed','changed','professional','en','Fallback','draft',?,?)").run(value.company.id, at, at);
-      const reserved = reserveForPass5(value, item.digit), delivery = new OutboundDeliveryRepository(value.db).leaseReady("worker", at, "2026-08-28T12:01:00.000Z", 1)[0]!;
+      const reserved = await reserveForPass5(value, item.digit), delivery = new OutboundDeliveryRepository(value.db).leaseReady("worker", at, "2026-08-28T12:01:00.000Z", 1)[0]!;
       assert.equal(delivery.id, reserved.outboundDeliveryId); assert.equal(new OutboundDeliveryRepository(value.db).authorizeLease(delivery.id, "worker", at), true);
       item.mutate(value);
       assert.equal(new OutboundDeliveryRepository(value.db).beginSend(delivery.id, "worker", at), false);
@@ -384,7 +384,7 @@ test("EPIC045 PASS5B classifies retryable, permanent, and uncertain provider out
   for (const item of cases) {
     const value = fixture(), provider = new FakeWhatsAppOutboundProvider();
     try {
-      const reserved = reserveForPass5(value, item.digit);
+      const reserved = await reserveForPass5(value, item.digit);
       if (typeof item.failure === "string") provider.enqueueAccepted(item.failure); else provider.enqueueFailed(item.failure);
       await outboundService(value, provider).dispatchReady("worker");
       assert.equal(new OutboundDeliveryRepository(value.db).findById(reserved.outboundDeliveryId as never)?.state, item.deliveryState);
@@ -394,10 +394,10 @@ test("EPIC045 PASS5B classifies retryable, permanent, and uncertain provider out
   }
 });
 
-test("EPIC045 PASS5B materialization and cancellation serialize across SQLite connections and preserve ordering", () => {
+test("EPIC045 PASS5B materialization and cancellation serialize across SQLite connections and preserve ordering", async () => {
   const directory = mkdtempSync(join(tmpdir(), "atlas-epic045-pass5b-race-")), path = join(directory, "atlas.sqlite"), value = fixture(path); let second: DatabaseSync | null = null;
   try {
-    const first = reserveForPass5(value, "1");
+    const first = await reserveForPass5(value, "1");
     second = new DatabaseSync(path); second.exec("PRAGMA foreign_keys=ON");
     assert.equal(new ProactiveActionRepository(second).materializeCompleted(at, 25).length, 0);
     const standardMessage = `cmsg_${"3".repeat(32)}`, standardRecord = `pmr_${"3".repeat(32)}`, standardDelivery = `odl_${"3".repeat(32)}`;
@@ -414,7 +414,7 @@ test("EPIC045 PASS5B materialization and cancellation serialize across SQLite co
 test("EPIC045 PASS5B acceptance rollback is all-or-nothing and semantic recovery is exactly once after restart", async () => {
   const directory = mkdtempSync(join(tmpdir(), "atlas-epic045-pass5b-semantic-")), path = join(directory, "atlas.sqlite"), value = fixture(path); let reopened: DatabaseSync | null = null;
   try {
-    const reserved = reserveForPass5(value, "2"), deliveries = new OutboundDeliveryRepository(value.db), leased = deliveries.leaseReady("worker", at, "2026-08-28T12:01:00.000Z", 1)[0]!;
+    const reserved = await reserveForPass5(value, "2"), deliveries = new OutboundDeliveryRepository(value.db), leased = deliveries.leaseReady("worker", at, "2026-08-28T12:01:00.000Z", 1)[0]!;
     assert.equal(deliveries.beginSend(leased.id, "worker", at), true);
     value.db.exec("CREATE TRIGGER reject_pass5b_visibility BEFORE INSERT ON proactive_action_visibility BEGIN SELECT RAISE(ABORT,'rollback proof'); END;");
     assert.throws(() => deliveries.acceptSend(leased.id, "worker", "wamid-rollback", at));

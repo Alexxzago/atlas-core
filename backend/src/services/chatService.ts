@@ -1,5 +1,5 @@
 import type { AtlasAgent } from "../agents/atlas.js";
-import type { CompanyRepositoryPort, KnowledgeRepositoryPort } from "../application/ports/repositories.js";
+import type { CompanyPersistencePort, KnowledgeRepositoryPort } from "../application/ports/repositories.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 import { AnswerGenerationUnavailableError } from "../assistant/application/assistantExecution.js";
 
@@ -14,20 +14,20 @@ const TEMPORARY_RESPONSE = "I'm temporarily unable to check that information. I 
 
 export class ChatService {
   public constructor(
-    private readonly companies: CompanyRepositoryPort,
+    private readonly companies: CompanyPersistencePort,
     private readonly knowledge: KnowledgeRepositoryPort,
     private readonly agent: AtlasAgent
   ) {}
 
   public async chat(context: WorkspaceContext, companyId: number, message: string): Promise<ChatResult> {
-    const company = this.companies.findById(context, companyId);
+    const company = await this.companies.findById(context, companyId);
     if (!company) {
       return { kind: "company_not_found", answer: SAFE_RESPONSE };
     }
     if (company.status !== "ready") {
       return { kind: "company_not_ready", answer: SAFE_RESPONSE };
     }
-    const companyKnowledge = this.knowledge.load(context, companyId);
+    const companyKnowledge = await this.knowledge.load(context, companyId);
     if (!companyKnowledge) {
       return { kind: "knowledge_not_found", answer: SAFE_RESPONSE };
     }

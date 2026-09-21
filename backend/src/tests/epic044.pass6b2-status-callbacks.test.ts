@@ -24,17 +24,17 @@ const at = "2026-08-28T12:00:00.000Z";
 const connectionId = "wac_" + "6".repeat(32);
 const phoneNumberId = "phone-pass6b2";
 
-function setup(path = ":memory:") {
+async function setup(path = ":memory:") {
   const database = createDatabase(path), context = createWorkspaceContext(new WorkspaceRepository(database).resolveDefault()), companies = new CompanyRepository(database);
-  const company = companies.findById(context, 1) ?? companies.create(context, { name: "PASS6B2", website: "https://pass6b2.test" });
+  const company = await companies.findById(context, 1) ?? await companies.create(context, { name: "PASS6B2", website: "https://pass6b2.test" });
   const conversations = new ConversationService(new ConversationRepository(database), { now: () => at }), voices = new WhatsAppVoiceRepository(database), deliveries = new OutboundDeliveryRepository(database), messages = new ProviderMessageRecordRepository(database), derived: string[] = [];
   const intelligence = new ConversationIntelligenceService(new ConversationIntelligenceRepository(database), { derive: async ({ message }) => { derived.push(message.id); return [{ kind: "set_fact", key: "voice", value: message.content }] as const; } }, { now: () => at });
   const recovery = new VoiceDeferredSemanticRecoveryService(voices, intelligence);
   const status = new WhatsAppDeliveryStatusService(messages, deliveries, new MetaDeliveryStatusMapper(), new DeliveryLifecyclePolicy(), { now: () => at }, { resolveActiveByPhoneNumberId: (phone: unknown) => phone === phoneNumberId ? { id: connectionId } : null, recordWebhookActivity: () => undefined } as never);
   const webhook = new WhatsAppWebhookService({ appSecret: "", verifyToken: "" }, undefined, undefined, undefined, undefined, undefined, { now: () => at }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, status);
   let ordinal = 0;
-  const add = (suffix: string, responsePolicy: "deferred_voice" | "standard" = "deferred_voice", state: "accepted" | "uncertain" = "accepted") => {
-    const conversation = conversations.open(context, company.id, "whatsapp"), participant = conversations.addParticipant(context, company.id, conversation.id, { type: "assistant" }), message = conversations.addMessage(context, company.id, conversation.id, { senderParticipantId: participant.id, direction: "outbound", content: `reply ${suffix}` });
+  const add = async (suffix: string, responsePolicy: "deferred_voice" | "standard" = "deferred_voice", state: "accepted" | "uncertain" = "accepted") => {
+    const conversation = await conversations.open(context, company.id, "whatsapp"), participant = await conversations.addParticipant(context, company.id, conversation.id, { type: "assistant" }), message = await conversations.addMessage(context, company.id, conversation.id, { senderParticipantId: participant.id, direction: "outbound", content: `reply ${suffix}` });
     database.prepare("INSERT INTO conversation_controls(conversation_id,state,controlling_actor_id,last_controlling_actor_id,taken_at,released_at,last_operator_activity_at,attention_reason,resolved_at,resolved_by,version,created_at,updated_at,authority_generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(conversation.id, "automated", null, null, null, null, null, null, null, null, 1, at, at, 1);
     const token = (++ordinal).toString(16).padStart(32, "0"), recordId = `pmr_${token}`, deliveryId = `odl_${token}`, externalMessageId = `wamid-${suffix}`;
     database.prepare("INSERT INTO provider_message_records(id,communication_channel,transport_provider,direction,transport_connection_id,conversation_message_id,external_message_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(recordId, "whatsapp", "meta_whatsapp_cloud", "outbound", connectionId, message.id, null, at, at);
@@ -49,13 +49,13 @@ function setup(path = ":memory:") {
 }
 
 function callbacks(phone: string, statuses: readonly { readonly id: string; readonly status: string }[]): Buffer { return Buffer.from(JSON.stringify({ entry: [{ changes: [{ field: "messages", value: { metadata: { phone_number_id: phone }, statuses } }] }] })); }
-function deliveryState(value: ReturnType<typeof setup>, id: string): string { return (value.database.prepare("SELECT state FROM outbound_deliveries WHERE id=?").get(id) as { state: string }).state; }
-function visibility(value: ReturnType<typeof setup>, id: string): number { return (value.database.prepare("SELECT COUNT(*) AS count FROM voice_response_visibility WHERE outbound_delivery_id=?").get(id) as { count: number }).count; }
+function deliveryState(value: Awaited<ReturnType<typeof setup>>, id: string): string { return (value.database.prepare("SELECT state FROM outbound_deliveries WHERE id=?").get(id) as { state: string }).state; }
+function visibility(value: Awaited<ReturnType<typeof setup>>, id: string): number { return (value.database.prepare("SELECT COUNT(*) AS count FROM voice_response_visibility WHERE outbound_delivery_id=?").get(id) as { count: number }).count; }
 
 test("EPIC044 PASS6B2 routes Voice callbacks through the Meta lifecycle once without post-acceptance side effects", async () => {
-  const fixture = setup();
+  const fixture = await setup();
   try {
-    const voice = fixture.add("voice"), standard = fixture.add("standard", "standard"), voiceEventsBeforeCallbacks = (fixture.database.prepare("SELECT COUNT(*) AS count FROM conversation_events WHERE event_type='voice_state_changed' AND related_message_id=?").get(voice.message.id) as { count: number }).count;
+    const voice = await fixture.add("voice"), standard = await fixture.add("standard", "standard"), voiceEventsBeforeCallbacks = (fixture.database.prepare("SELECT COUNT(*) AS count FROM conversation_events WHERE event_type='voice_state_changed' AND related_message_id=?").get(voice.message.id) as { count: number }).count;
     assert.equal(visibility(fixture, voice.deliveryId), 1); assert.equal(visibility(fixture, standard.deliveryId), 0);
     await fixture.webhook.acknowledge(callbacks(phoneNumberId, [{ id: voice.externalMessageId, status: "read" }, { id: voice.externalMessageId, status: "delivered" }, { id: voice.externalMessageId, status: "read" }, { id: standard.externalMessageId, status: "delivered" }]));
     assert.equal(deliveryState(fixture, voice.deliveryId), "read"); assert.equal(deliveryState(fixture, standard.deliveryId), "delivered");
@@ -69,9 +69,9 @@ test("EPIC044 PASS6B2 routes Voice callbacks through the Meta lifecycle once wit
 });
 
 test("EPIC044 PASS6B2 ignores malformed and foreign callbacks and preserves uncertain no-visibility behavior", async () => {
-  const fixture = setup();
+  const fixture = await setup();
   try {
-    const voice = fixture.add("foreign"), uncertain = fixture.add("uncertain", "deferred_voice", "uncertain");
+    const voice = await fixture.add("foreign"), uncertain = await fixture.add("uncertain", "deferred_voice", "uncertain");
     await fixture.webhook.acknowledge(callbacks("foreign-phone", [{ id: voice.externalMessageId, status: "read" }]));
     await fixture.webhook.acknowledge(callbacks(phoneNumberId, [{ id: " ", status: "read" }, { id: "x".repeat(257), status: "read" }, { id: "unknown", status: "read" }]));
     assert.equal(deliveryState(fixture, voice.deliveryId), "accepted"); assert.equal(deliveryState(fixture, uncertain.deliveryId), "uncertain"); assert.equal(visibility(fixture, uncertain.deliveryId), 0);
@@ -81,12 +81,12 @@ test("EPIC044 PASS6B2 ignores malformed and foreign callbacks and preserves unce
 });
 
 test("EPIC044 PASS6B2 recovers atomic Voice acceptance after restart and retains callbacks after authority takeover", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "atlas-epic044-pass6b2-")), path = join(directory, "atlas.sqlite"), first = setup(path);
+  const directory = mkdtempSync(join(tmpdir(), "atlas-epic044-pass6b2-")), path = join(directory, "atlas.sqlite"), first = await setup(path);
   try {
-    const voice = first.add("restart");
+    const voice = await first.add("restart");
     first.database.prepare("UPDATE conversation_controls SET state='human_required',authority_generation=2 WHERE conversation_id=?").run(voice.conversation.id);
     first.database.close();
-    const restarted = setup(path);
+    const restarted = await setup(path);
     try {
       assert.equal(visibility(restarted, voice.deliveryId), 1); assert.equal(await restarted.recovery.recover(restarted.context, restarted.company.id), 1); assert.deepEqual(restarted.derived, [voice.message.id]);
       await restarted.webhook.acknowledge(callbacks(phoneNumberId, [{ id: voice.externalMessageId, status: "delivered" }, { id: voice.externalMessageId, status: "read" }]));

@@ -27,96 +27,96 @@ export interface ConversationClock { now(): string; }
 export class ConversationService {
   public constructor(private readonly conversations: ConversationRepositoryPort, private readonly clock: ConversationClock) {}
 
-  public open(context: WorkspaceContext, companyIdValue: unknown, channelValue: unknown = "internal"): Conversation {
+  public async open(context: WorkspaceContext, companyIdValue: unknown, channelValue: unknown = "internal"): Promise<Conversation> {
     const companyId = parseCompanyId(companyIdValue);
     const channel = parseChannel(channelValue);
     const now = this.clock.now();
     const conversation = reconstructConversation({
       id: conversationId(`cnv_${randomUUID().replaceAll("-", "")}`), companyId, channel, state: "open", createdAt: now, updatedAt: now, closedAt: null,
     });
-    const created = this.conversations.createConversation(context, conversation);
+    const created = await this.conversations.createConversation(context, conversation);
     if (!created) throw new ConversationNotFoundError("Company was not found.");
     return created;
   }
 
-  public get(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): Conversation {
+  public async get(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): Promise<Conversation> {
     const companyId = parseCompanyId(companyIdValue), id = parseConversationId(conversationIdValue);
-    const conversation = this.conversations.findConversation(context, companyId, id);
+    const conversation = await this.conversations.findConversation(context, companyId, id);
     if (!conversation) throw new ConversationNotFoundError("Conversation was not found.");
     return conversation;
   }
 
-  public close(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): Conversation {
-    const current = this.get(context, companyIdValue, conversationIdValue);
+  public async close(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): Promise<Conversation> {
+    const current = await this.get(context, companyIdValue, conversationIdValue);
     if (current.state === "closed") throw new ConversationClosedError("Conversation is already closed.");
     const now = this.clock.now();
     const closed = reconstructConversation({ ...current, state: "closed", updatedAt: now, closedAt: now });
-    if (!this.conversations.updateConversation(context, current.companyId, closed, "open")) {
+    if (!await this.conversations.updateConversation(context, current.companyId, closed, "open")) {
       throw new ConversationClosedError("Conversation is already closed.");
     }
     return closed;
   }
 
-  public addParticipant(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, value: unknown): ConversationParticipant {
-    const current = this.get(context, companyIdValue, conversationIdValue);
+  public async addParticipant(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, value: unknown): Promise<ConversationParticipant> {
+    const current = await this.get(context, companyIdValue, conversationIdValue);
     const input = participantInput(value), now = this.clock.now();
     const participant = reconstructConversationParticipant({
       id: conversationParticipantId(`cpt_${randomUUID().replaceAll("-", "")}`), conversationId: current.id, type: input.type, reference: input.reference, createdAt: now,
     });
-    const created = this.conversations.createParticipant(context, current.companyId, participant);
+    const created = await this.conversations.createParticipant(context, current.companyId, participant);
     if (!created) throw new ConversationNotFoundError("Conversation was not found.");
     return created;
   }
 
-  public addMessage(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, value: unknown): ConversationMessage {
-    const current = this.validateOpen(context, companyIdValue, conversationIdValue);
+  public async addMessage(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, value: unknown): Promise<ConversationMessage> {
+    const current = await this.validateOpen(context, companyIdValue, conversationIdValue);
     const input = messageInput(value);
-    const sender = this.conversations.findParticipant(context, current.companyId, input.senderParticipantId);
+    const sender = await this.conversations.findParticipant(context, current.companyId, input.senderParticipantId);
     if (!sender || sender.conversationId !== current.id) throw new ConversationNotFoundError("Conversation participant was not found.");
     const message = reconstructConversationMessage({
       id: conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`), conversationId: current.id, senderParticipantId: sender.id,
       direction: input.direction, content: input.content, idempotencyKey: input.idempotencyKey, executionRecordId: input.executionRecordId, createdAt: this.clock.now(),
     });
-    const created = this.conversations.createMessage(context, current.companyId, message);
+    const created = await this.conversations.createMessage(context, current.companyId, message);
     if (!created) throw new ConversationNotFoundError("Conversation was not found.");
     return created;
   }
 
-  public listMessages(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): ConversationMessage[] {
-    const current = this.get(context, companyIdValue, conversationIdValue);
+  public async listMessages(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): Promise<readonly ConversationMessage[]> {
+    const current = await this.get(context, companyIdValue, conversationIdValue);
     return this.conversations.listMessages(context, current.companyId, current.id);
   }
-  public findMessageByIdempotencyKey(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, idempotencyKey: string): ConversationMessage | null {
-    const current = this.get(context, companyIdValue, conversationIdValue);
+  public async findMessageByIdempotencyKey(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, idempotencyKey: string): Promise<ConversationMessage | null> {
+    const current = await this.get(context, companyIdValue, conversationIdValue);
     return this.conversations.findMessageByIdempotencyKey(context, current.companyId, current.id, idempotencyKey);
   }
-  public finalizeAssistantResponse(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, input: { inboundMessageId: ConversationMessage["id"]; outboundParticipantId: ConversationParticipant["id"]; executionRecordId: string; authorityGeneration: number; content: string; idempotencyKey: string; occurredAt: string; whatsAppConnectionId?: string }): AssistantResponseFinalizationResult {
-    const current = this.get(context, companyIdValue, conversationIdValue);
+  public async finalizeAssistantResponse(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, input: { inboundMessageId: ConversationMessage["id"]; outboundParticipantId: ConversationParticipant["id"]; executionRecordId: string; authorityGeneration: number; content: string; idempotencyKey: string; occurredAt: string; whatsAppConnectionId?: string }): Promise<AssistantResponseFinalizationResult> {
+    const current = await this.get(context, companyIdValue, conversationIdValue);
     return this.conversations.finalizeAssistantResponse(context, current.companyId, current.id, input.inboundMessageId, input.outboundParticipantId, input.executionRecordId, input.authorityGeneration, input.content, input.idempotencyKey, input.occurredAt, input.whatsAppConnectionId ?? null);
   }
-  public listInbox(context: WorkspaceContext, companyIdValue: unknown, actorId: UserId, input: unknown): ConversationInboxPage<ConversationInboxProjection> {
+  public async listInbox(context: WorkspaceContext, companyIdValue: unknown, actorId: UserId, input: unknown): Promise<ConversationInboxPage<ConversationInboxProjection>> {
     const companyId = parseCompanyId(companyIdValue);
-    if (!this.conversations.hasCompany(context, companyId)) throw new ConversationNotFoundError("Company was not found.");
+    if (!await this.conversations.hasCompany(context, companyId)) throw new ConversationNotFoundError("Company was not found.");
     const parsed = inboxInput(input);
     const cursor = parsed.cursor === null ? null : decodeConversationInboxCursor(parsed.cursor, context.workspaceId, companyId, parsed.filters);
     if (parsed.cursor !== null && cursor === null) throw new ConversationValidationError("Conversation cursor is invalid.");
-    const page = this.conversations.listConversationInboxPage(context, companyId, actorId, parsed.filters, cursor === null ? null : { activity: cursor.a, id: cursor.i }, parsed.limit);
+    const page = await this.conversations.listConversationInboxPage(context, companyId, actorId, parsed.filters, cursor === null ? null : { activity: cursor.a, id: cursor.i }, parsed.limit);
     const next = page.nextCursor === null ? null : JSON.parse(page.nextCursor) as { activity: string; id: string };
     return Object.freeze({ items: Object.freeze(page.items), nextCursor: next === null ? null : encodeConversationInboxCursor({ w: context.workspaceId, c: companyId, a: next.activity, i: next.id, ...parsed.filters }) });
   }
-  public detail(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, actorId?: UserId): ConversationDetailProjection {
+  public async detail(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, actorId?: UserId): Promise<ConversationDetailProjection> {
     const companyId = parseCompanyId(companyIdValue), id = parseConversationId(conversationIdValue);
-    const detail = this.conversations.findConversationDetail(context, companyId, id, actorId ?? ("anonymous" as UserId));
+    const detail = await this.conversations.findConversationDetail(context, companyId, id, actorId ?? ("anonymous" as UserId));
     if (!detail) throw new ConversationNotFoundError("Conversation was not found.");
-    return Object.freeze({ ...detail, controlledByCurrentActor: actorId === undefined ? false : this.conversations.isConversationControlledBy(context, companyId, detail.conversationId, actorId) });
+    return Object.freeze({ ...detail, controlledByCurrentActor: actorId === undefined ? false : await this.conversations.isConversationControlledBy(context, companyId, detail.conversationId, actorId) });
   }
-  public markRead(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, actorId: UserId): void {
+  public async markRead(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, actorId: UserId): Promise<void> {
     const companyId = parseCompanyId(companyIdValue), id = parseConversationId(conversationIdValue);
-    if (!this.conversations.markConversationRead(context, companyId, id, actorId, this.clock.now())) throw new ConversationNotFoundError("Conversation was not found.");
+    if (!await this.conversations.markConversationRead(context, companyId, id, actorId, this.clock.now())) throw new ConversationNotFoundError("Conversation was not found.");
   }
 
-  public validateOpen(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): Conversation {
-    const current = this.get(context, companyIdValue, conversationIdValue);
+  public async validateOpen(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown): Promise<Conversation> {
+    const current = await this.get(context, companyIdValue, conversationIdValue);
     if (current.state !== "open") throw new ConversationClosedError("Conversation is closed.");
     return current;
   }

@@ -207,10 +207,10 @@ test("verification succeeds once and invalid, expired, superseded and invalidate
   setup.clock.value = "2026-07-16T12:01:00.000Z";
   await setup.resend().resend("user@example.com", "en");
   const currentProof = proofFrom(delivery, 1);
-  assert.equal(setup.verify.verify(initialProof), "invalid_or_expired");
-  assert.equal(setup.verify.verify("invalid"), "invalid_or_expired");
-  assert.equal(setup.verify.verify(currentProof), "verified");
-  assert.equal(setup.verify.verify(currentProof), "invalid_or_expired");
+  assert.equal(await setup.verify.verify(initialProof), "invalid_or_expired");
+  assert.equal(await setup.verify.verify("invalid"), "invalid_or_expired");
+  assert.equal(await setup.verify.verify(currentProof), "verified");
+  assert.equal(await setup.verify.verify(currentProof), "invalid_or_expired");
   const user = new UserRepository(database).findById((database.prepare("SELECT id FROM users").get() as { id: string }).id as never);
   assert.equal(user?.status, "active");
   assert.equal(user?.authenticationIdentities[0]?.emailVerified, true);
@@ -224,7 +224,7 @@ test("verification succeeds once and invalid, expired, superseded and invalidate
   const expired = services(expiredDb, expiredDelivery);
   await expired.registration.register("expired@example.com", "en");
   expired.clock.value = "2026-07-16T13:00:00.000Z";
-  assert.equal(expired.verify.verify(proofFrom(expiredDelivery)), "invalid_or_expired");
+  assert.equal(await expired.verify.verify(proofFrom(expiredDelivery)), "invalid_or_expired");
   assert.equal(new UserRepository(expiredDb).findByNormalizedEmail("expired@example.com" as never)?.status, "pending_verification");
   expiredDb.close();
 
@@ -232,7 +232,7 @@ test("verification succeeds once and invalid, expired, superseded and invalidate
   const failedDelivery = new InMemoryVerificationDelivery("permanent_failure");
   const invalidated = services(invalidatedDb, failedDelivery);
   await invalidated.registration.register("invalidated@example.com", "en");
-  assert.equal(invalidated.verify.verify(proofFrom(failedDelivery)), "invalid_or_expired");
+  assert.equal(await invalidated.verify.verify(proofFrom(failedDelivery)), "invalid_or_expired");
   assert.equal(new UserRepository(invalidatedDb).findByNormalizedEmail("invalidated@example.com" as never)?.status, "pending_verification");
   invalidatedDb.close();
 });

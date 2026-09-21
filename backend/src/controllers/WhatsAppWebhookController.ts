@@ -9,12 +9,12 @@ export function createWhatsAppWebhookControllers(service: WhatsAppWebhookService
       if (challenge === null) { res.sendStatus(403); return; }
       res.type("text/plain").send(challenge);
     },
-    receive: (req, res): void => {
+    receive: async (req, res): Promise<void> => {
       const raw = req.body, signature = req.headers["x-hub-signature-256"], signatureValid = Buffer.isBuffer(raw) && service.signatureValid(raw, signature), summary = Buffer.isBuffer(raw) ? payloadSummary(raw) : emptySummary;
       diagnostic("whatsapp_webhook_received", { remoteIp: remoteIp(req), contentLength: req.headers["content-length"] ?? null, signaturePresent: typeof signature === "string" && signature.length > 0, signatureValid, ...summary });
       if (!signatureValid) { diagnostic("whatsapp_webhook_signature_rejected", { remoteIp: remoteIp(req) }); res.sendStatus(401); return; }
       if (service.parseEvents(raw).length === 0) diagnostic("whatsapp_webhook_payload_ignored", summary);
-      void service.acknowledge(raw).then(() => res.sendStatus(200)).catch(() => res.sendStatus(500));
+      try { await service.acknowledge(raw); res.sendStatus(200); } catch { res.sendStatus(500); }
     },
   };
 }

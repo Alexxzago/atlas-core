@@ -2327,6 +2327,33 @@ const migrations: Migration[] = [
     ALTER TABLE billing_provider_events ADD COLUMN safe_failure_code TEXT CHECK(safe_failure_code IS NULL OR length(safe_failure_code) BETWEEN 1 AND 100);
     CREATE INDEX idx_billing_provider_events_account_received ON billing_provider_events(billing_account_id,received_at DESC,id DESC);
   `);}},
+  { id:75,name:"0075_activation_verification_attempts",checksumSource:"activation-projection-web-chat-verification-session-bound-persisted-turn-outcome-v2",apply(database):void{database.exec(`
+    CREATE TABLE activation_verification_attempts(
+      id TEXT PRIMARY KEY CHECK(length(id)=36 AND substr(id,1,4)='ava_'),workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,web_chat_connection_id TEXT NOT NULL,
+      token_digest TEXT NOT NULL UNIQUE CHECK(length(token_digest)=64 AND token_digest NOT GLOB '*[^0-9a-f]*'),status TEXT NOT NULL CHECK(status IN ('pending','succeeded','failed','expired')),
+      created_at TEXT NOT NULL,expires_at TEXT NOT NULL,claimed_at TEXT,web_chat_session_id TEXT REFERENCES web_chat_sessions(id) ON DELETE RESTRICT,conversation_id TEXT REFERENCES conversations(id) ON DELETE RESTRICT,inbound_message_id TEXT REFERENCES conversation_messages(id) ON DELETE RESTRICT,execution_record_id TEXT REFERENCES assistant_execution_records(id) ON DELETE RESTRICT,outcome_ref TEXT CHECK(outcome_ref IS NULL OR outcome_ref IN ('answered','safe_fallback')),completed_at TEXT,failure_code TEXT CHECK(failure_code IS NULL OR failure_code='runtime_failure'),
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(web_chat_connection_id) REFERENCES web_chat_connections(id) ON DELETE CASCADE,
+      CHECK(expires_at>created_at),CHECK((claimed_at IS NULL AND web_chat_session_id IS NULL AND conversation_id IS NULL) OR (claimed_at IS NOT NULL AND web_chat_session_id IS NOT NULL AND conversation_id IS NOT NULL)),CHECK((status='pending' AND completed_at IS NULL AND inbound_message_id IS NULL AND execution_record_id IS NULL AND outcome_ref IS NULL AND failure_code IS NULL) OR (status='succeeded' AND claimed_at IS NOT NULL AND completed_at IS NOT NULL AND inbound_message_id IS NOT NULL AND execution_record_id IS NOT NULL AND outcome_ref IS NOT NULL AND failure_code IS NULL) OR (status='failed' AND claimed_at IS NOT NULL AND completed_at IS NOT NULL AND inbound_message_id IS NULL AND execution_record_id IS NULL AND outcome_ref IS NULL AND failure_code='runtime_failure') OR (status='expired' AND claimed_at IS NULL AND completed_at IS NOT NULL AND inbound_message_id IS NULL AND execution_record_id IS NULL AND outcome_ref IS NULL AND failure_code IS NULL))
+    );
+    CREATE INDEX idx_activation_verification_attempts_company_connection ON activation_verification_attempts(workspace_id,company_id,web_chat_connection_id,created_at DESC,id DESC);
+    CREATE TRIGGER activation_verification_attempt_scope_insert BEFORE INSERT ON activation_verification_attempts WHEN NOT EXISTS(SELECT 1 FROM web_chat_connections WHERE id=NEW.web_chat_connection_id AND workspace_id=NEW.workspace_id AND company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Activation verification attempt scope is invalid'); END;
+    CREATE TRIGGER activation_verification_attempts_no_delete BEFORE DELETE ON activation_verification_attempts BEGIN SELECT RAISE(ABORT,'Activation verification attempts are immutable'); END;
+  `);}},
+  { id:76,name:"0076_public_web_chat_durable_turn_claims",checksumSource:"public-web-chat-session-scoped-durable-idempotency-terminal-handoff-v1",apply(database):void{database.exec(`
+    CREATE TABLE public_web_chat_turns(
+      web_chat_session_id TEXT NOT NULL REFERENCES web_chat_sessions(id) ON DELETE CASCADE,
+      idempotency_key_digest TEXT NOT NULL CHECK(length(idempotency_key_digest)=64 AND idempotency_key_digest NOT GLOB '*[^0-9a-f]*'),
+      content_digest TEXT NOT NULL CHECK(length(content_digest)=64 AND content_digest NOT GLOB '*[^0-9a-f]*'),
+      status TEXT NOT NULL CHECK(status IN ('pending','succeeded','failed')),
+      inbound_message_id TEXT REFERENCES conversation_messages(id) ON DELETE RESTRICT,
+      execution_record_id TEXT REFERENCES assistant_execution_records(id) ON DELETE RESTRICT,
+      response_message TEXT,
+      created_at TEXT NOT NULL,completed_at TEXT,updated_at TEXT NOT NULL,
+      PRIMARY KEY(web_chat_session_id,idempotency_key_digest),
+      CHECK((status='pending' AND inbound_message_id IS NULL AND execution_record_id IS NULL AND response_message IS NULL AND completed_at IS NULL) OR (status='succeeded' AND inbound_message_id IS NOT NULL AND execution_record_id IS NOT NULL AND response_message IS NOT NULL AND completed_at IS NOT NULL) OR (status='failed' AND completed_at IS NOT NULL))
+    );
+    CREATE INDEX idx_public_web_chat_turns_cleanup ON public_web_chat_turns(status,updated_at);
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {
@@ -2338,6 +2365,77 @@ function migrationChecksum(migration: Migration): string {
 const retiredMigrations = new Map<number, { readonly name: string; readonly checksum: string }>([
   [61, { name: "0061_voice_audio_upload_reservation", checksum: "56ed576cbc89fef1304834bb20dcb38cb49498460154045193421176e0ee6940" }],
 ]);
+
+export interface MigrationRegistryEntry { readonly id: number; readonly name: string; readonly checksum: string; readonly retired?: true; }
+export interface PortableMigrationOperation {
+  readonly kind: "script" | "statement";
+  readonly sql: string;
+  readonly args: readonly (string | number | bigint | null | Uint8Array)[];
+}
+export interface PortableMigration extends MigrationRegistryEntry { readonly operations: readonly PortableMigrationOperation[]; readonly disableForeignKeys?: true; }
+
+/** Immutable inventory of the complete synchronous bootstrap history, including retired migration 0061. */
+export const migrationRegistry: readonly MigrationRegistryEntry[] = Object.freeze([
+  ...migrations.map((migration) => Object.freeze({ id: migration.id, name: migration.name, checksum: migrationChecksum(migration) })),
+  ...retiredMigrations.entries().map(([id, migration]) => Object.freeze({ id, ...migration, retired: true as const })),
+].sort((left, right) => left.id - right.id));
+export const migrationHead: MigrationRegistryEntry = migrationRegistry[migrationRegistry.length - 1]!;
+
+/**
+ * Converts the legacy synchronous migration closures into an immutable plan for
+ * a brand-new database. The recorder never opens SQLite: it supplies only the
+ * deterministic empty-database results required by historical backfills.
+ */
+export function freshPortableMigrations(): readonly PortableMigration[] {
+  const recorded = migrations.map((migration) => {
+    const recorder = new FreshMigrationRecorder();
+    migration.apply(recorder as unknown as SynchronousDatabase);
+    return Object.freeze({
+      id: migration.id,
+      name: migration.name,
+      checksum: migrationChecksum(migration),
+      ...(migration.disableForeignKeys ? { disableForeignKeys: true as const } : {}),
+      operations: Object.freeze(recorder.operations),
+    });
+  });
+  const retired = [...retiredMigrations.entries()].map(([id, migration]) => Object.freeze({
+    id,
+    name: migration.name,
+    checksum: migration.checksum,
+    retired: true as const,
+    operations: Object.freeze([]),
+  }));
+  return Object.freeze([...recorded, ...retired].sort((left, right) => left.id - right.id));
+}
+
+class FreshMigrationRecorder {
+  public readonly operations: PortableMigrationOperation[] = [];
+
+  public exec(sql: string): void {
+    this.operations.push(Object.freeze({ kind: "script", sql, args: Object.freeze([]) }));
+  }
+
+  public prepare(sql: string): { run: (...args: (string | number | bigint | null | Uint8Array)[]) => void; get: () => Record<string, unknown> | undefined; all: () => Record<string, unknown>[] } {
+    return {
+      run: (...args): void => { this.operations.push(Object.freeze({ kind: "statement", sql, args: Object.freeze(args) })); },
+      get: (): Record<string, unknown> | undefined => this.emptyResult(sql),
+      all: (): Record<string, unknown>[] => {
+        const result = this.emptyResult(sql);
+        return result ? [result] : [];
+      },
+    };
+  }
+
+  private emptyResult(sql: string): Record<string, unknown> | undefined {
+    if (/SELECT id FROM workspaces WHERE key/u.test(sql)) return { id: 1 };
+    if (/COUNT\(\*\) AS count/u.test(sql)) return { count: 0 };
+    if (/sqlite_master/u.test(sql)) return { exists: 1 };
+    if (/PRAGMA table_info\(companies\)/u.test(sql)) return { name: "id" };
+    if (/PRAGMA table_info\(scheduling_bookings\)/u.test(sql)) return { name: "id" };
+    if (/PRAGMA table_info\(scheduling_/u.test(sql)) return { name: "id" };
+    return undefined;
+  }
+}
 
 function readCount(database: SynchronousDatabase, table: "companies" | "company_knowledge" | "companies_workspace_migration"): number {
   const row = database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };

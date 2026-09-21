@@ -14,12 +14,12 @@ function readiness(input: Input = {}): PilotReadinessService {
   const connection = { id: "wac_safe", status: whatsApp === "operational" ? "active" : "inactive", assistantProfileId: profileId };
   const state = whatsApp === "operational" ? { validationState: "valid", healthState: "healthy" } : whatsApp === "validation_failed" ? { validationState: "invalid", healthState: "inactive" } : whatsApp === "health_degraded" ? { validationState: "valid", healthState: "degraded" } : { validationState: "not_validated", healthState: "inactive" };
   return new PilotReadinessService(
-    { findById: () => ({ lifecycle: input.lifecycle ?? "operational" }) } as never,
-    { assess: () => ({ assistantProfileId: profileId, blockers: input.assistant === false ? ["default_assistant_missing"] : [] }) } as never,
-    { loadCurrentVersion: () => input.knowledge === false ? null : { id: "kver_safe" } } as never,
-    { listByCompany: () => webChat === "absent" ? [] : [{ status: webChat === "operational" ? "active" : "inactive", assistantProfileId: profileId }] } as never,
-    { listByCompany: () => whatsApp === "absent" ? [] : [connection], findCredentials: () => whatsApp === "operational" ? { whatsAppConnectionId: connection.id } : null, findOperationalState: () => state } as never,
-    { pilotReadiness: () => input.commercial ?? "usable" }, { whatsAppEmbeddedSignupAvailable: input.platformAvailable ?? true }, { now: () => "2026-01-01T00:00:00.000Z" },
+    { findById: async () => ({ lifecycle: input.lifecycle ?? "operational" }) } as never,
+    { assess: async () => ({ assistantProfileId: profileId, blockers: input.assistant === false ? ["default_assistant_missing"] : [] }) } as never,
+    { loadCurrentVersion: async () => input.knowledge === false ? null : { id: "kver_safe" } } as never,
+    { listByCompany: async () => webChat === "absent" ? [] : [{ status: webChat === "operational" ? "active" : "inactive", assistantProfileId: profileId }] } as never,
+    { listByCompany: async () => whatsApp === "absent" ? [] : [connection], findCredentials: async () => whatsApp === "operational" ? { whatsAppConnectionId: connection.id } : null, findOperationalState: async () => state } as never,
+    { pilotReadiness: async () => input.commercial ?? "usable" }, { whatsAppEmbeddedSignupAvailable: input.platformAvailable ?? true }, { now: () => "2026-01-01T00:00:00.000Z" },
   );
 }
 

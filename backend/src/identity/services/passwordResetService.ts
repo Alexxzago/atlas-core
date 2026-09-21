@@ -16,15 +16,15 @@ export class PasswordResetService {
     try {
       const email = createEmailAddress(emailValue);
       if (localeValue !== "en" && localeValue !== "es") return;
-      issued = this.tx.execute(({ users, verifications, credentials }) => {
-        const user = users.findByNormalizedEmail(createNormalizedEmail(email));
+      issued = await this.tx.execute(async ({ users, verifications, credentials }) => {
+        const user = await users.findByNormalizedEmail(createNormalizedEmail(email));
         const identity = user?.authenticationIdentities.find((candidate) => candidate.normalizedEmail === createNormalizedEmail(email) && candidate.emailVerified);
-        if (!user || user.status !== "active" || !identity || !credentials.findCurrent(identity.id)) return null;
+        if (!user || user.status !== "active" || !identity || !await credentials.findCurrent(identity.id)) return null;
         const now = this.clock.now();
-        const current = verifications.findCurrent(identity.id, "password_reset");
-        if (current && !verifications.update(supersedeVerification(current, now), "pending")) return null;
+        const current = await verifications.findCurrent(identity.id, "password_reset");
+        if (current && !await verifications.update(supersedeVerification(current, now), "pending")) return null;
         const next = issuePasswordReset(user.id, identity.id, this.random, this.hash, this.clock, this.lifetimeMilliseconds);
-        verifications.create(next.workflow);
+        await verifications.create(next.workflow);
         return { workflow: next.workflow, proof: next.proof, email: identity.email, locale: user.locale };
       });
     } catch { return; }
@@ -32,7 +32,7 @@ export class PasswordResetService {
     const url = new URL("/identity/password-reset/complete", this.origin);
     url.searchParams.set("proof", issued.proof);
     const outcome = await this.delivery.deliver({ recipient: createEmailAddress(issued.email), locale: issued.locale, resetUrl: url.toString(), expiresAt: issued.workflow.expiresAt, workflowId: issued.workflow.id });
-    this.tx.execute(({ verifications }) => verifications.setDeliveryStatus(issued!.workflow.id, outcome, this.clock.now()));
+    await this.tx.execute(async ({ verifications }) => verifications.setDeliveryStatus(issued!.workflow.id, outcome, this.clock.now()));
   }
 
   public async complete(proofValue: string, password: string, confirmation: string): Promise<void> {
@@ -40,19 +40,19 @@ export class PasswordResetService {
     let proof;
     try { proof = parseVerificationProof(proofValue); } catch { throw new PasswordResetError(); }
     const protection = await this.passwords.protect(password);
-    this.tx.execute(({ users, verifications, credentials, sessions }) => {
+    await this.tx.execute(async ({ users, verifications, credentials, sessions }) => {
       const now = this.clock.now();
-      const workflow = verifications.findByDigest("password_reset", this.hash.version, this.hash.digest(proof, "password_reset"));
+      const workflow = await verifications.findByDigest("password_reset", this.hash.version, this.hash.digest(proof, "password_reset"));
       if (!workflow || !isVerificationCurrent(workflow, now)) throw new PasswordResetError();
-      const user = users.findById(workflow.userId);
+      const user = await users.findById(workflow.userId);
       const identity = user?.authenticationIdentities.find((candidate) => candidate.id === workflow.authenticationIdentityId && candidate.emailVerified);
-      const current = identity ? credentials.findCurrent(identity.id) : null;
+      const current = identity ? await credentials.findCurrent(identity.id) : null;
       if (!user || user.status !== "active" || !identity || !current) throw new PasswordResetError();
-      if (!credentials.replace(this.credential(identity.id, current.credentialVersion + 1, protection, now), current.credentialVersion)) throw new PasswordResetError();
-      if (!verifications.update(consumeVerification(workflow, now), "pending")) throw new PasswordResetError();
-      const remaining = verifications.findCurrent(identity.id, "password_reset");
-      if (remaining) verifications.update(supersedeVerification(remaining, now), "pending");
-      sessions.revokeAll(user.id, now, "password_reset");
+      if (!await credentials.replace(this.credential(identity.id, current.credentialVersion + 1, protection, now), current.credentialVersion)) throw new PasswordResetError();
+      if (!await verifications.update(consumeVerification(workflow, now), "pending")) throw new PasswordResetError();
+      const remaining = await verifications.findCurrent(identity.id, "password_reset");
+      if (remaining) await verifications.update(supersedeVerification(remaining, now), "pending");
+      await sessions.revokeAll(user.id, now, "password_reset");
     });
   }
 

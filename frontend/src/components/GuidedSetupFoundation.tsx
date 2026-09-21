@@ -10,10 +10,9 @@ import { GuidedSignIn } from "./GuidedSignIn";
 import { ActivationPending } from "./ActivationPending";
 import { GuidedForgotPassword } from "./GuidedForgotPassword";
 import { GuidedResetPassword } from "./GuidedResetPassword";
-import { Button, Container, Stack, Surface } from "../design-system/primitives";
+import { Button, Container, Stack, Stepper, Surface } from "../design-system/primitives";
 import { AuthLayout } from "./AuthLayout";
 import { StartupState } from "./StartupState";
-import { StepList } from "../design-system/product";
 import { resolveAuthenticatedOnboardingProgress, type AuthenticatedOnboardingProgress } from "../routing/onboardingProgress";
 
 const pageKeys = {
@@ -21,7 +20,7 @@ const pageKeys = {
 } as const;
 
 type OnboardingStep = "workspace" | "company" | "setup";
-export function GuidedSetupProgress({ current }: { readonly current: OnboardingStep }): React.JSX.Element { const { t } = useI18n(); const steps: ReadonlyArray<{ readonly id: OnboardingStep; readonly key: "assistantSetup.progress.workspace" | "assistantSetup.progress.company" | "assistantSetup.progress.configuration" }> = [{ id: "workspace", key: "assistantSetup.progress.workspace" }, { id: "company", key: "assistantSetup.progress.company" }, { id: "setup", key: "assistantSetup.progress.configuration" }]; const currentIndex = steps.findIndex((step) => step.id === current); return <nav aria-label={t("guided.progress.label")}><StepList className="onboarding-progress">{steps.map((step, index) => <li key={step.id} aria-current={step.id === current ? "step" : undefined} data-state={index < currentIndex ? "complete" : step.id === current ? "active" : "upcoming"}>{t(step.key)}</li>)}</StepList></nav>; }
+export function GuidedSetupProgress({ current }: { readonly current: OnboardingStep }): React.JSX.Element { const { t } = useI18n(); const steps: ReadonlyArray<{ readonly id: OnboardingStep; readonly key: "assistantSetup.progress.workspace" | "assistantSetup.progress.company" | "assistantSetup.progress.configuration" }> = [{ id: "workspace", key: "assistantSetup.progress.workspace" }, { id: "company", key: "assistantSetup.progress.company" }, { id: "setup", key: "assistantSetup.progress.configuration" }]; const currentIndex = steps.findIndex((step) => step.id === current); return <Stepper label={t("guided.progress.label")} steps={steps.map((step, index) => ({ label: t(step.key), state: index < currentIndex ? "complete" : step.id === current ? "current" : "upcoming" }))}/>; }
 export function PublicLayout({ children }: { readonly children: React.ReactNode }): React.JSX.Element { return <main id="main-content"><Container size="wide"><Stack gap="6"><header><strong>ATLAS</strong></header>{children}</Stack></Container></main>; }
 export function AccountLayout({ children }: { readonly children: React.ReactNode }): React.JSX.Element { return <AuthLayout>{children}</AuthLayout>; }
 export function OnboardingLayout({ children, step }: { readonly children: React.ReactNode; readonly step: OnboardingStep }): React.JSX.Element { return <main className="onboarding-shell" id="main-content"><Container size="narrow"><Stack gap="6"><header className="onboarding-brand"><strong>ATLAS</strong></header><GuidedSetupProgress current={step}/>{children}</Stack></Container></main>; }

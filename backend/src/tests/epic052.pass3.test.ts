@@ -14,6 +14,7 @@ import { BillingReconciliationRepository } from "../repositories/billingReconcil
 import { BillingWebhookRepository } from "../repositories/billingWebhookRepository.js";
 import { BillingAccountRepository, BillingCatalogRepository, BillingProviderCommercialOfferRepository, BillingSubscriptionRepository } from "../repositories/billingRepository.js";
 import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
+import { asyncBillingApplication, asyncBillingOperations } from "./helpers/asyncBillingTestComposition.js";
 
 const at = "2026-09-01T00:00:00.000Z";
 const stripeTimestamp = Math.floor(Date.parse(at) / 1_000);
@@ -23,7 +24,7 @@ function open(): DatabaseSync { const db = new DatabaseSync(":memory:"); db.exec
 function account(db: DatabaseSync, workspaceId = (db.prepare("SELECT id FROM workspaces WHERE key='default'").get() as { id: number }).id) { return new BillingAccountRepository(db).findByWorkspace(workspaceId)!; }
 function plan(db: DatabaseSync, key: string, kind: ProviderKind, amount = 100) { return new BillingCatalogRepository(db).create({ planKey: key, catalogVersion: 1, displayName: key, interval: "month", currency: kind === "stripe" ? "USD" : "ARS", amountMinor: amount, lifecycle: "active", maxCompanies: 1, maxAssistantProfiles: 1, maxActiveChannels: 1, mutationEligible: true, entitlementDefinitionVersion: 1, providerKind: kind, providerPriceId: `${kind}_${key}` }); }
 function offer(db: DatabaseSync, entryId: string, kind: ProviderKind) { return new BillingProviderCommercialOfferRepository(db).findForCatalogProvider(entryId, kind)!; }
-function operations(db: DatabaseSync, providers: BillingProviderRegistry) { return new BillingOperationService(new BillingAccountRepository(db), new BillingCatalogRepository(db), new BillingSubscriptionRepository(db), new BillingOperationRepository(db), providers, () => at); }
+function operations(db: DatabaseSync, providers: BillingProviderRegistry) { return asyncBillingOperations(db, providers, () => at); }
 function evidence(subscriptionId: string, reference: string) { return { kind: "success" as const, evidence: { providerSubscriptionId: subscriptionId, providerCommercialReference: reference, providerEvidenceState: "active" as const, currentPeriodStart: null, currentPeriodEnd: null, trialEndsAt: null, cancelAtPeriodEnd: false } }; }
 function enroll(db: DatabaseSync, value: { accountId: string; entryId: string; offerId: string; kind: ProviderKind; subscriptionId: string; suffix: string }): void {
   const created = new BillingOperationRepository(db).createOrReplay({ billingAccountId: value.accountId, kind: "checkout_session_create", providerKind: value.kind, operationId: `op_${value.suffix}`, fingerprint: "a".repeat(64), catalogEntryId: value.entryId, providerCommercialOfferId: value.offerId, at }).operation!;
@@ -168,11 +169,11 @@ test("EPIC052 PASS3 isolates reconciliation work in a mixed batch", async () => 
   } finally { db.close(); }
 });
 
-test("EPIC052 PASS3 retains only safe billing projections and redacts raw webhook payloads", () => {
+test("EPIC052 PASS3 retains only safe billing projections and redacts raw webhook payloads", async () => {
   const db = open();
   try {
-    const a = account(db), service = new BillingApplicationService(db, operations(db, new BillingProviderRegistry()), { checkoutSuccess: "https://atlas.test/s", checkoutCancel: "https://atlas.test/c", portalReturn: "https://atlas.test/p" });
-    assert.deepEqual(service.summary(a.workspaceId), { rolloutMode: "unmanaged", subscription: { state: "unmanaged", plan: null } });
+    const a = account(db), service = asyncBillingApplication(db, new BillingProviderRegistry(), { checkoutSuccess: "https://atlas.test/s", checkoutCancel: "https://atlas.test/c", portalReturn: "https://atlas.test/p" }, () => at);
+    assert.deepEqual(await service.summary(a.workspaceId), { rolloutMode: "unmanaged", subscription: { state: "unmanaged", plan: null } });
     assert.deepEqual((db.prepare("PRAGMA table_info(billing_provider_events)").all() as Array<{ name: string }>).map(column => column.name).filter(name => /payload|body/i.test(name)), ["payload_digest"]);
     assert.equal((db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='billing_provider_events'").get() as { sql: string }).sql.includes("raw"), false);
   } finally { db.close(); }

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import express,{type RequestHandler}from"express";
 import { createDatabase } from "../config/database.js";
+import { LocalSqlDatabase } from "../config/sqlDatabase.js";
 import type { CredentialEnrollmentDeliveryPort,CredentialEnrollmentDeliveryRequest } from "../identity/application/ports.js";
 import { reconstructUser,type UserId } from "../identity/domain/user.js";
 import { SecureRandomProvider,ScryptPasswordProvider,Sha256CredentialEnrollmentHashProvider,Sha256SessionIdentifierProvider } from "../identity/infrastructure/securityProviders.js";
@@ -17,7 +18,8 @@ import { WorkspaceRepository } from "../repositories/workspaceRepository.js";
 import { MembershipRepository } from "../repositories/workspaceAdministrationRepository.js";
 import type { Membership,MembershipId } from "../workspace/domain/membership.js";
 import { CompanyRepository } from "../repositories/companyRepository.js";
-import { KnowledgeRepository } from "../repositories/knowledgeRepository.js";
+import { KnowledgeRepository as AsyncKnowledgeRepository } from "../repositories/knowledgeRepository.js";
+import type { DatabaseSync } from "node:sqlite";
 import { createAuthorizedCompaniesRouter } from "../routes/authorizedCompanies.js";
 import { AuthorizationService } from "../workspace/services/authorizationService.js";
 import { WorkspaceResolver } from "../workspace/services/workspaceResolver.js";
@@ -30,6 +32,8 @@ import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 
 class Delivery implements CredentialEnrollmentDeliveryPort{public request:CredentialEnrollmentDeliveryRequest|null=null;public async deliver(value:CredentialEnrollmentDeliveryRequest){this.request=value;return"accepted"as const;}}
 const knowledge:CompanyKnowledge={company:{name:"Onboarding",website:"https://onboarding.test",phone:"",email:""},business:{services:["Service"],hours:"Always",locations:["Remote"]},faq:[]};
+
+class KnowledgeRepository extends AsyncKnowledgeRepository { public constructor(database: DatabaseSync) { super(new LocalSqlDatabase(database)); } }
 
 test("authenticated nested onboarding uses the production repository for absence, integrity, and availability",async()=>{
   const directory=mkdtempSync(join(tmpdir(),"atlas-onboarding-evidence-")),path=join(directory,"atlas.sqlite"),db=createDatabase(path),users=new UserRepository(db),userId="usr_onboarding_repository"as UserId,now=new Date().toISOString();

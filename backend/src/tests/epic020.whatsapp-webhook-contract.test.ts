@@ -25,7 +25,7 @@ test("EPIC-020 normalizes ordered inbound text and safe message status events on
 
 test("EPIC-020 excludes malformed and unsupported structures without side effects", async () => {
   let processed = 0;
-  const service = new WhatsAppWebhookService({ appSecret: "", verifyToken: "" }, { resolveActiveByPhoneNumberId: () => { processed += 1; return null; } } as never, {} as never, {} as never, {} as never, {} as never);
+  const service = new WhatsAppWebhookService({ appSecret: "", verifyToken: "" }, { resolveActiveByPhoneNumberId: () => { processed += 1; return null; }, async recordWebhookActivity(): Promise<void> {} } as never, {} as never, {} as never, {} as never, {} as never);
   assert.deepEqual(service.parseEvents(raw({ entry: [{ changes: [{ field: "other", value: {} }] }] })), []);
   assert.deepEqual(service.parseEvents(payload([{ type: "text", from: "wa", id: "in", text: { body: "" } }], [{ status: "read" }])), []);
   await service.receive(payload([], [{ id: "out", status: "read" }]));

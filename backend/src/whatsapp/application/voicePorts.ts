@@ -44,3 +44,39 @@ export interface VoiceRepositoryPort {
   findMessageReadModel(context:WorkspaceContext,companyId:number,conversationId:string,messageId:string):VoiceMessageReadModel|null;
   findPlayback(context:WorkspaceContext,companyId:number,conversationId:string,messageId:string):VoicePlayback|null;
 }
+
+/** Read-only voice persistence boundary for async production runtimes. */
+export interface AsyncVoiceLookupPort {
+  findPolicy(context:WorkspaceContext,companyId:number,connectionId:string):Promise<WhatsAppVoicePolicy|null>;
+  findTranscriptByMessage(context:WorkspaceContext,companyId:number,messageId:string):Promise<ConversationAudioTranscript|null>;
+  isVoiceInboundMessage(context:WorkspaceContext,companyId:number,messageId:string):Promise<boolean>;
+  isAssistantMessageSemanticallyVisible(context:WorkspaceContext,companyId:number,messageId:string):Promise<boolean>;
+  findCompletedInboundTranscriptMessages(context:WorkspaceContext,companyId:number,limit:number):Promise<readonly ConversationMessage[]>;
+  findVisibleDeferredAssistantMessages(context:WorkspaceContext,companyId:number,limit:number):Promise<readonly ConversationMessage[]>;
+  recoverableSemanticScopes(limit:number):Promise<readonly {readonly workspaceId:number;readonly companyId:number}[]>;
+  findUploadedProviderMediaId(context:WorkspaceContext,companyId:number,outboundDeliveryId:string):Promise<string|null>;
+  findMessageReadModel(context:WorkspaceContext,companyId:number,conversationId:string,messageId:string):Promise<VoiceMessageReadModel|null>;
+  findPlayback(context:WorkspaceContext,companyId:number,conversationId:string,messageId:string):Promise<VoicePlayback|null>;
+}
+
+/** Async write and queue boundary for production voice persistence. */
+export interface AsyncVoiceRepositoryPort extends AsyncVoiceLookupPort {
+  applyPolicy(context:WorkspaceContext,companyId:number,connectionId:string,command:VoicePolicyMutation):Promise<VoicePolicyMutationResult>;
+  createTranscript(context:WorkspaceContext,companyId:number,value:TranscriptCreate):Promise<TranscriptCreateResult>;
+  enqueueTranscription(context:WorkspaceContext,companyId:number,value:Omit<AudioTranscriptionRequest,"state"|"leaseOwner"|"leaseExpiresAt"|"attemptCount"|"safeOutcome"|"safeFailureCategory"|"completedAt">):Promise<{readonly kind:"created"|"replayed"|"conflict"|"not_found";readonly request?:AudioTranscriptionRequest}>;
+  enqueueTranscriptionAndBlockExecution(context:WorkspaceContext,companyId:number,connectionId:string,eventId:string,value:{readonly id:string;readonly mediaAssetId:string;readonly createdAt:string;readonly updatedAt:string}):Promise<{readonly kind:"created"|"replayed"|"conflict"|"not_found";readonly request?:AudioTranscriptionRequest}>;
+  enqueueSynthesis(context:WorkspaceContext,companyId:number,value:Omit<VoiceSynthesisRequest,"state"|"leaseOwner"|"leaseExpiresAt"|"attemptCount"|"safeOutcome"|"safeFailureCategory"|"completedAt"|"renditionSettlementId">):Promise<{readonly kind:"created"|"replayed"|"conflict"|"not_found";readonly request?:VoiceSynthesisRequest}>;
+  leaseTranscriptions(context:WorkspaceContext,companyId:number,lease:VoiceLease):Promise<readonly AudioTranscriptionRequest[]>;
+  leaseSynthesis(context:WorkspaceContext,companyId:number,lease:VoiceLease):Promise<readonly VoiceSynthesisRequest[]>;
+  settleTranscription(context:WorkspaceContext,companyId:number,id:string,owner:string,settlement:VoiceWorkSettlement):Promise<AudioTranscriptionRequest|null>;
+  finalizeTranscription(context:WorkspaceContext,companyId:number,id:string,owner:string,value:TranscriptionFinalization):Promise<TranscriptionFinalizationResult>;
+  settleSynthesis(context:WorkspaceContext,companyId:number,id:string,owner:string,settlement:VoiceWorkSettlement):Promise<VoiceSynthesisRequest|null>;
+  authorizeSynthesis(context:WorkspaceContext,companyId:number,id:string,owner:string,at:string):Promise<SynthesisAuthorizationResult>;
+  finalizeSynthesis(context:WorkspaceContext,companyId:number,id:string,owner:string,value:SynthesisFinalization):Promise<VoiceSynthesisRequest|null>;
+  createUpload(context:WorkspaceContext,companyId:number,value:Omit<WhatsAppOutboundMediaUpload,"state"|"leaseOwner"|"leaseExpiresAt"|"attemptCount"|"providerMediaId"|"safeErrorCategory">):Promise<{readonly kind:"created"|"replayed"|"conflict"|"not_found";readonly upload?:WhatsAppOutboundMediaUpload}>;
+  leaseUploads(context:WorkspaceContext,companyId:number,lease:VoiceLease):Promise<readonly WhatsAppOutboundMediaUpload[]>;
+  settleUpload(context:WorkspaceContext,companyId:number,id:string,owner:string,state:Exclude<import("../domain/voice.js").VoiceUploadState,"pending_upload"|"uploading">,providerMediaId:string|null,safeErrorCategory:string|null,updatedAt:string):Promise<WhatsAppOutboundMediaUpload|null>;
+  authorizeUpload(context:WorkspaceContext,companyId:number,id:string,owner:string,at:string):Promise<{readonly kind:"authorized";readonly connectionId:string;readonly mediaType:string;readonly filename:string|null}|{readonly kind:"suppressed"|"lease_lost"}>;
+  finalizeUpload(context:WorkspaceContext,companyId:number,id:string,owner:string,result:WhatsAppOutboundMediaUploadResult,at:string):Promise<WhatsAppOutboundMediaUpload|null>;
+  appendVisibility(context:WorkspaceContext,companyId:number,value:VoiceResponseVisibility):Promise<{readonly kind:"created"|"replayed"|"conflict"|"not_found";readonly visibility?:VoiceResponseVisibility}>;
+}

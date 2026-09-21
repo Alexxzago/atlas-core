@@ -1,11 +1,11 @@
 import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
 import type { ConversationId, ConversationMessageId } from "../conversation/domain/conversation.js";
-import type { ConversationIntelligenceRepositoryPort } from "../conversationIntelligence/application/ports.js";
+import type { SynchronousConversationIntelligenceRepositoryPort } from "../conversationIntelligence/application/ports.js";
 import { conversationValue, type ConversationFact, type ConversationFactSourceKind, type ConversationIntelligenceState, type ConversationPendingItem, type ConversationReferenceGroup, type ConversationReferenceOption, type ConversationToolMemory } from "../conversationIntelligence/domain/conversationIntelligence.js";
 
 interface StateRow { conversation_id: string; active_intent_json: string | null; version: number; created_at: string; updated_at: string; }
-export class ConversationIntelligenceRepository implements ConversationIntelligenceRepositoryPort {
+export class ConversationIntelligenceRepository implements SynchronousConversationIntelligenceRepositoryPort {
   public constructor(private readonly database: SynchronousDatabase) {}
   public find(context: WorkspaceContext, companyId: number, conversationId: ConversationId): ConversationIntelligenceState | null {
     const state = this.database.prepare("SELECT s.conversation_id,s.active_intent_json,s.version,s.created_at,s.updated_at FROM conversation_intelligence_states s JOIN conversations c ON c.id=s.conversation_id WHERE s.workspace_id=? AND s.company_id=? AND c.company_id=? AND s.conversation_id=?").get(context.workspaceId, companyId, companyId, conversationId) as StateRow | undefined;

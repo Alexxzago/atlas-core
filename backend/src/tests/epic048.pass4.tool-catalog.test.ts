@@ -24,10 +24,10 @@ test("EPIC048 PASS4 tool catalog is exact, safe, company-readable, and non-discl
   const registry = new ToolRegistry(catalog, [tool("orders.lookup", read), tool("orders.unavailable", unavailable)]);
   const service = new AssistantToolCatalogService(new Capabilities(), registry, { isAvailable: async definition => definition.name !== "orders.unavailable" });
   const app = express(); app.use("/workspaces", createAuthorizedCompaniesRouter({
-    authentication: { cookieName: () => "atlas", current: (value: string) => value === "reader" ? { userId: value } : null, validateCsrf: () => true } as never,
-    users: { findById: (id: string) => ({ id }) } as never,
-    authorization: { authorize: () => ({ userId: "reader", membershipId: "member", role: "viewer", capabilities: new Set(["company:read"]) }) } as never,
-    resolver: { resolve: () => context } as never, controllers: {} as never, assistantControllers: {} as never,
+    authentication: { cookieName: () => "atlas", current: async (value: string) => value === "reader" ? { userId: value } : null, validateCsrf: async () => true } as never,
+    users: { findById: async (id: string) => ({ id }) } as never,
+    authorization: { authorize: async () => ({ userId: "reader", membershipId: "member", role: "viewer", capabilities: new Set(["company:read"]) }) } as never,
+    resolver: { resolve: async () => context } as never, controllers: {} as never, assistantControllers: {} as never,
     assistantCapabilityControllers: { list: () => (_req, res) => res.status(501).end(), catalog: () => (_req, res) => res.status(501).end(), toolsCatalog: workspace => createListAssistantToolCatalogController(service, workspace), replace: () => (_req, res) => res.status(501).end() },
   }));
   const { server, origin } = await listen(app); const path = `${origin}/workspaces/wsp_tools/companies/3/assistant-profiles/${profileId}/tools/catalog`;

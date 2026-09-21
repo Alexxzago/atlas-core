@@ -1,5 +1,5 @@
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
-import type { VoiceRepositoryPort } from "../application/voicePorts.js";
+import type { AsyncVoiceRepositoryPort, VoiceRepositoryPort } from "../application/voicePorts.js";
 import { voiceBounded, voiceMode, voicePositive, type VoiceAudioResponseMode, type WhatsAppVoicePolicy } from "../domain/voice.js";
 
 export class VoicePolicyValidationError extends Error {}
@@ -13,19 +13,19 @@ export interface VoicePolicyResponse {
 }
 
 export class VoicePolicyService {
-  public constructor(private readonly policies: VoiceRepositoryPort, private readonly clock: { now(): string }) {}
+  public constructor(private readonly policies: Pick<AsyncVoiceRepositoryPort, "findPolicy" | "applyPolicy"> | Pick<VoiceRepositoryPort, "findPolicy" | "applyPolicy">, private readonly clock: { now(): string }) {}
 
-  public get(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): VoicePolicyResponse {
+  public async get(context: WorkspaceContext, companyIdValue: unknown, connectionIdValue: unknown): Promise<VoicePolicyResponse> {
     const { companyId, connectionId } = this.scope(companyIdValue, connectionIdValue);
-    const value = this.policies.findPolicy(context, companyId, connectionId);
+    const value = await this.policies.findPolicy(context, companyId, connectionId);
     if (!value) throw new VoicePolicyNotFoundError();
     return response(value);
   }
 
-  public update(context: WorkspaceContext, actorId: string, companyIdValue: unknown, connectionIdValue: unknown, input: unknown): VoicePolicyResponse {
+  public async update(context: WorkspaceContext, actorId: string, companyIdValue: unknown, connectionIdValue: unknown, input: unknown): Promise<VoicePolicyResponse> {
     const { companyId, connectionId } = this.scope(companyIdValue, connectionIdValue);
     const command = this.command(input);
-    const result = this.policies.applyPolicy(context, companyId, connectionId, { actorId, ...command, occurredAt: this.clock.now() });
+    const result = await this.policies.applyPolicy(context, companyId, connectionId, { actorId, ...command, occurredAt: this.clock.now() });
     if (result.kind === "applied" || result.kind === "replayed_applied") return response(result.policy);
     if (result.kind === "not_found") throw new VoicePolicyNotFoundError();
     throw new VoicePolicyConflictError();

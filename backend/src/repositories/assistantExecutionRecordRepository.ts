@@ -1,5 +1,4 @@
 import type { SynchronousDatabase } from "../config/synchronousDatabase.js";
-import type { AssistantExecutionRecordRepositoryPort } from "../assistant/application/operationalAssistantRuntime.js";
 import { assistantExecutionRecordId, type AssistantExecutionRecord, type AssistantExecutionRecordId, type AssistantExecutionRecordState, type AssistantProfileRuntimeSnapshot, type AssistantRuntimePurpose, type PublishedKnowledgeSnapshotReference } from "../assistant/domain/operationalAssistantRuntime.js";
 import { assistantProfileId } from "../assistant/domain/assistantProfile.js";
 
@@ -11,7 +10,7 @@ function record(row: Row): AssistantExecutionRecord {
   return Object.freeze({ id: assistantExecutionRecordId(row.id), companyId: row.company_id, profileId: assistantProfileId(row.assistant_profile_id), profileSnapshot: Object.freeze(snapshot), knowledgeSnapshot: Object.freeze(knowledgeSnapshot), executionSnapshot: row.execution_snapshot_json ? Object.freeze(JSON.parse(row.execution_snapshot_json)) : null, provider: row.provider, purpose: row.purpose, state: row.state, fallbackUsed: row.fallback_used === 1, result: row.result, inputTokens: row.input_tokens, outputTokens: row.output_tokens, errorCode: row.error_code, startedAt: row.started_at, completedAt: row.completed_at, durationMilliseconds: row.duration_milliseconds });
 }
 
-export class AssistantExecutionRecordRepository implements AssistantExecutionRecordRepositoryPort {
+export class AssistantExecutionRecordRepository {
   public constructor(private readonly db: SynchronousDatabase) {}
 
   public create(value: AssistantExecutionRecord): AssistantExecutionRecord {

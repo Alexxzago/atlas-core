@@ -12,6 +12,13 @@ export type ConversationStateOperation =
   | { readonly kind: "stale_reference_group"; readonly groupKind: string };
 export interface ConversationStateDerivationPort { derive(input: { readonly state: ConversationIntelligenceState | null; readonly message: ConversationMessage }): Promise<readonly ConversationStateOperation[]>; }
 export interface ConversationIntelligenceRepositoryPort {
+  find(context: WorkspaceContext, companyId: number, conversationId: ConversationId): Promise<ConversationIntelligenceState | null>;
+  isApplied(context: WorkspaceContext, companyId: number, conversationId: ConversationId, messageId: ConversationMessageId): Promise<boolean>;
+  compareAndSet(context: WorkspaceContext, companyId: number, conversationId: ConversationId, expectedVersion: number | null, value: { readonly state: ConversationIntelligenceState; readonly appliedMessageId: ConversationMessageId; readonly sourceKind: ConversationFactSourceKind; readonly at: string }): Promise<ConversationIntelligenceState | null>;
+}
+
+/** Temporary contract for the synchronous runtime until its composition migrates to SqlDatabase. */
+export interface SynchronousConversationIntelligenceRepositoryPort {
   find(context: WorkspaceContext, companyId: number, conversationId: ConversationId): ConversationIntelligenceState | null;
   isApplied(context: WorkspaceContext, companyId: number, conversationId: ConversationId, messageId: ConversationMessageId): boolean;
   compareAndSet(context: WorkspaceContext, companyId: number, conversationId: ConversationId, expectedVersion: number | null, value: { readonly state: ConversationIntelligenceState; readonly appliedMessageId: ConversationMessageId; readonly sourceKind: ConversationFactSourceKind; readonly at: string }): ConversationIntelligenceState | null;

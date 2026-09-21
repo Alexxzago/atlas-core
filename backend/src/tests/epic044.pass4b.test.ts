@@ -18,8 +18,8 @@ import { includeVoiceSemanticHistory } from "../whatsapp/services/voiceSemanticC
 const at = "2026-08-27T12:00:00.000Z";
 class Clock { public now(): string { return at; } }
 
-function setup(path: string) {
-  const database = createDatabase(path), context = createWorkspaceContext(new WorkspaceRepository(database).resolveDefault()), companies = new CompanyRepository(database), existing = companies.findById(context, 1), company = existing ?? companies.create(context, { name: "PASS4B", website: "https://pass4b.test" });
+async function setup(path: string) {
+  const database = createDatabase(path), context = createWorkspaceContext(new WorkspaceRepository(database).resolveDefault()), companies = new CompanyRepository(database), existing = await companies.findById(context, 1), company = existing ?? await companies.create(context, { name: "PASS4B", website: "https://pass4b.test" });
   const conversations = new ConversationService(new ConversationRepository(database), new Clock()), voices = new WhatsAppVoiceRepository(database), derived: string[] = [];
   const intelligence = new ConversationIntelligenceService(new ConversationIntelligenceRepository(database), { derive: async ({ message }) => { derived.push(message.id); return [{ kind: "set_fact", key: "voice", value: message.content }] as const; } }, new Clock());
   const recovery = new VoiceDeferredSemanticRecoveryService(voices, intelligence);
@@ -32,9 +32,9 @@ function setup(path: string) {
   return { database, context, company, conversations, voices, recovery, derived };
 }
 
-function inbound(fixture: ReturnType<typeof setup>, content: string) {
-  const conversation = fixture.conversations.open(fixture.context, fixture.company.id, "whatsapp"), participant = fixture.conversations.addParticipant(fixture.context, fixture.company.id, conversation.id, { type: "customer" });
-  const message = fixture.conversations.addMessage(fixture.context, fixture.company.id, conversation.id, { senderParticipantId: participant.id, direction: "inbound", content });
+async function inbound(fixture: Awaited<ReturnType<typeof setup>>, content: string) {
+  const conversation = await fixture.conversations.open(fixture.context, fixture.company.id, "whatsapp"), participant = await fixture.conversations.addParticipant(fixture.context, fixture.company.id, conversation.id, { type: "customer" });
+  const message = await fixture.conversations.addMessage(fixture.context, fixture.company.id, conversation.id, { senderParticipantId: participant.id, direction: "inbound", content });
   const suffix = message.id.slice(-8), assetId = `mas_${suffix}`;
   fixture.database.prepare("INSERT INTO channel_provider_events(id,communication_channel,transport_provider,transport_connection_id,external_event_id,state,conversation_id,conversation_message_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(`cpe_${suffix}`, "whatsapp", "meta_whatsapp_cloud", "wac_pass4b", `event-${suffix}`, "completed", conversation.id, message.id, at, at);
   fixture.database.prepare("INSERT INTO media_blobs(id,workspace_id,company_id,sha256_digest,size_bytes,media_type,storage_reference,state,created_at) VALUES(?,?,?,?,?,?,?,?,?)").run(`mbl_${suffix}`, fixture.context.workspaceId, fixture.company.id, "a".repeat(64), 12, "audio/ogg", `memory://${suffix}`, "active", at);
@@ -44,9 +44,9 @@ function inbound(fixture: ReturnType<typeof setup>, content: string) {
   return { conversation, participant, message };
 }
 
-function deferred(fixture: ReturnType<typeof setup>, state: "accepted" | "delivered" | "read" | "suppressed" | "uncertain" | "permanent_failure" = "accepted") {
-  const conversation = fixture.conversations.open(fixture.context, fixture.company.id, "whatsapp"), participant = fixture.conversations.addParticipant(fixture.context, fixture.company.id, conversation.id, { type: "assistant" });
-  const message = fixture.conversations.addMessage(fixture.context, fixture.company.id, conversation.id, { senderParticipantId: participant.id, direction: "outbound", content: `deferred ${state}` });
+async function deferred(fixture: Awaited<ReturnType<typeof setup>>, state: "accepted" | "delivered" | "read" | "suppressed" | "uncertain" | "permanent_failure" = "accepted") {
+  const conversation = await fixture.conversations.open(fixture.context, fixture.company.id, "whatsapp"), participant = await fixture.conversations.addParticipant(fixture.context, fixture.company.id, conversation.id, { type: "assistant" });
+  const message = await fixture.conversations.addMessage(fixture.context, fixture.company.id, conversation.id, { senderParticipantId: participant.id, direction: "outbound", content: `deferred ${state}` });
   const suffix = message.id.slice(-8), deliveryId = `odl_${suffix}`;
   fixture.database.prepare("INSERT INTO provider_message_records(id,communication_channel,transport_provider,direction,transport_connection_id,conversation_message_id,external_message_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(`pmr_${suffix}`, "whatsapp", "meta_whatsapp_cloud", "outbound", "wac_pass4b", message.id, `wamid-${suffix}`, at, at);
   fixture.database.prepare("INSERT INTO outbound_deliveries(id,provider_message_record_id,transport_connection_id,state,attempt_count,next_attempt_at,payload_kind,response_policy,media_asset_id,expected_authority_generation,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(deliveryId, `pmr_${suffix}`, "wac_pass4b", "accepted", 0, at, "audio", "deferred_voice", "mas_delivery", 1, at, at);
@@ -55,9 +55,9 @@ function deferred(fixture: ReturnType<typeof setup>, state: "accepted" | "delive
   return { conversation, message, deliveryId };
 }
 
-function standard(fixture: ReturnType<typeof setup>) {
-  const conversation = fixture.conversations.open(fixture.context, fixture.company.id, "whatsapp"), participant = fixture.conversations.addParticipant(fixture.context, fixture.company.id, conversation.id, { type: "assistant" });
-  const message = fixture.conversations.addMessage(fixture.context, fixture.company.id, conversation.id, { senderParticipantId: participant.id, direction: "outbound", content: "standard" });
+async function standard(fixture: Awaited<ReturnType<typeof setup>>) {
+  const conversation = await fixture.conversations.open(fixture.context, fixture.company.id, "whatsapp"), participant = await fixture.conversations.addParticipant(fixture.context, fixture.company.id, conversation.id, { type: "assistant" });
+  const message = await fixture.conversations.addMessage(fixture.context, fixture.company.id, conversation.id, { senderParticipantId: participant.id, direction: "outbound", content: "standard" });
   const suffix = message.id.slice(-8);
   fixture.database.prepare("INSERT INTO provider_message_records(id,communication_channel,transport_provider,direction,transport_connection_id,conversation_message_id,external_message_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(`pmr_standard_${suffix}`, "whatsapp", "meta_whatsapp_cloud", "outbound", "wac_pass4b", message.id, `wamid-standard-${suffix}`, at, at);
   fixture.database.prepare("INSERT INTO outbound_deliveries(id,provider_message_record_id,transport_connection_id,state,attempt_count,next_attempt_at,payload_kind,response_policy,media_asset_id,expected_authority_generation,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(`odl_standard_${suffix}`, `pmr_standard_${suffix}`, "wac_pass4b", "accepted", 0, at, "text", "standard", null, null, at, at);
@@ -65,11 +65,11 @@ function standard(fixture: ReturnType<typeof setup>) {
 }
 
 test("EPIC044 PASS4B recovers a durable transcript once across restart and webhook replay", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "atlas-epic044-pass4b-")), path = join(directory, "atlas.sqlite"), first = setup(path);
+  const directory = mkdtempSync(join(tmpdir(), "atlas-epic044-pass4b-")), path = join(directory, "atlas.sqlite"), first = await setup(path);
   try {
-    const voice = inbound(first, "original"), originalId = voice.message.id;
+    const voice = await inbound(first, "original"), originalId = voice.message.id;
     first.database.close();
-    const restarted = setup(path);
+    const restarted = await setup(path);
     try {
       assert.equal(await restarted.recovery.recover(restarted.context, restarted.company.id), 1);
       assert.deepEqual(restarted.derived, [originalId]);
@@ -77,29 +77,29 @@ test("EPIC044 PASS4B recovers a durable transcript once across restart and webho
       assert.equal(await restarted.recovery.recover(restarted.context, restarted.company.id), 0);
       assert.deepEqual(restarted.derived, [originalId]);
     } finally { restarted.database.close(); }
-    const second = setup(path);
+    const second = await setup(path);
     try { assert.equal(await second.recovery.recoverAvailable(), 0); assert.equal(second.derived.length, 0); }
     finally { second.database.close(); }
   } finally { if (first.database.isOpen) first.database.close(); try { rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* Windows can retain a SQLite handle briefly after a restart test. */ } }
 });
 
 test("EPIC044 PASS4B only recovers visible deferred voice evidence and preserves semantic history", async () => {
-  const fixture = setup(":memory:");
+  const fixture = await setup(":memory:");
   try {
-    const visible = deferred(fixture), delivered = deferred(fixture, "delivered"), read = deferred(fixture, "read"), noVisibility = deferred(fixture, "suppressed"), uncertain = deferred(fixture, "uncertain"), permanent = deferred(fixture, "permanent_failure");
-    const standardMessage = standard(fixture);
-    const webConversation = fixture.conversations.open(fixture.context, fixture.company.id, "web_chat"), webParticipant = fixture.conversations.addParticipant(fixture.context, fixture.company.id, webConversation.id, { type: "assistant" }), webMessage = fixture.conversations.addMessage(fixture.context, fixture.company.id, webConversation.id, { senderParticipantId: webParticipant.id, direction: "outbound", content: "webchat" });
+    const visible = await deferred(fixture), delivered = await deferred(fixture, "delivered"), read = await deferred(fixture, "read"), noVisibility = await deferred(fixture, "suppressed"), uncertain = await deferred(fixture, "uncertain"), permanent = await deferred(fixture, "permanent_failure");
+    const standardMessage = await standard(fixture);
+    const webConversation = await fixture.conversations.open(fixture.context, fixture.company.id, "web_chat"), webParticipant = await fixture.conversations.addParticipant(fixture.context, fixture.company.id, webConversation.id, { type: "assistant" }), webMessage = await fixture.conversations.addMessage(fixture.context, fixture.company.id, webConversation.id, { senderParticipantId: webParticipant.id, direction: "outbound", content: "webchat" });
     assert.equal(await fixture.recovery.recover(fixture.context, fixture.company.id), 3);
     assert.deepEqual(fixture.derived.sort(), [visible.message.id, delivered.message.id, read.message.id].sort());
     assert.equal(await fixture.recovery.recover(fixture.context, fixture.company.id), 0);
-    assert.equal(includeVoiceSemanticHistory(fixture.voices, fixture.context, fixture.company.id, visible.message), true);
-    assert.equal(includeVoiceSemanticHistory(fixture.voices, fixture.context, fixture.company.id, noVisibility.message), false);
-    assert.equal(includeVoiceSemanticHistory(fixture.voices, fixture.context, fixture.company.id, standardMessage), true);
-    assert.equal(includeVoiceSemanticHistory(fixture.voices, fixture.context, fixture.company.id, webMessage), true);
+    assert.equal(await includeVoiceSemanticHistory(fixture.voices, fixture.context, fixture.company.id, visible.message), true);
+    assert.equal(await includeVoiceSemanticHistory(fixture.voices, fixture.context, fixture.company.id, noVisibility.message), false);
+    assert.equal(await includeVoiceSemanticHistory(fixture.voices, fixture.context, fixture.company.id, standardMessage), true);
+    assert.equal(await includeVoiceSemanticHistory(fixture.voices, fixture.context, fixture.company.id, webMessage), true);
     assert.equal(fixture.derived.includes(uncertain.message.id) || fixture.derived.includes(permanent.message.id) || fixture.derived.includes(noVisibility.message.id) || fixture.derived.includes(standardMessage.id) || fixture.derived.includes(webMessage.id), false);
-    const other = new CompanyRepository(fixture.database).create(fixture.context, { name: "Other PASS4B", website: "https://other-pass4b.test" });
-    const otherConversation = fixture.conversations.open(fixture.context, other.id, "internal"), otherParticipant = fixture.conversations.addParticipant(fixture.context, other.id, otherConversation.id, { type: "customer" }), otherMessage = fixture.conversations.addMessage(fixture.context, other.id, otherConversation.id, { senderParticipantId: otherParticipant.id, direction: "inbound", content: "other" });
-    const otherAssistant = fixture.conversations.addParticipant(fixture.context, other.id, otherConversation.id, { type: "assistant" }), otherOutbound = fixture.conversations.addMessage(fixture.context, other.id, otherConversation.id, { senderParticipantId: otherAssistant.id, direction: "outbound", content: "other deferred" });
+    const other = await new CompanyRepository(fixture.database).create(fixture.context, { name: "Other PASS4B", website: "https://other-pass4b.test" });
+    const otherConversation = await fixture.conversations.open(fixture.context, other.id, "internal"), otherParticipant = await fixture.conversations.addParticipant(fixture.context, other.id, otherConversation.id, { type: "customer" }), otherMessage = await fixture.conversations.addMessage(fixture.context, other.id, otherConversation.id, { senderParticipantId: otherParticipant.id, direction: "inbound", content: "other" });
+    const otherAssistant = await fixture.conversations.addParticipant(fixture.context, other.id, otherConversation.id, { type: "assistant" }), otherOutbound = await fixture.conversations.addMessage(fixture.context, other.id, otherConversation.id, { senderParticipantId: otherAssistant.id, direction: "outbound", content: "other deferred" });
     fixture.database.prepare("INSERT INTO media_blobs(id,workspace_id,company_id,sha256_digest,size_bytes,media_type,storage_reference,state,created_at) VALUES(?,?,?,?,?,?,?,?,?)").run("mbl_other", fixture.context.workspaceId, other.id, "d".repeat(64), 12, "audio/ogg", "memory://other", "active", at);
     fixture.database.prepare("INSERT INTO media_assets(id,workspace_id,company_id,blob_id,kind,media_type,size_bytes,safe_filename,metadata_json,status,created_at,archived_at,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)").run("mas_other", fixture.context.workspaceId, other.id, "mbl_other", "audio", "audio/ogg", 12, "voice.ogg", "{}", "ready", at, null, null);
     fixture.database.prepare("INSERT INTO provider_message_records(id,communication_channel,transport_provider,direction,transport_connection_id,conversation_message_id,external_message_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run("pmr_other", "whatsapp", "meta_whatsapp_cloud", "outbound", "wac_other", otherOutbound.id, "wamid-other", at, at);

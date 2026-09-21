@@ -6,7 +6,7 @@ export interface OperationalExecutionLease {
   release(): void;
 }
 
-export interface OperationalExecutionBudgetPort { acquire(context: WorkspaceContext, companyId?: number, actorId?: string): OperationalExecutionLease | null; }
+export interface OperationalExecutionBudgetPort { acquire(context: WorkspaceContext, companyId?: number, actorId?: string): OperationalExecutionLease | null | Promise<OperationalExecutionLease | null>; }
 
 interface WorkspaceBudget {
   readonly acceptedAt: number[];
@@ -36,9 +36,9 @@ export class InMemoryOperationalExecutionBudget implements OperationalExecutionB
 
 export class SharedOperationalExecutionBudget implements OperationalExecutionBudgetPort {
   public constructor(private readonly limits: RateLimitService) {}
-  public acquire(context: WorkspaceContext, companyId = 0, actorId = "unknown"): OperationalExecutionLease | null {
-    this.limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actorId), "actor", assistantActorLimit);
-    this.limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", assistantCompanyLimit);
+  public async acquire(context: WorkspaceContext, companyId = 0, actorId = "unknown"): Promise<OperationalExecutionLease> {
+    await this.limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actorId), "actor", assistantActorLimit);
+    await this.limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", assistantCompanyLimit);
     return { release: (): void => undefined };
   }
 }

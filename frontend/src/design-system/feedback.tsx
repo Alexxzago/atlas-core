@@ -10,6 +10,8 @@ export function StatusIndicator({ tone = "neutral", children }: { readonly tone?
   return <span className={`ds-status ds-status--${tone}`}><span aria-hidden="true" className="ds-status__mark" />{children}</span>;
 }
 
+export const StatusBadge = StatusIndicator;
+
 export function Skeleton({ label, lines = 2 }: { readonly label: string; readonly lines?: number }): React.JSX.Element {
   return <div className="ds-skeleton" role="status"><span className="ds-visually-hidden">{label}</span>{Array.from({ length: lines }, (_, index) => <span aria-hidden="true" key={index} />)}</div>;
 }
@@ -20,6 +22,14 @@ export function EmptyState({ title, description }: { readonly title: string; rea
 
 export function ErrorState({ title, description, action }: { readonly title: string; readonly description: string; readonly action?: ReactNode }): React.JSX.Element {
   return <div className="ds-error-state" role="alert"><h2>{title}</h2><p>{description}</p>{action}</div>;
+}
+
+export function SuccessState({ title, description, action }: { readonly title: string; readonly description: string; readonly action?: ReactNode }): React.JSX.Element {
+  return <div className="ds-success-state" role="status"><h2>{title}</h2><p>{description}</p>{action}</div>;
+}
+
+export function LoadingState({ title, description }: { readonly title: string; readonly description?: string }): React.JSX.Element {
+  return <div className="ds-loading-state" role="status"><ProgressIndicator label={title}/>{description && <p>{description}</p>}</div>;
 }
 
 export function ProgressIndicator({ label }: { readonly label: string }): React.JSX.Element {

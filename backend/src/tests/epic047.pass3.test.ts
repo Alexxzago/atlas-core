@@ -6,15 +6,18 @@ import { createApp } from "../app.js";
 import { CompanyOperationalStatusService } from "../company/services/companyOperationalStatusService.js";
 import { AssistantReadinessAssessmentRepository } from "../repositories/assistantReadinessAssessmentRepository.js";
 import { WhatsAppConnectionRepository } from "../repositories/whatsappConnectionRepository.js";
-import { database } from "../config/database.js";
-import { markRuntimeReady, markRuntimeShuttingDown, registerRuntimeWorker, resetRuntimeReadinessForTests, runtimeWorkersRegistered } from "../config/runtimeReadiness.js";
-import { operationalLogger, setOperationalLogSinkForTests } from "../observability/operationalLogger.js";
+import { markRuntimeReady, markRuntimeShuttingDown, registerRuntimeWorker, resetRuntimeReadinessForTests, runtimeWorkerCycleSucceeded, runtimeWorkerStarted, runtimeWorkersRegistered } from "../config/runtimeReadiness.js";
+import { createRequestId, operationalLogger, setOperationalLogSinkForTests, withRequestContext } from "../observability/operationalLogger.js";
 import { createAuthorizedCompaniesRouter } from "../routes/authorizedCompanies.js";
 import { createWorkspaceContext } from "../types/workspaceContext.js";
+import type { SqlDatabase, SqlResult, SqlValue } from "../config/sqlDatabase.js";
+import { createHealthRouter } from "../routes/health.js";
 
 function capture(): { records: Array<Record<string, unknown>>; restore(): void } { const records: Array<Record<string, unknown>> = [], restore = setOperationalLogSinkForTests((line) => records.push(JSON.parse(line) as Record<string, unknown>)); return { records, restore }; }
 function listen(app: express.Express): Promise<{ readonly server: ReturnType<express.Express["listen"]>; readonly origin: string }> { const server = app.listen(0, "127.0.0.1"); return new Promise((resolve) => server.once("listening", () => resolve({ server, origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}` }))); }
 function close(server: ReturnType<express.Express["listen"]>): Promise<void> { return new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
+function markWorkersHealthy(): void { for (const name of ["billing_reconciliation", "whatsapp_recovery"]) { runtimeWorkerStarted(name); runtimeWorkerCycleSucceeded(name); } }
+function readinessApp(probe: (statement: string) => Promise<void>): express.Express { const database: SqlDatabase = { async execute(_statement: string, _args: readonly SqlValue[] = []): Promise<SqlResult> { return { rowsAffected: 0 }; }, async executeScript(_script: string): Promise<void> {}, async query<Row extends Record<string, unknown>>(statement: string, _args: readonly SqlValue[] = []): Promise<Row[]> { await probe(statement); return []; }, async transaction<T>(operation: (database: SqlDatabase) => Promise<T>): Promise<T> { return operation(database); }, async close(): Promise<void> {} }; const app = express(); app.use((_request, _response, next) => withRequestContext(createRequestId(), () => next())); app.use(createHealthRouter(database)); return app; }
 
 test("EPIC047 PASS3 separates liveness from boot readiness and records worker registration", async () => {
   resetRuntimeReadinessForTests();
@@ -25,7 +28,7 @@ test("EPIC047 PASS3 separates liveness from boot readiness and records worker re
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     assert.equal((await fetch(`${origin}/health`)).status, 200);
     assert.equal((await fetch(`${origin}/ready`)).status, 503);
-    registerRuntimeWorker("billing_reconciliation"); registerRuntimeWorker("whatsapp_recovery"); markRuntimeReady();
+    registerRuntimeWorker("billing_reconciliation"); registerRuntimeWorker("whatsapp_recovery"); markWorkersHealthy(); markRuntimeReady();
     assert.deepEqual(runtimeWorkersRegistered(), ["billing_reconciliation", "whatsapp_recovery"]);
     assert.equal((await fetch(`${origin}/ready`)).status, 200);
     markRuntimeShuttingDown();
@@ -34,23 +37,24 @@ test("EPIC047 PASS3 separates liveness from boot readiness and records worker re
   } finally { resetRuntimeReadinessForTests(); await close(server); }
 });
 
-test("EPIC047 PASS3 readiness requires both core workers while optional and Voice registrations have no effect", async () => {
+test("EPIC047 PASS3 readiness gates configured required workers while optional registrations have no effect", async () => {
   resetRuntimeReadinessForTests();
   const app = createApp({ authorizedCompaniesRouter: Router(), chatRouter: Router(), companiesRouter: Router(), identityRouter: Router(), knowledgeRouter: Router(), publicWebChatRouter: Router(), scrapeRouter: Router(), workspacesRouter: Router() });
   const { server, origin } = await listen(app);
   try {
     markRuntimeReady(); registerRuntimeWorker("voice_transcription"); registerRuntimeWorker("optional_reporting");
-    assert.equal((await fetch(`${origin}/ready`)).status, 503);
-    registerRuntimeWorker("whatsapp_recovery"); assert.equal((await fetch(`${origin}/ready`)).status, 503);
-    registerRuntimeWorker("billing_reconciliation"); assert.equal((await fetch(`${origin}/ready`)).status, 200);
+    assert.equal((await fetch(`${origin}/ready`)).status, 200);
+    registerRuntimeWorker("billing_reconciliation", { required: true }); assert.equal((await fetch(`${origin}/ready`)).status, 503);
+    runtimeWorkerStarted("billing_reconciliation"); runtimeWorkerCycleSucceeded("billing_reconciliation"); assert.equal((await fetch(`${origin}/ready`)).status, 200);
+    registerRuntimeWorker("whatsapp_recovery", { configured: true, required: true }); assert.equal((await fetch(`${origin}/ready`)).status, 503);
+    runtimeWorkerStarted("whatsapp_recovery"); runtimeWorkerCycleSucceeded("whatsapp_recovery"); assert.equal((await fetch(`${origin}/ready`)).status, 200);
   } finally { resetRuntimeReadinessForTests(); await close(server); }
 });
 
 test("EPIC047 PASS3 probes SQLite for every ready request and recovers after a database failure", async () => {
-  resetRuntimeReadinessForTests(); registerRuntimeWorker("billing_reconciliation"); registerRuntimeWorker("whatsapp_recovery"); markRuntimeReady();
-  const originalPrepare = database.prepare.bind(database); let probes = 0, unavailable = false;
-  Object.assign(database, { prepare(sql: string) { if (sql === "SELECT 1 AS ready") { probes++; if (unavailable) throw new Error("database password=secret"); } return originalPrepare(sql); } });
-  const app = createApp({ authorizedCompaniesRouter: Router(), chatRouter: Router(), companiesRouter: Router(), identityRouter: Router(), knowledgeRouter: Router(), publicWebChatRouter: Router(), scrapeRouter: Router(), workspacesRouter: Router() });
+  resetRuntimeReadinessForTests(); registerRuntimeWorker("billing_reconciliation"); registerRuntimeWorker("whatsapp_recovery"); markWorkersHealthy(); markRuntimeReady();
+  let probes = 0, unavailable = false;
+  const app = readinessApp(async (statement) => { assert.equal(statement, "SELECT 1 AS ready"); probes++; if (unavailable) throw new Error("database password=secret"); });
   const { server, origin } = await listen(app);
   try {
     assert.equal((await fetch(`${origin}/ready`)).status, 200);
@@ -58,50 +62,47 @@ test("EPIC047 PASS3 probes SQLite for every ready request and recovers after a d
     unavailable = true; assert.equal((await fetch(`${origin}/ready`)).status, 503);
     unavailable = false; assert.equal((await fetch(`${origin}/ready`)).status, 200);
     assert.equal(probes, 4);
-  } finally { Object.assign(database, { prepare: originalPrepare }); resetRuntimeReadinessForTests(); await close(server); }
+  } finally { resetRuntimeReadinessForTests(); await close(server); }
 });
 
 test("EPIC047 PASS3 a ready probe performs exactly one database query and no application work", async () => {
-  resetRuntimeReadinessForTests(); registerRuntimeWorker("billing_reconciliation"); registerRuntimeWorker("whatsapp_recovery"); markRuntimeReady();
-  const originalPrepare = database.prepare.bind(database), queries: string[] = [];
-  Object.assign(database, { prepare(sql: string) { queries.push(sql); return originalPrepare(sql); } });
-  const app = createApp({ authorizedCompaniesRouter: Router(), chatRouter: Router(), companiesRouter: Router(), identityRouter: Router(), knowledgeRouter: Router(), publicWebChatRouter: Router(), scrapeRouter: Router(), workspacesRouter: Router() });
+  resetRuntimeReadinessForTests(); registerRuntimeWorker("billing_reconciliation"); registerRuntimeWorker("whatsapp_recovery"); markWorkersHealthy(); markRuntimeReady();
+  const queries: string[] = [];
+  const app = readinessApp(async (statement) => { queries.push(statement); });
   const { server, origin } = await listen(app);
   try { assert.equal((await fetch(`${origin}/ready`)).status, 200); assert.deepEqual(queries, ["SELECT 1 AS ready"]); }
-  finally { Object.assign(database, { prepare: originalPrepare }); resetRuntimeReadinessForTests(); await close(server); }
+  finally { resetRuntimeReadinessForTests(); await close(server); }
 });
 
 test("EPIC047 PASS3 ready performs no provider, migration, checksum, or domain work", async () => {
-  resetRuntimeReadinessForTests(); registerRuntimeWorker("billing_reconciliation"); registerRuntimeWorker("whatsapp_recovery"); markRuntimeReady();
-  const originalPrepare = database.prepare.bind(database), originalExec = database.exec.bind(database), previousFetch = globalThis.fetch;
+  resetRuntimeReadinessForTests(); registerRuntimeWorker("billing_reconciliation"); registerRuntimeWorker("whatsapp_recovery"); markWorkersHealthy(); markRuntimeReady();
+  const previousFetch = globalThis.fetch;
   let providerCalls = 0, migrationExecutions = 0, checksumRescans = 0, domainQueries = 0, databaseQueries = 0;
-  Object.assign(database, { prepare(sql: string) { if (sql === "SELECT 1 AS ready") databaseQueries++; else { domainQueries++; if (sql.includes("schema_migrations")) checksumRescans++; } return originalPrepare(sql); }, exec(sql: string) { migrationExecutions++; return originalExec(sql); } });
   globalThis.fetch = (async () => { providerCalls++; throw new Error("provider must not be called by readiness"); }) as typeof fetch;
-  const app = createApp({ authorizedCompaniesRouter: Router(), chatRouter: Router(), companiesRouter: Router(), identityRouter: Router(), knowledgeRouter: Router(), publicWebChatRouter: Router(), scrapeRouter: Router(), workspacesRouter: Router() });
+  const app = readinessApp(async (statement) => { if (statement === "SELECT 1 AS ready") databaseQueries++; else { domainQueries++; if (statement.includes("schema_migrations")) checksumRescans++; } });
   const { server, origin } = await listen(app);
   try { assert.equal((await previousFetch(`${origin}/ready`)).status, 200); assert.deepEqual({ providerCalls, migrationExecutions, checksumRescans, domainQueries, databaseQueries }, { providerCalls: 0, migrationExecutions: 0, checksumRescans: 0, domainQueries: 0, databaseQueries: 1 }); }
-  finally { globalThis.fetch = previousFetch; Object.assign(database, { prepare: originalPrepare, exec: originalExec }); resetRuntimeReadinessForTests(); await close(server); }
+  finally { globalThis.fetch = previousFetch; resetRuntimeReadinessForTests(); await close(server); }
 });
 
 test("EPIC047 PASS3 readiness failures are sanitized and correlated with the HTTP request", async () => {
-  resetRuntimeReadinessForTests(); registerRuntimeWorker("billing_reconciliation"); registerRuntimeWorker("whatsapp_recovery"); markRuntimeReady();
-  const logs = capture(), originalPrepare = database.prepare.bind(database);
-  Object.assign(database, { prepare(sql: string) { if (sql === "SELECT 1 AS ready") throw new Error("password=secret@example.test"); return originalPrepare(sql); } });
-  const app = createApp({ authorizedCompaniesRouter: Router(), chatRouter: Router(), companiesRouter: Router(), identityRouter: Router(), knowledgeRouter: Router(), publicWebChatRouter: Router(), scrapeRouter: Router(), workspacesRouter: Router() });
+  resetRuntimeReadinessForTests(); registerRuntimeWorker("billing_reconciliation"); registerRuntimeWorker("whatsapp_recovery"); markWorkersHealthy(); markRuntimeReady();
+  const logs = capture();
+  const app = readinessApp(async (statement) => { assert.equal(statement, "SELECT 1 AS ready"); throw new Error("password=secret@example.test"); });
   const { server, origin } = await listen(app);
   try {
     assert.equal((await fetch(`${origin}/ready`)).status, 503);
     const readiness = logs.records.find((record) => record.event === "readiness_check_failed")!;
     assert.equal(readiness.safeErrorCategory, "database_failure"); assert.equal(readiness.outcome, "database_unavailable"); assert.ok(typeof readiness.requestId === "string"); assert.ok(!JSON.stringify(readiness).includes("secret@example.test"));
-  } finally { Object.assign(database, { prepare: originalPrepare }); logs.restore(); resetRuntimeReadinessForTests(); await close(server); }
+  } finally { logs.restore(); resetRuntimeReadinessForTests(); await close(server); }
 });
 
-test("EPIC047 PASS3 reads persisted tenant operational state without provider access", () => {
+test("EPIC047 PASS3 reads persisted tenant operational state without provider access", async () => {
   const context = createWorkspaceContext({ id: 1, key: "default" } as never), connectionId = "wac_0123456789abcdef0123456789abcdef" as never;
   const service = new CompanyOperationalStatusService({ findById: () => ({ id: 2 }) } as never, { findLatest: () => ({ status: "blocked", evaluatedAt: "2026-09-03T00:00:00.000Z", blockers: ["published_knowledge_missing"] }) } as never, { listByCompany: () => [{ id: connectionId, status: "active" }], findOperationalState: () => ({ validationState: "valid", healthState: "healthy" }) } as never);
-  assert.deepEqual(service.get(context, 2), { assistant: { status: "blocked", evaluatedAt: "2026-09-03T00:00:00.000Z", blockers: ["published_knowledge_missing"] }, whatsApp: [{ connectionId, status: "active", validationState: "valid", healthState: "healthy" }], voice: { status: "unavailable" } });
+  assert.deepEqual(await service.get(context, 2), { assistant: { status: "blocked", evaluatedAt: "2026-09-03T00:00:00.000Z", blockers: ["published_knowledge_missing"] }, whatsApp: [{ connectionId, status: "active", validationState: "valid", healthState: "healthy" }], voice: { status: "unavailable" } });
   const missing = new CompanyOperationalStatusService({ findById: () => null } as never, {} as never, {} as never);
-  assert.throws(() => missing.get(context, 2));
+  await assert.rejects(missing.get(context, 2));
 });
 
 test("EPIC047 PASS3 serializes only the bounded safe operational projection", async () => {
@@ -124,9 +125,9 @@ test("EPIC047 PASS3 operational-status repositories use bounded and tenant-fence
   assert.ok(whatsAppSql.every(({ sql, values }) => sql.includes("company_id=?") && sql.includes("workspace_id=?") && values.includes(9) && values.includes(7)));
 });
 
-test("EPIC047 PASS3 logs unexpected operational-status service failures without data exposure", () => {
+test("EPIC047 PASS3 logs unexpected operational-status service failures without data exposure", async () => {
   const logs = capture(), context = createWorkspaceContext({ id: 1, key: "default" } as never);
-  try { assert.throws(() => new CompanyOperationalStatusService({ findById: () => { throw new Error("token=secret"); } } as never, {} as never, {} as never).get(context, 2)); const record = logs.records[0]!; assert.equal(record.event, "company_operational_status_failed"); assert.equal(record.safeErrorCategory, "internal_failure"); assert.equal(record.companyId, 2); assert.ok(!JSON.stringify(record).includes("secret")); } finally { logs.restore(); }
+  try { await assert.rejects(new CompanyOperationalStatusService({ findById: () => { throw new Error("token=secret"); } } as never, {} as never, {} as never).get(context, 2)); const record = logs.records[0]!; assert.equal(record.event, "company_operational_status_failed"); assert.equal(record.safeErrorCategory, "internal_failure"); assert.equal(record.companyId, 2); assert.ok(!JSON.stringify(record).includes("secret")); } finally { logs.restore(); }
 });
 
 test("EPIC047 PASS3 operational-status route requires company read authorization", async () => {

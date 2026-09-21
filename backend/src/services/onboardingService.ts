@@ -1,4 +1,4 @@
-import type { CompanyRepositoryPort, KnowledgeRepositoryPort } from "../application/ports/repositories.js";
+import type { CompanyPersistencePort, KnowledgeRepositoryPort } from "../application/ports/repositories.js";
 import type { CompanyKnowledge } from "../types/companyKnowledge.js";
 import type { KnowledgeExtractor, MarkdownDebugStore, WebsiteScraper } from "../types/ports.js";
 import type { WorkspaceContext } from "../types/workspaceContext.js";
@@ -24,7 +24,7 @@ export interface OnboardingResult {
 
 export class OnboardingService {
   public constructor(
-    private readonly companies: CompanyRepositoryPort,
+    private readonly companies: CompanyPersistencePort,
     private readonly knowledge: KnowledgeRepositoryPort,
     private readonly scraper: WebsiteScraper,
     private readonly extractor: KnowledgeExtractor,
@@ -34,19 +34,19 @@ export class OnboardingService {
     private readonly limits?: RateLimitService,
   ) {}
 
-  public validateTarget(context: WorkspaceContext, companyIdValue: unknown, rawUrl: unknown): void {
+  public async validateTarget(context: WorkspaceContext, companyIdValue: unknown, rawUrl: unknown): Promise<void> {
     const companyId = parseCompanyId(companyIdValue);
     normalizeWebsiteUrl(rawUrl);
-    if (!this.companies.findById(context, companyId)) throw new CompanyNotFoundError("Company was not found.");
+    if (!await this.companies.findById(context, companyId)) throw new CompanyNotFoundError("Company was not found.");
   }
 
   public async onboard(context: WorkspaceContext, companyIdValue: unknown, rawUrl: unknown, actor?: ActorContext): Promise<OnboardingResult> {
     const companyId = parseCompanyId(companyIdValue);
     const website = normalizeWebsiteUrl(rawUrl);
-    const company = this.companies.findById(context, companyId);
+    const company = await this.companies.findById(context, companyId);
     if (!company) throw new CompanyNotFoundError("Company was not found.");
-    if (actor && this.limits) { this.limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actor.userId), "actor", companyOnboardingActorLimit); this.limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", companyOnboardingCompanyLimit); }
-    const existingPublishedKnowledge = this.knowledge.load(context, companyId);
+    if (actor && this.limits) { await this.limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId, "actor", actor.userId), "actor", companyOnboardingActorLimit); await this.limits.enforce(abuseScope("workspace", context.workspaceId, "company", companyId), "company", companyOnboardingCompanyLimit); }
+    const existingPublishedKnowledge = await this.knowledge.load(context, companyId);
 
     if (!this.frozenKnowledge) throw new OnboardingError("Frozen Knowledge service is required.");
     return this.frozenOnboard(context, company, website, actor??createSystemActorContext("legacy-onboarding"),existingPublishedKnowledge!==null);
@@ -54,12 +54,12 @@ export class OnboardingService {
 
   private async frozenOnboard(context:WorkspaceContext,company:import("../types/company.js").Company,website:string,actor:ActorContext,hadPublishedKnowledge:boolean):Promise<OnboardingResult>{
     try{
-      const sources=this.frozenKnowledge!.list(context,company.id);const existing=sources.find(item=>item.name==="Website onboarding"&&item.kind==="public_url"&&item.status==="active");
+       const sources=await this.frozenKnowledge!.list(context,company.id);const existing=sources.find(item=>item.name==="Website onboarding"&&item.kind==="public_url"&&item.status==="active");
       const result=existing?await this.frozenKnowledge!.revise(context,actor,company.id,existing.id,"public_url",{url:website,expectedSourceVersion:existing.version}):await this.frozenKnowledge!.create(context,actor,company.id,"public_url",{name:"Website onboarding",url:website});
-      let current=null;try{current=this.frozenKnowledge!.current(context,company.id);}catch(error:unknown){if(!(error instanceof KnowledgeDomainError)||error.code!=="knowledge_unavailable")throw error;}
-      const publication=this.frozenKnowledge!.publish(context,actor,company.id,{sourceRevisionIds:[result.revision.id],expectedKnowledgeVersionId:current?.id??null});
+       let current=null;try{current=await this.frozenKnowledge!.current(context,company.id);}catch(error:unknown){if(!(error instanceof KnowledgeDomainError)||error.code!=="knowledge_unavailable")throw error;}
+       const publication=await this.frozenKnowledge!.publish(context,actor,company.id,{sourceRevisionIds:[result.revision.id],expectedKnowledgeVersionId:current?.id??null});
       return{companyId:company.id,status:"ready",knowledge:publication.version!.knowledge};
-    }catch(error:unknown){if(!hadPublishedKnowledge)this.companies.updateStatus(context,company.id,"failed");throw new OnboardingError("Unable to onboard company.",{cause:error});}
+    }catch(error:unknown){if(!hadPublishedKnowledge)await this.companies.updateStatus(context,company.id,"failed");throw new OnboardingError("Unable to onboard company.",{cause:error});}
   }
 
 }
