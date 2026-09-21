@@ -20,6 +20,7 @@ function renderBilling(value: CustomerBillingSummary, offers: CustomerBillingOff
     if (url.endsWith("/billing/summary")) return Promise.resolve(json(value));
     if (url.endsWith("/billing/offers")) return Promise.resolve(json({ offers }));
     if (url.endsWith("/billing/management-actions")) return Promise.resolve(json({ actions: ["portal", "cancel"], capabilities: value.capabilities }));
+    if (url.includes("/billing/payer-identity-options")) return Promise.resolve(json({ options: [] }));
     return Promise.resolve(new Response("", { status: 404 }));
   });
   render(<I18nProvider><BillingPage csrf="csrf" workspace={workspace(manage)} search="" pathname="/billing" /></I18nProvider>);
@@ -32,6 +33,7 @@ function portalFetch(input: string | URL | Request): Promise<Response> {
   if (url.endsWith("/billing/summary")) return Promise.resolve(json(summary()));
   if (url.endsWith("/billing/offers")) return Promise.resolve(json({ offers: [offer("stripe", "USD")] }));
   if (url.endsWith("/billing/management-actions")) return Promise.resolve(json({ actions: ["portal", "cancel"], capabilities }));
+  if (url.includes("/billing/payer-identity-options")) return Promise.resolve(json({ options: [] }));
   return Promise.resolve(new Response("", { status: 404 }));
 }
 
@@ -49,7 +51,7 @@ test("opens Billing from the real AppShell account menu and renders the authenti
 
 test("presents empty, trial, active, canceled, and pending canonical states without inferring a plan", async () => {
   const cases: Array<[CustomerBillingSummary["subscription"]["state"], CustomerBillingSummary["subscription"]["plan"], string]> = [
-    ["unmanaged", null, "No managed subscription"], ["trial", { key: "trial", name: "Trial plan", interval: "month", currency: "USD", amountMinor: 0 }, "Trial"], ["active", { key: "active", name: "Active plan", interval: "year", currency: "USD", amountMinor: 12000 }, "Active"], ["canceled", null, "Cancelled"], ["reconciliation_required", null, "Status is being verified"],
+    ["unmanaged", null, "No managed subscription"], ["trial", { key: "trial", name: "Trial plan", interval: "month", currency: "USD", amountMinor: 0 }, "Trial"], ["active", { key: "active", name: "Active plan", interval: "year", currency: "USD", amountMinor: 12000 }, "Active"], ["canceling_at_period_end", { key: "canceling", name: "Canceling plan", interval: "month", currency: "USD", amountMinor: 1200 }, "Cancels at period end"], ["grace", { key: "grace", name: "Grace plan", interval: "month", currency: "USD", amountMinor: 1200 }, "Grace period"], ["paused", { key: "paused", name: "Paused plan", interval: "month", currency: "USD", amountMinor: 1200 }, "Paused"], ["payment_required", { key: "payment", name: "Payment plan", interval: "month", currency: "USD", amountMinor: 1200 }, "Payment required"], ["canceled", null, "Cancelled"], ["reconciliation_required", null, "Status is being verified"],
   ];
   for (const [state, plan, label] of cases) {
     renderBilling(summary(state, plan), []);
