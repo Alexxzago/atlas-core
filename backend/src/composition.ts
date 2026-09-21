@@ -14,6 +14,7 @@ import { createOnboardingController } from "./controllers/onboarding.js";
 import { createScrapeController } from "./controllers/scrapeController.js";
 import { createAuthenticationControllers, createPasswordResetControllers, createPlatformBootstrapControllers, createRegistrationController, createResendVerificationController, createVerifyEmailController } from "./controllers/identityController.js";
 import { runtimeProductionConfiguration, sqlDatabase } from "./config/database.js";
+import { mediaStorageAvailable } from "./config/productionConfiguration.js";
 import { DevelopmentVerificationDelivery, UnavailableVerificationDelivery } from "./identity/infrastructure/developmentVerificationDelivery.js";
 import { ScryptPasswordProvider, SecureRandomProvider, Sha256CredentialEnrollmentHashProvider, Sha256SessionIdentifierProvider, Sha256VerificationHashProvider } from "./identity/infrastructure/securityProviders.js";
 import { SystemClock } from "./identity/infrastructure/systemClock.js";
@@ -246,6 +247,7 @@ export const billingReconciliationWorker = new AsyncBillingReconciliationWorker(
 export const billingOperationRecoveryWorker = new AsyncBillingOperationRecoveryWorker(billingPersistence.operationRecovery,billingProviderRegistry,()=>identityClock.now());
 export const billingReconciliationRuntime = new BillingReconciliationRuntime(billingReconciliationWorker, billingReconciliationRuntimeConfiguration(),{},billingOperationRecoveryWorker);
 const production=process.env.NODE_ENV==="production";
+const mediaAvailable=mediaStorageAvailable(runtimeConfiguration);
 export const mediaCore = runtimeConfiguration
   ? createAsyncMediaCore(sqlDatabase, runtimeConfiguration.mediaStorage ? new S3MediaStorage(runtimeConfiguration.mediaStorage) : new UnavailableMediaStorage(), identityClock, mediaPersistence)
   : createAsyncLocalMediaCore(sqlDatabase, resolve(repositoryRoot, "media"), identityClock, mediaPersistence);
@@ -392,7 +394,7 @@ const operatorConversationMessagingService = new OperatorConversationMessagingSe
 configureProductionConversationMessageController((context, actor) => createOperatorConversationMessageController(operatorConversationMessagingService, context, actor));
   const conversationEventFeedService = new ConversationEventFeedService(conversationPersistence.conversations);
   const voiceReadService = new VoiceReadService(whatsAppPersistence.voice, mediaCore.service);
-  configureProductionConversationReadControllers({ list: (context, actor) => createListConversationController(conversationService, context, actor), get: (context, actor) => createGetConversationController(conversationService, context, actor), markRead: (context, actor) => createMarkConversationReadController(conversationService, context, actor), feed: (context) => createConversationEventFeedController(conversationEventFeedService, context), voice: (context) => createVoiceReadController(voiceReadService, context), playback: (context) => createVoicePlaybackController(voiceReadService, context) });
+  configureProductionConversationReadControllers({ list: (context, actor) => createListConversationController(conversationService, context, actor), get: (context, actor) => createGetConversationController(conversationService, context, actor), markRead: (context, actor) => createMarkConversationReadController(conversationService, context, actor), feed: (context) => createConversationEventFeedController(conversationEventFeedService, context), voice: (context) => createVoiceReadController(voiceReadService, context), ...(mediaAvailable ? { playback: (context: WorkspaceContext) => createVoicePlaybackController(voiceReadService, context) } : {}) });
 const conversationControlService = new ConversationControlService(conversationService, conversationPersistence.conversations, identityClock);
 configureProductionConversationControlControllers({ takeover: (context, actor) => createConversationControlController(conversationControlService, context, actor, "takeover"), release: (context, actor) => createConversationControlController(conversationControlService, context, actor, "release"), resolve: (context, actor) => createConversationControlController(conversationControlService, context, actor, "resolve"), resume: (context, actor) => createConversationControlController(conversationControlService, context, actor, "resume") });
 export const whatsAppWebhookService = new WhatsAppWebhookService({ appSecret: process.env.WHATSAPP_APP_SECRET ?? "", verifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? "" }, whatsAppConnectionService, undefined, undefined, conversationService, operationalConversationTurnService, identityClock, undefined, undefined, undefined, undefined, undefined, undefined, undefined, whatsAppDeliveryStatusService, whatsAppPersistence.inbound);

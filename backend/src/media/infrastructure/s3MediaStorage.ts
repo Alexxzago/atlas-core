@@ -11,13 +11,16 @@ const objectKey = /^workspaces\/\d+\/companies\/\d+\/media\/mbl_[a-f0-9]{32}\/ob
 export interface S3MediaStorageConfiguration { readonly endpoint: string; readonly region: string; readonly bucket: string; readonly accessKeyId: string; readonly secretAccessKey: string; }
 interface S3ClientPort { send(command: object, options?: { readonly abortSignal?: AbortSignal }): Promise<unknown>; }
 export const S3_MEDIA_TIMEOUT_MILLISECONDS = 30_000;
+export const S3_MEDIA_MAX_ATTEMPTS = 2;
+/** Do not force path-style addressing; the S3 SDK endpoint resolver selects the effective request form. */
+export const S3_MEDIA_FORCE_PATH_STYLE = false;
 
 /** Private S3-compatible byte storage. Atlas retains media ownership and lifecycle metadata in SQLite. */
 export class S3MediaStorage implements MediaStoragePort {
   private readonly client: S3ClientPort;
   public constructor(private readonly configuration: S3MediaStorageConfiguration, client?: S3ClientPort, private readonly timeoutMilliseconds = S3_MEDIA_TIMEOUT_MILLISECONDS) {
     if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds < 1 || timeoutMilliseconds > 60_000) throw new Error("S3 media timeout is invalid.");
-    this.client = client ?? new S3Client({ endpoint: configuration.endpoint, region: configuration.region, credentials: { accessKeyId: configuration.accessKeyId, secretAccessKey: configuration.secretAccessKey }, maxAttempts: 2 });
+    this.client = client ?? new S3Client({ endpoint: configuration.endpoint, region: configuration.region, credentials: { accessKeyId: configuration.accessKeyId, secretAccessKey: configuration.secretAccessKey }, forcePathStyle: S3_MEDIA_FORCE_PATH_STYLE, maxAttempts: S3_MEDIA_MAX_ATTEMPTS });
   }
   public async stage(id: string, content: AsyncIterable<Uint8Array>, location?: MediaStorageLocation): Promise<StagedMedia> {
     if (!blobId.test(id) || !location || !Number.isSafeInteger(location.workspaceId) || location.workspaceId < 1 || !Number.isSafeInteger(location.companyId) || location.companyId < 1) throw new Error("Invalid media storage location.");

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { productionConfiguration, productionConfigurationInventory } from "../config/productionConfiguration.js";
+import { mediaStorageAvailable, productionConfiguration, productionConfigurationInventory, whatsAppWebhookEnabled } from "../config/productionConfiguration.js";
 import { createProductionRuntimeDatabase, productionDatabaseConfiguration } from "../config/database.js";
 import { DatabaseSync } from "node:sqlite";
 import { migrationHead, runMigrations } from "../config/migrations.js";
 import { UnavailableMediaStorage } from "../media/infrastructure/unavailableMediaStorage.js";
 import { MediaDomainError } from "../media/domain/media.js";
+import { S3_MEDIA_FORCE_PATH_STYLE, S3_MEDIA_MAX_ATTEMPTS, S3_MEDIA_TIMEOUT_MILLISECONDS } from "../media/infrastructure/s3MediaStorage.js";
 import { CompanyOperationalStatusService } from "../company/services/companyOperationalStatusService.js";
 import { markRuntimeReady, registerRuntimeWorker, resetRuntimeReadinessForTests, runtimeMissingRequiredWorkers, runtimeReadinessStatus, runtimeWorkerCycleSucceeded, runtimeWorkerStarted } from "../config/runtimeReadiness.js";
 
@@ -47,6 +48,38 @@ test("EPIC047 partial or invalid production durable media fails closed", () => {
   assert.throws(() => productionConfiguration({ ...core(), ATLAS_MEDIA_STORAGE_PROVIDER: "local" }), /durable media storage/);
   assert.throws(() => productionConfiguration({ ...core(), ATLAS_S3_BUCKET: "" }), /durable media storage/);
   assert.throws(() => productionConfiguration({ ...noMedia(), ATLAS_S3_BUCKET: "atlas-media" }), /durable media storage/);
+  assert.throws(() => productionConfiguration({ ...core(), ATLAS_S3_ENDPOINT: "http://storage.example.test" }), /durable media storage/);
+  assert.throws(() => productionConfiguration({ ...core(), ATLAS_S3_BUCKET: "Invalid_Bucket" }), /durable media storage/);
+});
+
+test("EPIC056 production webhook media requires durable storage using the shared enabled-flow predicate", () => {
+  const enabled = { ...noMedia(), WHATSAPP_APP_SECRET: "webhook-app-secret", WHATSAPP_WEBHOOK_VERIFY_TOKEN: "webhook-verify-secret" };
+  assert.equal(whatsAppWebhookEnabled(enabled), true);
+  assert.equal(whatsAppWebhookEnabled({ ...enabled, WHATSAPP_WEBHOOK_VERIFY_TOKEN: "" }), false);
+  assert.throws(() => productionConfiguration(enabled), (error: unknown) => error instanceof Error && /durable storage/.test(error.message) && !error.message.includes("webhook-app-secret") && !error.message.includes("webhook-verify-secret"));
+  const configured = productionConfiguration({ ...core(), WHATSAPP_APP_SECRET: "webhook-app-secret", WHATSAPP_WEBHOOK_VERIFY_TOKEN: "webhook-verify-secret" });
+  assert.equal(configured.whatsAppWebhookEnabled, true);
+  assert.equal(configured.mediaCapability, "available");
+});
+
+test("EPIC056 rejects enabled media before the production database factory or migrations", () => {
+  let opened = false;
+  assert.throws(() => createProductionRuntimeDatabase({ ...noMedia(), WHATSAPP_APP_SECRET: "webhook-app-secret", WHATSAPP_WEBHOOK_VERIFY_TOKEN: "webhook-verify-secret" }, () => { opened = true; throw new Error("database factory must not run"); }), /durable storage/);
+  assert.equal(opened, false);
+});
+
+test("EPIC056 uses the resolved media capability for production gates while preserving development media", () => {
+  assert.equal(mediaStorageAvailable(productionConfiguration(noMedia())), false);
+  assert.equal(mediaStorageAvailable(productionConfiguration(core())), true);
+  assert.equal(mediaStorageAvailable(null), true);
+});
+
+test("EPIC056 freezes the live S3 addressing, timeout, retry, and private server-owned operation contract", () => {
+  assert.equal(S3_MEDIA_FORCE_PATH_STYLE, false);
+  assert.equal(S3_MEDIA_MAX_ATTEMPTS, 2);
+  assert.equal(S3_MEDIA_TIMEOUT_MILLISECONDS, 30_000);
+  const inventory = productionConfigurationInventory.find(entry => entry.name.startsWith("ATLAS_MEDIA_STORAGE_PROVIDER"));
+  assert.equal(inventory?.enabledBy, "any durable media S3 variable is configured or the production WhatsApp webhook is enabled");
 });
 
 test("EPIC047 unavailable media operations are bounded and never expose storage failures", async () => {
@@ -80,6 +113,7 @@ test("EPIC047 valid production preflight permits the normal 0068 to 0069 migrati
 test("EPIC047 malformed configuration errors redact secret values", () => {
   const secret = "do-not-print-this-secret";
   assert.throws(() => productionConfiguration({ ...core(), TURSO_AUTH_TOKEN: secret, ATLAS_INTEGRATION_SECRET_KEY: "not-a-key" }), (error: unknown) => error instanceof Error && !error.message.includes(secret));
+  assert.throws(() => productionConfiguration({ ...noMedia(), WHATSAPP_APP_SECRET: secret, WHATSAPP_WEBHOOK_VERIFY_TOKEN: "another-secret" }), (error: unknown) => error instanceof Error && !error.message.includes(secret) && !error.message.includes("another-secret"));
 });
 
 test("EPIC047 release inventory classifies DR maintenance and release identity without requiring Voice", () => {
