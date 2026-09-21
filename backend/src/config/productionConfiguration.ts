@@ -1,4 +1,4 @@
-import { billingProviderRegistryFromEnvironment } from "../billing/application/billingProviderConfiguration.js";
+import { validateBillingProviderProductionConfiguration } from "../billing/application/billingProviderConfiguration.js";
 import { integrationSecretCipherRingFromEnvironment } from "../integrations/infrastructure/aesGcmIntegrationSecretCipher.js";
 import { AesGcmWhatsAppCredentialCipher } from "../whatsapp/infrastructure/aesGcmWhatsAppCredentialCipher.js";
 import { emailDeliveryMode, type EmailDeliveryMode } from "../providers/emailDeliveryMode.js";
@@ -63,7 +63,7 @@ function validateOptionalConfiguration(environment: NodeJS.ProcessEnv, emailMode
     if (emailMode === "resend") resendConfiguration(environment);
     if (emailMode === "google_apps_script") googleAppsScriptConfiguration(environment);
     if (environment.ATLAS_INTEGRATION_SECRET_KEY?.trim() || environment.ATLAS_INTEGRATION_SECRET_ACTIVE_KEY_ID?.trim() || environment.ATLAS_INTEGRATION_SECRET_ACTIVE_KEY?.trim() || environment.ATLAS_INTEGRATION_SECRET_PREVIOUS_KEY_ID?.trim() || environment.ATLAS_INTEGRATION_SECRET_PREVIOUS_KEY?.trim()) integrationSecretCipherRingFromEnvironment(environment);
-    if (environment.BILLING_PROVIDERS?.trim()) billingProviderRegistryFromEnvironment(environment);
+    if (environment.BILLING_PROVIDERS?.trim()) validateBillingProviderProductionConfiguration(environment);
     const whatsappWebhook = Boolean(environment.WHATSAPP_APP_SECRET?.trim() || environment.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim());
     if (whatsappWebhook && (!environment.WHATSAPP_APP_SECRET?.trim() || !environment.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim())) throw new Error();
     const whatsappKey = environment.WHATSAPP_PLATFORM_ENCRYPTION_KEY?.trim();

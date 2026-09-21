@@ -5,6 +5,7 @@ import type { AsyncBillingProviderEventRepository } from "../infrastructure/asyn
 
 export interface BillingWebhookSecrets { readonly stripe: string; readonly mercadopago: string; }
 type Json = Record<string, unknown>;
+const webhookTimestampMaximumSkewSeconds = 300;
 
 export class BillingWebhookService {
   public constructor(private readonly secrets: BillingWebhookSecrets, private readonly repository: BillingWebhookRepository, private readonly now: () => string = () => new Date().toISOString()) {}
@@ -21,7 +22,7 @@ export class BillingWebhookService {
     const header = headerValue(headers, provider === "stripe" ? "stripe-signature" : "x-signature");
     if (!header) return false;
     if (provider === "stripe") return stripeSignature(secret, raw, header, this.now()).some((signature) => safeEqual(signature.digest, signature.signature));
-    const expected = mercadoPagoSignature(secret, raw, headers, header);
+    const expected = mercadoPagoSignature(secret, raw, headers, header, this.now());
     return expected !== null && safeEqual(expected.digest, expected.signature);
   }
 }
@@ -41,7 +42,7 @@ export class AsyncBillingWebhookService {
     const header = headerValue(headers, provider === "stripe" ? "stripe-signature" : "x-signature");
     if (!header) return false;
     if (provider === "stripe") return stripeSignature(secret, raw, header, this.now()).some((signature) => safeEqual(signature.digest, signature.signature));
-    const expected = mercadoPagoSignature(secret, raw, headers, header);
+    const expected = mercadoPagoSignature(secret, raw, headers, header, this.now());
     return expected !== null && safeEqual(expected.digest, expected.signature);
   }
 }
@@ -55,8 +56,9 @@ function normalize(provider: BillingProviderKind, raw: Buffer): Omit<import("../
   if (provider === "stripe" && eventType === "checkout.session.completed" && (!bounded(objectId) || !bounded(subscriptionId))) return null;
   return { providerEventId: eventId, eventType, providerObjectId: bounded(objectId) ? objectId : null, providerCustomerId: bounded(customerId) ? customerId : null, providerSubscriptionId: bounded(subscriptionId) ? subscriptionId : null, correlationToken:bounded(correlationToken)?correlationToken:null };
 }
-function stripeSignature(secret: string, raw: Buffer, header: string, now: string): readonly { digest: Buffer; signature: Buffer }[] { const parts=header.split(",").map(value=>value.trim()), timestamps=parts.filter(value=>value.startsWith("t=")).map(value=>value.slice(2)), signatures=parts.filter(value=>value.startsWith("v1=")).map(value=>value.slice(3)); if(timestamps.length!==1||!timestamps[0]||!/^\d+$/.test(timestamps[0])||!signatures.length)return[]; const timestamp=Number(timestamps[0]), current=Math.floor(Date.parse(now)/1000); if(!Number.isSafeInteger(timestamp)||!Number.isSafeInteger(current)||Math.abs(current-timestamp)>300)return[]; const digest=createHmac("sha256",secret).update(`${timestamp}.`).update(raw).digest(); return signatures.filter(value=>/^[0-9a-f]{64}$/i.test(value)).map(value=>({digest,signature:Buffer.from(value,"hex")})); }
-function mercadoPagoSignature(secret: string, raw: Buffer, headers: Record<string, string | string[] | undefined>, header: string): { digest: Buffer; signature: Buffer } | null { const values = Object.fromEntries(header.split(",").map(part => { const [key, value] = part.trim().split("=", 2); return [key, value]; })), timestamp = values.ts, signature = values.v1, requestId = headerValue(headers, "x-request-id"); if (!timestamp || !signature || !requestId || !/^\d+$/.test(timestamp) || !/^[0-9a-f]{64}$/i.test(signature)) return null; let id = ""; try { id = text(object((JSON.parse(raw.toString("utf8")) as Json).data)?.id) ?? ""; } catch { return null; } return { digest: createHmac("sha256", secret).update(`id:${id};request-id:${requestId};ts:${timestamp};`).digest(), signature: Buffer.from(signature, "hex") }; }
+function stripeSignature(secret: string, raw: Buffer, header: string, now: string): readonly { digest: Buffer; signature: Buffer }[] { const parts=header.split(",").map(value=>value.trim()), timestamps=parts.filter(value=>value.startsWith("t=")).map(value=>value.slice(2)), signatures=parts.filter(value=>value.startsWith("v1=")).map(value=>value.slice(3)); if(timestamps.length!==1||!timestamps[0]||!freshTimestamp(timestamps[0],now)||!signatures.length)return[]; const digest=createHmac("sha256",secret).update(`${timestamps[0]}.`).update(raw).digest(); return signatures.filter(value=>/^[0-9a-f]{64}$/i.test(value)).map(value=>({digest,signature:Buffer.from(value,"hex")})); }
+function mercadoPagoSignature(secret: string, raw: Buffer, headers: Record<string, string | string[] | undefined>, header: string, now: string): { digest: Buffer; signature: Buffer } | null { const values = Object.fromEntries(header.split(",").map(part => { const [key, value] = part.trim().split("=", 2); return [key, value]; })), timestamp = values.ts, signature = values.v1, requestId = headerValue(headers, "x-request-id"); if (!timestamp || !signature || !requestId || !freshTimestamp(timestamp,now) || !/^[0-9a-f]{64}$/i.test(signature)) return null; let id = ""; try { id = text(object((JSON.parse(raw.toString("utf8")) as Json).data)?.id) ?? ""; } catch { return null; } return { digest: createHmac("sha256", secret).update(`id:${id};request-id:${requestId};ts:${timestamp};`).digest(), signature: Buffer.from(signature, "hex") }; }
+function freshTimestamp(value:string,now:string):boolean { if(!/^\d+$/.test(value))return false;const timestamp=Number(value),current=Math.floor(Date.parse(now)/1000);return Number.isSafeInteger(timestamp)&&Number.isSafeInteger(current)&&Math.abs(current-timestamp)<=webhookTimestampMaximumSkewSeconds; }
 function safeEqual(left: Buffer, right: Buffer): boolean { return left.length === right.length && timingSafeEqual(left, right); }
 function headerValue(headers: Record<string, string | string[] | undefined>, name: string): string | null { const value = headers[name]; return typeof value === "string" && value.length <= 2048 ? value : null; }
 function object(value: unknown): Json | null { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Json : null; }

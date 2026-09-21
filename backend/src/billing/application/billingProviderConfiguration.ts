@@ -29,3 +29,13 @@ export function billingProviderRegistryFromEnvironment(environment:NodeJS.Proces
   }
   return new BillingProviderRegistry(entries);
 }
+
+/** Production-only validation keeps webhook signing material coupled to each enabled provider. */
+export function validateBillingProviderProductionConfiguration(environment:NodeJS.ProcessEnv=process.env):void {
+  const kinds=billingProviderKindsFromEnvironment(environment);
+  billingProviderRegistryFromEnvironment(environment);
+  for(const kind of kinds){
+    const secret=(kind==="stripe"?environment.STRIPE_WEBHOOK_SIGNING_SECRET:environment.MERCADOPAGO_WEBHOOK_SECRET)?.trim();
+    if(!secret)throw new BillingProviderConfigurationError(`${kind==="stripe"?"STRIPE_WEBHOOK_SIGNING_SECRET":"MERCADOPAGO_WEBHOOK_SECRET"} is required when ${kind} is configured.`);
+  }
+}
