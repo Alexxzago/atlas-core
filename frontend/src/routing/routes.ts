@@ -47,7 +47,7 @@ export function parsePortalRoute(pathname: string): PortalRoute {
   }
   if (segments.length === 1 && segments[0] === "conversations") return { name: "conversations" };
   if (segments.length === 1 && segments[0] === "analytics") return { name: "analytics" };
-  if (segments.length === 1 && segments[0] === "billing" || segments.length === 3 && segments[0] === "billing" && segments[1] === "checkout" && (segments[2] === "success" || segments[2] === "cancel")) return { name: "billing" };
+  if (segments.length === 1 && segments[0] === "billing" || segments.length === 3 && segments[0] === "billing" && segments[1] === "checkout" && (segments[2] === "success" || segments[2] === "cancel") || segments.length === 3 && segments[0] === "billing" && segments[1] === "portal" && segments[2] === "return") return { name: "billing" };
   if (segments.length === 1 && segments[0] === "settings") return { name: "settings" };
   return { name: "not-found" };
 }

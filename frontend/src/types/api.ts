@@ -55,6 +55,8 @@ export interface CustomerBillingSummary { rolloutMode:"unmanaged"|"managed"; sub
 export interface CustomerBillingOffer { offerId:string; provider:"stripe"|"mercadopago"; key:string; version:number; name:string; description:string; inclusions:Array<{code:string;title:string;description:string}>; interval:"month"|"year"; currency:string; amountMinor:number; checkoutAvailable:boolean; }
 export interface CustomerBillingManagementActions { actions:Array<"portal"|"cancel"|"reactivate">; capabilities:CustomerBillingCapabilities; }
 export type CustomerBillingOperation = { status:"succeeded"|"failed"|"uncertain"|"in_progress"|"conflict"|"invalid"|"unavailable"|"unsupported"; redirectUrl?:string };
+export interface CustomerBillingPayerIdentities { options:Array<{identityId:string;email:string}>; selectedEmail:string|null; }
+export type CustomerBillingPayerIdentityOperation = { status:"succeeded"|"conflict"|"invalid" };
 
 export type ConversationControlState = "automated" | "human_required" | "human_controlled";
 export interface ConversationDelivery { state: "pending" | "leased" | "accepted" | "delivered" | "read" | "retryable" | "permanent_failure" | "uncertain"; updatedAt: string; safeErrorCategory: string | null; }

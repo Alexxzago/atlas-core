@@ -78,7 +78,8 @@ export class MercadoPagoBillingProvider implements BillingProvider {
       let body:unknown;
       try { body=await response.json(); } catch { return {kind:"uncertain"}; }
       if(!body||typeof body!=="object")return {kind:"uncertain"};
-      const record=body as Record<string,unknown>;
+       const record=body as Record<string,unknown>,externalReference=input.correlationToken??this.externalReference(input.idempotencyKey);
+       if((record.preapproval_plan_id!==undefined&&record.preapproval_plan_id!==input.catalogReference)||(record.external_reference!==undefined&&record.external_reference!==externalReference))return {kind:"uncertain"};
       const id=typeof record.id==="string"&&record.id.length>0&&record.id.length<=200?record.id:null;
       const initPoint=typeof record.init_point==="string"&&this.redirect(record.init_point)?record.init_point:null;
       return id&&initPoint?{kind:"success",providerObjectId:id,redirectUrl:initPoint}:{kind:"uncertain"};
