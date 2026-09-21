@@ -1123,6 +1123,12 @@ test("EPIC046 PASS4F7B lists only the caller's usable payer identities and follo
   fixture.db.prepare("UPDATE memberships SET status='suspended' WHERE id='manager-member'").run(); assert.deepEqual(await (await fixture.get("/payer-identity-options")).json(),{options:[]});
 }));
 
+test("EPIC055 PASS7 payer identity options require workspace management permission", async () => withBillingHttp(async fixture => {
+  addPayerIdentity(fixture,"manager-identity","manager","manager@example.test");
+  fixture.db.prepare("UPDATE billing_accounts SET billing_payer_identity_id='manager-identity' WHERE id=?").run(fixture.account.id);
+  assert.equal((await fixture.get("/payer-identity-options",{"cookie":"atlas=reader"})).status,404);
+}));
+
 test("EPIC046 PASS4F7B payer identity mutations require exact own identity bodies", async () => withBillingHttp(async fixture => {
   addPayerIdentity(fixture,"manager-identity","manager","manager@example.test"); addPayerIdentity(fixture,"manager-second","manager","second@example.test"); addPayerIdentity(fixture,"other-identity","other","other@example.test");
   const put=(body:unknown)=>fetch(`${fixture.origin}/workspaces/wsp_default/billing/payer-identity`,{method:"PUT",headers:fixture.headers(),body:JSON.stringify(body)}), remove=(body:unknown)=>fetch(`${fixture.origin}/workspaces/wsp_default/billing/payer-identity`,{method:"DELETE",headers:fixture.headers(),body:JSON.stringify(body)});

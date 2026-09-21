@@ -3,6 +3,8 @@ import { createHmac } from "node:crypto";
 import test from "node:test";
 import { AsyncBillingWebhookService, BillingWebhookService } from "../billing/application/billingWebhookService.js";
 import { productionConfiguration } from "../config/productionConfiguration.js";
+import { stripeBillingProviderFromEnvironment } from "../billing/providers/stripeBillingProvider.js";
+import { mercadoPagoBillingProviderFromEnvironment } from "../billing/providers/mercadoPagoBillingProvider.js";
 
 const core=():NodeJS.ProcessEnv=>({NODE_ENV:"production",DATABASE_PROVIDER:"libsql",TURSO_DATABASE_URL:"libsql://atlas.example.test",TURSO_AUTH_TOKEN:"database-token",ATLAS_VERIFICATION_ORIGIN:"https://portal.example.test",ATLAS_BOOTSTRAP_SECRET:"b".repeat(32),EMAIL_PROVIDER:"resend",RESEND_API_KEY:"email-token",RESEND_FROM:"atlas@example.test"});
 const timestamp=1_725_000_000,now=()=>new Date(timestamp*1_000).toISOString();
@@ -43,4 +45,15 @@ test("EPIC055 PASS1 accepts only fresh valid Mercado Pago manifests and retains 
   const events=new Set<string>(),asyncService=new AsyncBillingWebhookService({stripe:"stripe-webhook",mercadopago:secret},{accept:async event=>events.has(event.providerEventId)?"duplicate":(events.add(event.providerEventId),"accepted")}as never,now);
   assert.equal(await asyncService.receive("mercadopago",raw,{"x-signature":header,"x-request-id":requestId}),"accepted");
   assert.equal(await asyncService.receive("mercadopago",raw,{"x-signature":header,"x-request-id":requestId}),"duplicate");
+});
+
+test("EPIC055 PASS7 keeps Atlas return origins separate from provider-hosted checkout redirects",async()=>{
+  const stripe=stripeBillingProviderFromEnvironment({STRIPE_SECRET_KEY:"stripe-key",STRIPE_ALLOWED_REDIRECT_ORIGINS:"https://portal.example.test"},async()=>new Response(JSON.stringify({id:"cs_1",url:"https://checkout.stripe.com/pay/cs_1"})));
+  assert.deepEqual(await stripe.createCheckoutSession({idempotencyKey:"key",catalogReference:"price_1",successTarget:"https://portal.example.test/billing/checkout/success",cancelTarget:"https://portal.example.test/billing/checkout/cancel"}),{kind:"success",providerObjectId:"cs_1",redirectUrl:"https://checkout.stripe.com/pay/cs_1"});
+  const hostileStripe=stripeBillingProviderFromEnvironment({STRIPE_SECRET_KEY:"stripe-key",STRIPE_ALLOWED_REDIRECT_ORIGINS:"https://portal.example.test"},async()=>new Response(JSON.stringify({id:"cs_1",url:"https://evil.example.test/pay"})));
+  assert.equal((await hostileStripe.createCheckoutSession({idempotencyKey:"key",catalogReference:"price_1",successTarget:"https://portal.example.test/billing/checkout/success",cancelTarget:"https://portal.example.test/billing/checkout/cancel"})).kind,"uncertain");
+  const mercado=mercadoPagoBillingProviderFromEnvironment({MERCADOPAGO_ACCESS_TOKEN:"mp-key",MERCADOPAGO_ALLOWED_REDIRECT_ORIGINS:"https://portal.example.test"},async()=>new Response(JSON.stringify({id:"pre_1",init_point:"https://www.mercadopago.com/checkout/pre_1"})));
+  assert.deepEqual(await mercado.createCheckoutSession({idempotencyKey:"key",catalogReference:"plan_1",successTarget:"https://portal.example.test/billing/checkout/success",cancelTarget:"https://portal.example.test/billing/checkout/cancel",payerEmail:"payer@example.test"}),{kind:"success",providerObjectId:"pre_1",redirectUrl:"https://www.mercadopago.com/checkout/pre_1"});
+  const hostileMercado=mercadoPagoBillingProviderFromEnvironment({MERCADOPAGO_ACCESS_TOKEN:"mp-key",MERCADOPAGO_ALLOWED_REDIRECT_ORIGINS:"https://portal.example.test"},async()=>new Response(JSON.stringify({id:"pre_1",init_point:"https://evil.example.test/checkout"})));
+  assert.equal((await hostileMercado.createCheckoutSession({idempotencyKey:"key",catalogReference:"plan_1",successTarget:"https://portal.example.test/billing/checkout/success",cancelTarget:"https://portal.example.test/billing/checkout/cancel",payerEmail:"payer@example.test"})).kind,"uncertain");
 });
