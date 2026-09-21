@@ -19,12 +19,16 @@ export interface SqlDatabase {
 /** Concrete async database facade that defers connection readiness without exposing its promise to consumers. */
 export class DeferredSqlDatabase implements SqlDatabase {
   private database: Promise<SqlDatabase> | null = null;
+  private initializationFailed = false;
 
   public constructor(private readonly connect: () => Promise<SqlDatabase>) {}
 
   private current(): Promise<SqlDatabase> {
     if (!this.database) {
-      this.database = this.connect();
+      this.database = this.connect().catch((error: unknown) => {
+        this.initializationFailed = true;
+        throw error;
+      });
       void this.database.catch(() => undefined);
     }
     return this.database;
@@ -35,7 +39,11 @@ export class DeferredSqlDatabase implements SqlDatabase {
   public async executeScript(script: string): Promise<void> { await (await this.current()).executeScript(script); }
   public async query<Row extends Record<string, unknown>>(statement: string, args: readonly SqlValue[] = []): Promise<Row[]> { return (await this.current()).query<Row>(statement, args); }
   public async transaction<T>(operation: (database: SqlDatabase) => Promise<T>): Promise<T> { return (await this.current()).transaction(operation); }
-  public async close(): Promise<void> { if (this.database) await (await this.database).close(); }
+  public async close(): Promise<void> {
+    if (!this.database) return;
+    try { await (await this.database).close(); }
+    catch (error: unknown) { if (!this.initializationFailed) throw error; }
+  }
 }
 
 function statement(sql: string, args: readonly SqlValue[] = []): InStatement {
