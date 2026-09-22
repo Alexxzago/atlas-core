@@ -19,7 +19,7 @@ import type { WhatsAppDeliveryStatusService } from "./WhatsAppDeliveryStatusServ
 import type { AsyncWhatsAppDeliveryStatusService } from "./AsyncWhatsAppDeliveryStatusService.js";
 import { neutralAttachmentMessage, type WhatsAppInboundMediaKind } from "../domain/whatsappInboundMedia.js";
 import { VoiceSemanticContentUnavailableError } from "./voiceSemanticContentResolver.js";
-import { AsyncWhatsAppInboundPersistence } from "../infrastructure/asyncWhatsAppInboundPersistence.js";
+import { AsyncWhatsAppExecutionLeaseLostError, AsyncWhatsAppInboundPersistence } from "../infrastructure/asyncWhatsAppInboundPersistence.js";
 
 export interface WhatsAppWebhookConfiguration { readonly appSecret: string; readonly verifyToken: string; }
 export interface WhatsAppInboundTextMessage { readonly phoneNumberId: string; readonly waId: string; readonly wamid: string; readonly text: string; }
@@ -77,6 +77,7 @@ export class WhatsAppWebhookService {
     }
   }
   public async resumeIncomplete(limit = 25): Promise<void> {
+    if (this.inboundPersistence) { await this.resumeAsync(limit); return; }
     if (!this.connections || !this.bindings || !this.events || !this.conversations || !this.turns) return;
     {
       const now = this.clock.now(), leased = this.events.leaseExecutionRequests(this.executionOwner, now, new Date(Date.parse(now) + 60_000).toISOString(), limit);
@@ -105,6 +106,31 @@ export class WhatsAppWebhookService {
         } catch (error: unknown) { const failedAt = this.clock.now(); if (error instanceof OperationalConversationTurnSuppressedError || error instanceof VoiceSemanticContentUnavailableError) { this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", "suppressed", failedAt); this.events.updateState(event.id, "claimed", "completed", failedAt); } else { await this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "provider_unavailable", failedAt); this.events.updateState(event.id, "claimed", "failed", failedAt); } }
       }
       return;
+    }
+  }
+  private async resumeAsync(limit: number): Promise<void> {
+    if (!this.inboundPersistence || !this.connections || !this.turns) return;
+    const now = this.clock.now(), leased = await this.inboundPersistence.leaseExecutionRequests(this.executionOwner, now, new Date(Date.parse(now) + 60_000).toISOString(), limit);
+    for (const request of leased) {
+      const snapshot = request.snapshot, connectionId = typeof snapshot.whatsAppConnectionId === "string" ? snapshot.whatsAppConnectionId : null, assistantParticipantId = typeof snapshot.assistantParticipantId === "string" ? snapshot.assistantParticipantId : null, recipientWaId = typeof snapshot.recipientWaId === "string" ? snapshot.recipientWaId : null, replyIdempotencyKey = typeof snapshot.replyIdempotencyKey === "string" ? snapshot.replyIdempotencyKey : null, assistantProfileId = typeof snapshot.assistantProfileId === "string" ? snapshot.assistantProfileId : null;
+      if (!connectionId || !assistantParticipantId || !recipientWaId || !replyIdempotencyKey || !assistantProfileId) { await this.inboundPersistence.settleExecutionRequest(request.id, this.executionOwner, "failed", "unsupported", this.clock.now()); continue; }
+      const connection = await this.connections.resolveForRecovery(connectionId as import("../domain/whatsappConnection.js").WhatsAppConnectionId);
+      if (!connection || assistantProfileId !== connection.assistantProfileId) { await this.inboundPersistence.settleExecutionRequest(request.id, this.executionOwner, "failed", "unsupported", this.clock.now()); continue; }
+      const context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, persisted = await this.inboundPersistence.loadLeasedExecutionContext(context, connection.companyId, connection.id, request.id, this.executionOwner, this.clock.now());
+      if (!persisted) continue;
+      try {
+        const current = await this.controls?.ensureConversationControl(context, connection.companyId, persisted.binding.conversationId);
+        await this.reopenForInbound(context, connection.companyId, persisted.binding.conversationId);
+        if (!allowsAutomation(current)) { await this.inboundPersistence.settleExecutionRequest(request.id, this.executionOwner, "completed", "unsupported", this.clock.now()); continue; }
+        const turn = await this.turns.executePersistedInbound(context, connection.companyId, persisted.binding.conversationId, { assistantProfileId, outboundParticipantId: assistantParticipantId, replyIdempotencyKey, whatsAppConnectionId: connection.id, whatsAppPhoneNumberId: connection.phoneNumberId }, persisted.inbound, { beforeRuntime: () => this.allowsAutomation(context, connection.companyId, persisted.binding.conversationId), finalizeResponse: input => this.inboundPersistence!.finalizeLeasedExecution({ context, companyId: connection.companyId, connectionId: connection.id, requestId: request.id, owner: this.executionOwner, leaseExpiresAt: request.leaseExpiresAt!, now: this.clock.now(), eventId: persisted.event.id, conversationId: persisted.binding.conversationId, inboundMessageId: persisted.inbound.id, assistantProfileId, assistantParticipantId, executionRecordId: input.executionRecordId, authorityGeneration: input.authorityGeneration, outcome: input.outcome, content: input.content, replyIdempotencyKey, outboundMessageId: conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`), providerMessageId: `pmr_${randomUUID().replaceAll("-", "")}`, deliveryId: `odl_${randomUUID().replaceAll("-", "")}` }) });
+        if (turn.response.outcome === "safe_fallback") await this.markHumanRequired(context, connection.companyId, persisted.binding.conversationId);
+        void recipientWaId;
+      } catch (error: unknown) {
+        const failedAt = this.clock.now();
+        if (error instanceof AsyncWhatsAppExecutionLeaseLostError) continue;
+        if (error instanceof OperationalConversationTurnSuppressedError || error instanceof VoiceSemanticContentUnavailableError) await this.inboundPersistence.settleExecutionRequest(request.id, this.executionOwner, "completed", "suppressed", failedAt);
+        else { await this.markHumanRequired(context, connection.companyId, persisted.binding.conversationId); await this.inboundPersistence.settleExecutionRequest(request.id, this.executionOwner, "failed", "provider_unavailable", failedAt); }
+      }
     }
   }
   public async leaseInboundExecutionRequests(owner: string, now: string, expiresAt: string, limit = 25): Promise<readonly import("../../transport/domain/providerDelivery.js").ChannelExecutionRequest[]> { return this.inboundPersistence ? this.inboundPersistence.leaseExecutionRequests(owner, now, expiresAt, limit) : []; }
