@@ -1,6 +1,16 @@
 export type MediaKind = "document" | "image" | "audio";
 export type MediaAssetStatus = "pending" | "ready" | "failed" | "archived" | "deleted";
 export type MediaBlobState = "active" | "reclaim_pending" | "reclaimed";
+export type MediaStorageFailureCategory = "timeout" | "transient_provider" | "transport" | "authorization" | "not_found" | "collision" | "integrity" | "permanent";
+/**
+ * reserved: exact server-owned references are durable before any external write.
+ * staged: validated staging and final references exist; the asset is pending and retry is possible.
+ * promoted: the final reference may exist; the asset remains pending until atomic SQL settlement.
+ * settled: asset/blob SQL is ready and this is terminal success.
+ * retryable_failure: exact references remain for later recovery; the asset is not a successful replay.
+ * terminal_failure: no retry is allowed and the asset is failed; settlement is terminal.
+ */
+export type MediaIngestAttemptState = "reserved" | "staged" | "promoted" | "settled" | "retryable_failure" | "terminal_failure";
 export type MediaAssociationOwnerType = "conversation_message" | "knowledge_source" | "tool_result" | "outbound_message";
 export interface MediaMetadataObject { readonly [key: string]: MediaMetadataValue; }
 export type MediaMetadataValue = number | readonly MediaMetadataValue[] | MediaMetadataObject;
@@ -33,6 +43,27 @@ export interface MediaBlob {
   readonly createdAt: string;
 }
 
+export interface MediaIngestAttempt {
+  readonly assetId: string;
+  readonly workspaceId: number;
+  readonly companyId: number;
+  readonly candidateBlobId: string;
+  readonly stagingStorageReference: string;
+  readonly finalStorageReference: string;
+  readonly digest: string;
+  readonly sizeBytes: number;
+  readonly inspectedMediaType: string;
+  readonly state: MediaIngestAttemptState;
+  readonly leaseOwner: string | null;
+  readonly leaseToken: string | null;
+  readonly leaseExpiresAt: string | null;
+  readonly attemptCount: number;
+  readonly failureCategory: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly settledAt: string | null;
+}
+
 export interface MediaAssociation {
   readonly id: string;
   readonly assetId: string;
@@ -46,6 +77,7 @@ export interface MediaAssociation {
 export const MEDIA_LIMITS = Object.freeze({ maximumBytes: 25 * 1024 * 1024, filenameLength: 180, metadataEntries: 4, metadataValue: 100_000, idempotencyKeyLength: 200 } as const);
 export const MEDIA_TYPES = Object.freeze(["application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp", "audio/mpeg", "audio/ogg", "audio/wav"] as const);
 export class MediaDomainError extends Error { public constructor(public readonly code: string) { super(code); } }
+export class MediaStorageError extends MediaDomainError { public constructor(public readonly category: MediaStorageFailureCategory) { super(category==="not_found"?"media_not_found":category==="collision"?"media_storage_collision":category==="integrity"?"media_integrity_invalid":"media_storage_failed"); } }
 
 export function mediaKind(mediaType: string): MediaKind { return mediaType === "application/pdf" ? "document" : mediaType.startsWith("audio/") ? "audio" : "image"; }
 export function safeFilename(value: string | undefined): string | null { if (value === undefined) return null; const filename = value.normalize("NFC").trim(); if (!filename || filename.length > MEDIA_LIMITS.filenameLength || /[\\/\u0000-\u001f]/u.test(filename)) throw new MediaDomainError("media_filename_invalid"); return filename; }

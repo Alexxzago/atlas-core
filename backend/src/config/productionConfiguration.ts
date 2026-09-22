@@ -7,6 +7,7 @@ import { resendConfiguration } from "../providers/resendEmailDelivery.js";
 import { smtpConfiguration } from "../providers/smtpEmailDelivery.js";
 import { s3MediaStorageConfiguration } from "./s3MediaStorageConfiguration.js";
 import type { S3MediaStorageConfiguration } from "../media/infrastructure/s3MediaStorage.js";
+import { googleCloudSpeechConfiguration } from "./googleCloudSpeechConfiguration.js";
 
 export type ProductionConfigurationClass = "CORE_REQUIRED" | "REQUIRED_WHEN_ENABLED" | "OPTIONAL" | "PUBLIC_FRONTEND_ONLY";
 export interface ProductionConfigurationInventoryEntry { readonly name: string; readonly classification: ProductionConfigurationClass; readonly enabledBy?: string; }
@@ -14,7 +15,7 @@ export const productionConfigurationInventory: readonly ProductionConfigurationI
   { name: "NODE_ENV, DATABASE_PROVIDER, TURSO_DATABASE_URL, TURSO_AUTH_TOKEN", classification: "CORE_REQUIRED" },
   { name: "ATLAS_VERIFICATION_ORIGIN", classification: "CORE_REQUIRED" },
   { name: "ATLAS_BOOTSTRAP_SECRET", classification: "CORE_REQUIRED" },
-  { name: "ATLAS_MEDIA_STORAGE_PROVIDER, ATLAS_S3_ENDPOINT, ATLAS_S3_REGION, ATLAS_S3_BUCKET, ATLAS_S3_ACCESS_KEY_ID, ATLAS_S3_SECRET_ACCESS_KEY", classification: "REQUIRED_WHEN_ENABLED", enabledBy: "any durable media S3 variable is configured" },
+  { name: "ATLAS_MEDIA_STORAGE_PROVIDER, ATLAS_S3_ENDPOINT, ATLAS_S3_REGION, ATLAS_S3_BUCKET, ATLAS_S3_ACCESS_KEY_ID, ATLAS_S3_SECRET_ACCESS_KEY", classification: "REQUIRED_WHEN_ENABLED", enabledBy: "any durable media S3 variable is configured or the production WhatsApp webhook is enabled" },
   { name: "EMAIL_PROVIDER, ATLAS_VERIFICATION_DELIVERY, SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASSWORD, SMTP_FROM, SMTP_REPLY_TO, RESEND_API_KEY, RESEND_FROM, RESEND_REPLY_TO, GOOGLE_APPS_SCRIPT_URL, GOOGLE_APPS_SCRIPT_TOKEN, EMAIL_TIMEOUT", classification: "REQUIRED_WHEN_ENABLED", enabledBy: "selected email delivery mode" },
   { name: "WHATSAPP_PLATFORM_ENCRYPTION_KEY, WHATSAPP_PLATFORM_ENCRYPTION_ACTIVE_KEY_ID, WHATSAPP_PLATFORM_ENCRYPTION_ACTIVE_KEY, WHATSAPP_PLATFORM_ENCRYPTION_PREVIOUS_KEY_ID, WHATSAPP_PLATFORM_ENCRYPTION_PREVIOUS_KEY, WHATSAPP_APP_SECRET, WHATSAPP_WEBHOOK_VERIFY_TOKEN, WHATSAPP_ACCESS_TOKEN, WHATSAPP_GRAPH_API_VERSION", classification: "REQUIRED_WHEN_ENABLED", enabledBy: "WhatsApp credentials or webhook are configured" },
   { name: "ATLAS_INTEGRATION_SECRET_KEY, ATLAS_INTEGRATION_SECRET_ACTIVE_KEY_ID, ATLAS_INTEGRATION_SECRET_ACTIVE_KEY, ATLAS_INTEGRATION_SECRET_PREVIOUS_KEY_ID, ATLAS_INTEGRATION_SECRET_PREVIOUS_KEY, GOOGLE_CALENDAR_OAUTH_CLIENT_ID, GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET", classification: "REQUIRED_WHEN_ENABLED", enabledBy: "integration encryption or Google Calendar is configured" },
@@ -22,6 +23,7 @@ export const productionConfigurationInventory: readonly ProductionConfigurationI
   { name: "BILLING_PROVIDERS, STRIPE_SECRET_KEY, STRIPE_API_BASE_URL, STRIPE_TIMEOUT_MS, STRIPE_ALLOWED_REDIRECT_ORIGINS, STRIPE_API_VERSION, STRIPE_WEBHOOK_SIGNING_SECRET, MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_API_BASE_URL, MERCADOPAGO_TIMEOUT_MS, MERCADOPAGO_ALLOWED_REDIRECT_ORIGINS, MERCADOPAGO_WEBHOOK_SECRET", classification: "REQUIRED_WHEN_ENABLED", enabledBy: "a billing provider or webhook is selected" },
   { name: "ATLAS_BACKUP_S3_ENDPOINT, ATLAS_BACKUP_S3_REGION, ATLAS_BACKUP_S3_BUCKET, ATLAS_BACKUP_S3_ACCESS_KEY_ID, ATLAS_BACKUP_S3_SECRET_ACCESS_KEY, ATLAS_RESTORE_S3_ENDPOINT, ATLAS_RESTORE_S3_REGION, ATLAS_RESTORE_S3_BUCKET, ATLAS_RESTORE_S3_ACCESS_KEY_ID, ATLAS_RESTORE_S3_SECRET_ACCESS_KEY, TURSO_ORG, TURSO_PLATFORM_TOKEN, TURSO_DATABASE_NAME, TURSO_DATABASE_GROUP, ATLAS_BACKUP_RETENTION_DAYS, ATLAS_BACKUP_MIN_COMPLETE_SETS", classification: "REQUIRED_WHEN_ENABLED", enabledBy: "backup, restore, or retention maintenance is run" },
   { name: "GEMINI_API_KEY, FIRECRAWL_API_KEY", classification: "OPTIONAL" },
+  { name: "GOOGLE_CLOUD_SPEECH_SERVICE_ACCOUNT_JSON_B64", classification: "OPTIONAL" },
   { name: "PORT, SHUTDOWN_TIMEOUT_MS, ATLAS_TRUSTED_LOCAL_MODE, ATLAS_ALLOWED_ORIGINS, ATLAS_BILLING_RETURN_ORIGIN, BILLING_RECONCILIATION_INTERVAL_MS, BILLING_RECONCILIATION_BATCH_SIZE, ATLAS_DEPLOYMENT_VERSION", classification: "OPTIONAL" },
   { name: "VITE_ATLAS_API_BASE_URL", classification: "PUBLIC_FRONTEND_ONLY" },
 ]);
@@ -29,6 +31,11 @@ export const productionConfigurationInventory: readonly ProductionConfigurationI
 export interface ProductionDatabaseConfiguration { readonly provider: "libsql"; readonly url: string; readonly authToken: string; }
 export interface ProductionConfiguration { readonly database: ProductionDatabaseConfiguration; readonly verificationOrigin: string; readonly mediaStorage: S3MediaStorageConfiguration | null; readonly mediaCapability: "available" | "unavailable"; readonly emailDeliveryMode: EmailDeliveryMode; readonly whatsAppWebhookEnabled: boolean; }
 export class ProductionConfigurationError extends Error {}
+
+/** The complete webhook credential pair is the existing production switch for inbound media recovery. */
+export function whatsAppWebhookEnabled(environment: NodeJS.ProcessEnv = process.env): boolean { return Boolean(environment.WHATSAPP_APP_SECRET?.trim() && environment.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim()); }
+/** Development uses local media; production is media-capable only with resolved durable storage. */
+export function mediaStorageAvailable(configuration: Pick<ProductionConfiguration, "mediaCapability"> | null): boolean { return configuration?.mediaCapability !== "unavailable"; }
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
   const value = environment[name]?.trim();
@@ -64,6 +71,7 @@ function validateOptionalConfiguration(environment: NodeJS.ProcessEnv, emailMode
     if (emailMode === "google_apps_script") googleAppsScriptConfiguration(environment);
     if (environment.ATLAS_INTEGRATION_SECRET_KEY?.trim() || environment.ATLAS_INTEGRATION_SECRET_ACTIVE_KEY_ID?.trim() || environment.ATLAS_INTEGRATION_SECRET_ACTIVE_KEY?.trim() || environment.ATLAS_INTEGRATION_SECRET_PREVIOUS_KEY_ID?.trim() || environment.ATLAS_INTEGRATION_SECRET_PREVIOUS_KEY?.trim()) integrationSecretCipherRingFromEnvironment(environment);
     if (environment.BILLING_PROVIDERS?.trim()) validateBillingProviderProductionConfiguration(environment);
+    if (environment.GOOGLE_CLOUD_SPEECH_SERVICE_ACCOUNT_JSON_B64 !== undefined) googleCloudSpeechConfiguration(environment);
     const whatsappWebhook = Boolean(environment.WHATSAPP_APP_SECRET?.trim() || environment.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim());
     if (whatsappWebhook && (!environment.WHATSAPP_APP_SECRET?.trim() || !environment.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim())) throw new Error();
     const whatsappKey = environment.WHATSAPP_PLATFORM_ENCRYPTION_KEY?.trim();
@@ -78,15 +86,17 @@ function validateOptionalConfiguration(environment: NodeJS.ProcessEnv, emailMode
 export function productionConfiguration(environment: NodeJS.ProcessEnv = process.env): ProductionConfiguration {
   const database = productionDatabaseConfiguration(environment);
   const verificationOrigin = httpsOrigin(environment, "ATLAS_VERIFICATION_ORIGIN");
+  const whatsAppWebhook = whatsAppWebhookEnabled(environment);
   let mediaStorage: S3MediaStorageConfiguration | null = null;
   if (mediaConfigurationEnabled(environment)) {
     try { mediaStorage = s3MediaStorageConfiguration(environment); }
     catch { throw new ProductionConfigurationError("Production configuration is invalid for durable media storage."); }
   }
+  if (whatsAppWebhook && mediaStorage === null) throw new ProductionConfigurationError("Production WhatsApp media requires durable storage.");
   if ((environment.ATLAS_BOOTSTRAP_SECRET?.length ?? 0) < 32) throw new ProductionConfigurationError("Production configuration is invalid for ATLAS_BOOTSTRAP_SECRET.");
   let mode: EmailDeliveryMode;
   try { mode = emailDeliveryMode(environment.EMAIL_PROVIDER ?? environment.ATLAS_VERIFICATION_DELIVERY, true, environment); }
   catch { throw new ProductionConfigurationError("Production configuration is invalid for email delivery."); }
   validateOptionalConfiguration(environment, mode);
-  return Object.freeze({ database, verificationOrigin, mediaStorage, mediaCapability: mediaStorage ? "available" : "unavailable", emailDeliveryMode: mode, whatsAppWebhookEnabled: Boolean(environment.WHATSAPP_APP_SECRET?.trim() && environment.WHATSAPP_WEBHOOK_VERIFY_TOKEN?.trim()) });
+  return Object.freeze({ database, verificationOrigin, mediaStorage, mediaCapability: mediaStorage ? "available" : "unavailable", emailDeliveryMode: mode, whatsAppWebhookEnabled: whatsAppWebhook });
 }

@@ -2354,6 +2354,37 @@ const migrations: Migration[] = [
     );
     CREATE INDEX idx_public_web_chat_turns_cleanup ON public_web_chat_turns(status,updated_at);
   `);}},
+  { id:77,name:"0077_media_durable_ingest_attempts",checksumSource:"media-durable-ingest-attempt-state-machine-v1",apply(database):void{database.exec(`
+    CREATE TABLE media_ingest_attempts(
+      asset_id TEXT PRIMARY KEY REFERENCES media_assets(id) ON DELETE CASCADE,
+      workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,
+      candidate_blob_id TEXT NOT NULL UNIQUE CHECK(length(candidate_blob_id) BETWEEN 1 AND 80),
+      staging_storage_reference TEXT NOT NULL UNIQUE CHECK(length(staging_storage_reference) BETWEEN 1 AND 2000),
+      final_storage_reference TEXT NOT NULL UNIQUE CHECK(length(final_storage_reference) BETWEEN 1 AND 2000),
+      sha256_digest TEXT NOT NULL CHECK(length(sha256_digest)=64 AND sha256_digest NOT GLOB '*[^0-9a-f]*'),
+      size_bytes INTEGER NOT NULL CHECK(typeof(size_bytes)='integer' AND size_bytes BETWEEN 1 AND 26214400),
+      inspected_media_type TEXT NOT NULL CHECK(inspected_media_type IN ('application/pdf','image/jpeg','image/png','image/gif','image/webp','audio/mpeg','audio/ogg','audio/wav')),
+      state TEXT NOT NULL CHECK(state IN ('reserved','staged','promoted','settled','retryable_failure','terminal_failure')),
+      lease_owner TEXT CHECK(lease_owner IS NULL OR length(lease_owner) BETWEEN 1 AND 100),
+      lease_token TEXT CHECK(lease_token IS NULL OR length(lease_token) BETWEEN 1 AND 200),
+      lease_expires_at TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count>=0),
+      safe_failure_category TEXT CHECK(safe_failure_category IS NULL OR length(safe_failure_category) BETWEEN 1 AND 100),
+      created_at TEXT NOT NULL,updated_at TEXT NOT NULL,settled_at TEXT,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      CHECK((lease_owner IS NULL AND lease_token IS NULL AND lease_expires_at IS NULL) OR (lease_owner IS NOT NULL AND lease_token IS NOT NULL AND lease_expires_at IS NOT NULL)),
+      CHECK((state IN ('reserved','staged','promoted') AND safe_failure_category IS NULL AND settled_at IS NULL) OR (state='retryable_failure' AND safe_failure_category IS NOT NULL AND settled_at IS NULL) OR (state='terminal_failure' AND safe_failure_category IS NOT NULL AND settled_at IS NOT NULL) OR (state='settled' AND safe_failure_category IS NULL AND settled_at IS NOT NULL))
+    );
+    CREATE INDEX idx_media_ingest_attempts_recovery ON media_ingest_attempts(state,lease_expires_at,updated_at,asset_id) WHERE state IN ('reserved','staged','promoted','retryable_failure');
+    CREATE TRIGGER media_ingest_attempt_scope_insert BEFORE INSERT ON media_ingest_attempts WHEN NOT EXISTS(SELECT 1 FROM media_assets a WHERE a.id=NEW.asset_id AND a.workspace_id=NEW.workspace_id AND a.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Media ingest attempt scope is invalid'); END;
+    CREATE TRIGGER media_ingest_attempt_scope_update BEFORE UPDATE OF asset_id,workspace_id,company_id ON media_ingest_attempts WHEN NOT EXISTS(SELECT 1 FROM media_assets a WHERE a.id=NEW.asset_id AND a.workspace_id=NEW.workspace_id AND a.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Media ingest attempt scope is invalid'); END;
+  `);}},
+  { id:78,name:"0078_media_reclaim_leases",checksumSource:"media-reclaim-lease-and-recovery-v1",apply(database):void{database.exec(`
+    ALTER TABLE media_blobs ADD COLUMN reclaim_lease_owner TEXT CHECK(reclaim_lease_owner IS NULL OR length(reclaim_lease_owner) BETWEEN 1 AND 100);
+    ALTER TABLE media_blobs ADD COLUMN reclaim_lease_token TEXT CHECK(reclaim_lease_token IS NULL OR length(reclaim_lease_token) BETWEEN 1 AND 200);
+    ALTER TABLE media_blobs ADD COLUMN reclaim_lease_expires_at TEXT;
+    CREATE INDEX idx_media_blobs_reclaim_recovery ON media_blobs(state,reclaim_lease_expires_at,created_at,id) WHERE state='reclaim_pending';
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

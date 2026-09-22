@@ -5,10 +5,12 @@ import type { SynchronousDatabase } from "./synchronousDatabase.js";
 
 export type SqlValue = string | number | bigint | null | Uint8Array;
 export interface SqlResult { readonly rowsAffected: number | bigint; readonly lastInsertRowid?: number | bigint; }
+export interface SqlStatement { readonly sql: string; readonly args?: readonly SqlValue[]; }
 
 /** The only persistence API shared by local SQLite and libSQL. */
 export interface SqlDatabase {
   execute(statement: string, args?: readonly SqlValue[]): Promise<SqlResult>;
+  writeBatch(statements: readonly SqlStatement[]): Promise<readonly SqlResult[]>;
   /** Executes a SQL script without parameters. Use this for schema operations, not application data. */
   executeScript(script: string): Promise<void>;
   query<Row extends Record<string, unknown>>(statement: string, args?: readonly SqlValue[]): Promise<Row[]>;
@@ -36,6 +38,7 @@ export class DeferredSqlDatabase implements SqlDatabase {
 
   public async initialize(): Promise<void> { await this.current(); }
   public async execute(statement: string, args: readonly SqlValue[] = []): Promise<SqlResult> { return (await this.current()).execute(statement, args); }
+  public async writeBatch(statements: readonly SqlStatement[]): Promise<readonly SqlResult[]> { return (await this.current()).writeBatch(statements); }
   public async executeScript(script: string): Promise<void> { await (await this.current()).executeScript(script); }
   public async query<Row extends Record<string, unknown>>(statement: string, args: readonly SqlValue[] = []): Promise<Row[]> { return (await this.current()).query<Row>(statement, args); }
   public async transaction<T>(operation: (database: SqlDatabase) => Promise<T>): Promise<T> { return (await this.current()).transaction(operation); }
@@ -80,6 +83,14 @@ export class LocalSqlDatabase implements SqlDatabase {
     return { rowsAffected: result.changes, lastInsertRowid: result.lastInsertRowid };
   }
 
+  public async writeBatch(statements: readonly SqlStatement[]): Promise<readonly SqlResult[]> {
+    return this.transaction(async database => {
+      const results: SqlResult[] = [];
+      for (const value of statements) results.push(await database.execute(value.sql, value.args));
+      return results;
+    });
+  }
+
   public async executeScript(script: string): Promise<void> { this.database.exec(script); }
 
   public async query<Row extends Record<string, unknown>>(sql: string, args: readonly SqlValue[] = []): Promise<Row[]> {
@@ -114,6 +125,7 @@ export class LocalSqlDatabase implements SqlDatabase {
 export class SynchronousSqlDatabaseAdapter implements SqlDatabase {
   public constructor(private readonly database: SynchronousDatabase) {}
   public async execute(sql: string, args: readonly SqlValue[] = []): Promise<SqlResult> { const result=this.database.prepare(sql).run(...args); return { rowsAffected:result.changes,lastInsertRowid:result.lastInsertRowid }; }
+  public async writeBatch(statements: readonly SqlStatement[]): Promise<readonly SqlResult[]> { return this.transaction(async database=>{const results:SqlResult[]=[];for(const value of statements)results.push(await database.execute(value.sql,value.args));return results;}); }
   public async executeScript(script: string): Promise<void> { this.database.exec(script); }
   public async query<Row extends Record<string, unknown>>(sql: string, args: readonly SqlValue[] = []): Promise<Row[]> { return (this.database.prepare(sql).all(...args) as Row[]).map(row=>({...row})); }
   public async transaction<T>(operation: (database: SqlDatabase) => Promise<T>): Promise<T> {
@@ -143,6 +155,13 @@ export class LibsqlDatabase implements SqlDatabase {
       : { rowsAffected: result.rowsAffected, lastInsertRowid: result.lastInsertRowid };
   }
 
+  public async writeBatch(statements: readonly SqlStatement[]): Promise<readonly SqlResult[]> {
+    const results = await this.client.batch(statements.map(value => statement(value.sql, value.args)), "write");
+    return results.map(result => result.lastInsertRowid === undefined
+      ? { rowsAffected: result.rowsAffected }
+      : { rowsAffected: result.rowsAffected, lastInsertRowid: result.lastInsertRowid });
+  }
+
   public async executeScript(script: string): Promise<void> { await this.client.executeMultiple(script); }
 
   public async query<Row extends Record<string, unknown>>(sql: string, args: readonly SqlValue[] = []): Promise<Row[]> {
@@ -158,6 +177,11 @@ export class LibsqlDatabase implements SqlDatabase {
         return result.lastInsertRowid === undefined
           ? { rowsAffected: result.rowsAffected }
           : { rowsAffected: result.rowsAffected, lastInsertRowid: result.lastInsertRowid };
+      },
+      writeBatch: async statements => {
+        const results: SqlResult[] = [];
+        for (const value of statements) results.push(await database.execute(value.sql, value.args));
+        return results;
       },
       executeScript: async (script) => { await transaction.executeMultiple(script); },
       query: async <Row extends Record<string, unknown>>(sql: string, args: readonly SqlValue[] = []) => {

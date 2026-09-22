@@ -21,25 +21,27 @@ class FailingMigrationDatabase implements SqlDatabase {
   public close(): Promise<void> { return this.database.close(); }
 }
 
-test("EPIC054 production async migrations advance a validated existing 0074 ledger through 0076 exactly once", async () => {
+test("EPIC054 production async migrations advance a validated existing 0074 ledger through 0078 exactly once", async () => {
   const database = atHead(74);
   try {
     await runAsyncMigrations(database);
     assert.deepEqual(await database.query("SELECT id,name FROM schema_migrations WHERE id>=75 ORDER BY id"), [
       { id: 75, name: "0075_activation_verification_attempts" },
       { id: 76, name: "0076_public_web_chat_durable_turn_claims" },
+      { id: 77, name: "0077_media_durable_ingest_attempts" },
+      { id: 78, name: "0078_media_reclaim_leases" },
     ]);
     assert.deepEqual(await database.query("SELECT id,name,checksum FROM schema_migrations ORDER BY id DESC LIMIT 1"), [{ id: migrationHead.id, name: migrationHead.name, checksum: migrationHead.checksum }]);
     await runAsyncMigrations(database);
-    assert.deepEqual(await database.query<{ count: number }>("SELECT COUNT(*) count FROM schema_migrations WHERE id>=75"), [{ count: 2 }]);
+    assert.deepEqual(await database.query<{ count: number }>("SELECT COUNT(*) count FROM schema_migrations WHERE id>=75"), [{ count: 4 }]);
   } finally { await database.close(); }
 });
 
-test("EPIC054 production async migrations preserve fresh bootstrap through 0076", async () => {
+test("EPIC054 production async migrations preserve fresh bootstrap through 0078", async () => {
   const database = new LocalSqlDatabase(new DatabaseSync(":memory:"));
   try {
     await runFreshAsyncMigrations(database);
-    assert.deepEqual(await database.query("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1"), [{ id: 76, name: "0076_public_web_chat_durable_turn_claims" }]);
+    assert.deepEqual(await database.query("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1"), [{ id: 78, name: "0078_media_reclaim_leases" }]);
   } finally { await database.close(); }
 });
 
