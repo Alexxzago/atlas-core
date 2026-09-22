@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
+import { link, lstat, mkdir, open, realpath, rm } from "node:fs/promises";
 import { basename, dirname, resolve, sep } from "node:path";
-import type { MediaStoragePort, StagedMedia } from "../application/ports.js";
+import type { MediaStoragePort, MediaStorageReferences, StagedMedia } from "../application/ports.js";
 import { MEDIA_LIMITS, MediaDomainError } from "../domain/media.js";
 
 const blobId = /^mbl_[a-f0-9]{32}$/u;
@@ -18,9 +18,10 @@ const defaultCleanup: LocalMediaCleanupPort = { close: file => file.close(), rem
 export class LocalMediaStorage implements MediaStoragePort {
   private readonly configuredRoot: string;
   public constructor(root: string, private readonly cleanup: LocalMediaCleanupPort = defaultCleanup) { this.configuredRoot = resolve(root); }
-  public async stage(id: string, content: AsyncIterable<Uint8Array>): Promise<StagedMedia> {
-    if (!blobId.test(id)) throw new Error("Invalid media blob identifier.");
-    const reference = `tmp_${randomUUID().replace(/-/gu, "")}`;
+  public plan(id:string,_location:{readonly workspaceId:number;readonly companyId:number}):MediaStorageReferences { if(!blobId.test(id))throw new Error("Invalid media blob identifier.");return Object.freeze({stagingReference:`tmp_${randomUUID().replace(/-/gu,"")}`,finalStorageReference:id}); }
+  public async stage(input: MediaStorageReferences|string, content: AsyncIterable<Uint8Array>, location?:{readonly workspaceId:number;readonly companyId:number}): Promise<StagedMedia> {
+    const references=typeof input==="string"?this.plan(input,location??{workspaceId:1,companyId:1}):input,reference=references.stagingReference;
+    if (!temporaryId.test(reference)||!blobId.test(references.finalStorageReference)) throw new Error("Invalid media storage reference.");
     const path = await this.safePath(reference, temporaryId);
     await mkdir(dirname(path), { recursive: true });
     await this.assertSafePath(dirname(path));
@@ -35,7 +36,7 @@ export class LocalMediaStorage implements MediaStoragePort {
       }
       if (sizeBytes === 0) throw new MediaDomainError("media_empty");
       await file.sync();
-      return Object.freeze({ temporaryReference: reference, digest: digest.digest("hex"), sizeBytes });
+      return Object.freeze({ temporaryReference: reference, finalStorageReference: references.finalStorageReference, digest: digest.digest("hex"), sizeBytes });
     } catch (error: unknown) {
       // Windows does not permit unlinking an open file. Preserve the write failure.
       try { await this.cleanup.close(file); closed = true; } catch { closed = true; }
@@ -48,7 +49,8 @@ export class LocalMediaStorage implements MediaStoragePort {
     if (!temporaryId.test(temporaryReference) || !blobId.test(id)) throw new Error("Invalid media storage reference.");
     const source = await this.safePath(temporaryReference, temporaryId), targetReference = id, target = await this.safePath(targetReference, blobId);
     await mkdir(dirname(target), { recursive: true }); await this.assertSafePath(dirname(target));
-    try { await rename(source, target); } catch (error: unknown) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; await rm(source, { force: true }); }
+    // link() is create-only: unlike rename(), it cannot replace a colliding final object.
+    await link(source, target); await rm(source, { force: true });
     return targetReference;
   }
   public async delete(reference: string): Promise<void> { await rm(await this.referencePath(reference), { force: true }); }

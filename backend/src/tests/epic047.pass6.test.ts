@@ -15,7 +15,7 @@ class S3Fake {
   private readonly objects = new Map<string, Uint8Array>();
   public async send(command: { readonly input: Record<string, unknown> }, _options?: { readonly abortSignal?: AbortSignal }): Promise<unknown> {
     const name = command.constructor.name, input = command.input; this.calls.push({ name, input });
-    if (name === "PutObjectCommand") { this.objects.set(input.Key as string, await collect(input.Body)); return {}; }
+    if (name === "PutObjectCommand") { if(input.IfNoneMatch==="*"&&this.objects.has(input.Key as string))throw Object.assign(new Error("collision"),{name:"PreconditionFailed",$metadata:{httpStatusCode:412}});this.objects.set(input.Key as string, await collect(input.Body)); return {}; }
     if (name === "CopyObjectCommand") { const source = decodeURIComponent((input.CopySource as string).slice(configuration.bucket.length + 1)); const value = this.objects.get(source); if (!value) throw Object.assign(new Error("missing"), { name: "NoSuchKey", $metadata: { httpStatusCode: 404 } }); this.objects.set(input.Key as string, value); return {}; }
     if (name === "DeleteObjectCommand") { this.objects.delete(input.Key as string); return {}; }
     if (name === "GetObjectCommand") { const value = this.objects.get(input.Key as string); if (!value) throw Object.assign(new Error("missing"), { name: "NoSuchKey", $metadata: { httpStatusCode: 404 } }); return { ContentLength: value.byteLength, Body: bytes(value) }; }
@@ -31,9 +31,10 @@ test("EPIC047 PASS6 stores private server-owned S3 keys and returns bounded exac
   const reference = await storage.promote(staged.temporaryReference, blobId, "image/png");
   assert.equal(reference, "workspaces/12/companies/34/media/mbl_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/object");
   assert.deepEqual(await storage.read(reference, content.byteLength), content);
-  assert.deepEqual(fake.calls.map(call => call.name), ["PutObjectCommand", "CopyObjectCommand", "DeleteObjectCommand", "GetObjectCommand"]);
+  assert.deepEqual(fake.calls.map(call => call.name), ["PutObjectCommand", "GetObjectCommand", "PutObjectCommand", "DeleteObjectCommand", "GetObjectCommand"]);
   assert.equal(fake.calls.every(call => call.input.Bucket === configuration.bucket), true);
-  assert.equal(fake.calls[1]?.input.ContentType, "image/png");
+  assert.equal(fake.calls[2]?.input.ContentType, "image/png");
+  assert.equal(fake.calls[2]?.input.IfNoneMatch, "*");
 });
 
 test("EPIC047 PASS6 projects missing and provider failures without endpoint or credential leakage", async () => {
@@ -43,6 +44,14 @@ test("EPIC047 PASS6 projects missing and provider failures without endpoint or c
   await assert.rejects(new S3MediaStorage(configuration, unavailable).delete(reference), (error: unknown) => error instanceof MediaDomainError && error.code === "media_storage_failed");
   const missingDelete = { send: async (): Promise<unknown> => { throw Object.assign(new Error("missing"), { name: "NoSuchKey", $metadata: { httpStatusCode: 404 } }); } };
   await assert.doesNotReject(new S3MediaStorage(configuration, missingDelete).delete(reference));
+});
+
+test("EPIC056 PASS2 uses a conditional final put and projects destination collisions safely", async () => {
+  const fake = new S3Fake(), storage = new S3MediaStorage(configuration, fake), staged = await storage.stage(blobId, bytes(Uint8Array.of(1)), location);
+  await storage.promote(staged.temporaryReference, blobId, "image/png");
+  const second = await storage.stage(blobId, bytes(Uint8Array.of(2)), location);
+  await assert.rejects(storage.promote(second.temporaryReference, blobId, "image/png"), (error:unknown) => error instanceof MediaDomainError && error.code === "media_storage_collision");
+  assert.equal(fake.calls.filter(call=>call.name==="PutObjectCommand"&&call.input.IfNoneMatch==="*").length,2);
 });
 
 test("EPIC047 PASS6 bounds object reads before materializing bytes", async () => {

@@ -332,16 +332,17 @@ test("EPIC039 concurrent same-key replay reports in-progress rather than a pendi
     });
   let first = true;
   const storage: MediaStoragePort = {
-    stage: (id, content) => v.storage.stage(id, content),
-    readTemporary: async (reference, maximum) => {
+    plan: (id, location) => v.storage.plan(id, location),
+    stage: (references, content, location) => v.storage.stage(references, content, location),
+    readTemporary: (reference, maximum) => v.storage.readTemporary(reference, maximum),
+    promote: async (reference, blob, mediaType) => {
       if (first) {
         first = false;
         entered();
         await gate;
       }
-      return v.storage.readTemporary(reference, maximum);
+      return v.storage.promote(reference, blob, mediaType);
     },
-    promote: (reference, blob) => v.storage.promote(reference, blob),
     delete: (reference) => v.storage.delete(reference),
     read: (reference, maximum) => v.storage.read(reference, maximum),
   };
@@ -907,6 +908,7 @@ test("EPIC039 local storage specifically rejects a readable external file throug
 test("EPIC039 failure paths clean staged storage and never expose ready assets", async () => {
   const v = fixture();
   const failing: MediaStoragePort = {
+    plan: (id, location) => v.storage.plan(id, location),
     stage: async () => {
       throw new Error("write failed");
     },
@@ -947,7 +949,8 @@ test("EPIC039 leaves failed physical reclaim durable and a later sweep finalizes
   const v = fixture();
   let fail = true;
   const storage: MediaStoragePort = {
-    stage: (id, content) => v.storage.stage(id, content),
+    plan: (id, location) => v.storage.plan(id, location),
+    stage: (references, content, location) => v.storage.stage(references, content, location),
     readTemporary: (reference, maximum) =>
       v.storage.readTemporary(reference, maximum),
     promote: (reference, blob) => v.storage.promote(reference, blob),
@@ -999,7 +1002,8 @@ test("EPIC039 recovers an interrupted reclaim after physical deletion before fin
   const v = fixture();
   let crash = true;
   const storage: MediaStoragePort = {
-    stage: (id, content) => v.storage.stage(id, content),
+    plan: (id, location) => v.storage.plan(id, location),
+    stage: (references, content, location) => v.storage.stage(references, content, location),
     readTemporary: (reference, maximum) =>
       v.storage.readTemporary(reference, maximum),
     promote: (reference, blob) => v.storage.promote(reference, blob),
@@ -1041,7 +1045,7 @@ test("EPIC039 recovers an interrupted reclaim after physical deletion before fin
   }
 });
 
-test("EPIC039 inspector failures clean staged bytes and preserve failed provenance", async () => {
+test("EPIC039 inspector failures clean staged bytes before durable reservation", async () => {
   const v = fixture(),
     inspector: MediaInspectorPort = {
       inspect: () => {
@@ -1063,11 +1067,9 @@ test("EPIC039 inspector failures clean staged bytes and preserve failed provenan
     assert.equal(readdirSync(v.directory).length, 0);
     assert.equal(
       (
-        v.db
-          .prepare("SELECT status FROM media_assets WHERE company_id=?")
-          .get(v.company.id) as { status: string }
-      ).status,
-      "failed",
+        v.db.prepare("SELECT COUNT(*) count FROM media_assets WHERE company_id=?").get(v.company.id) as { count: number }
+      ).count,
+      0,
     );
   } finally {
     v.db.close();
@@ -1131,6 +1133,7 @@ test("EPIC039 migration preserves the 0049 contract through the current 0076 hea
         { id: 74, name: "0074_billing_versioned_plan_provider_commercial_offers" },
         { id: 75, name: "0075_activation_verification_attempts" },
         { id: 76, name: "0076_public_web_chat_durable_turn_claims" },
+        { id: 77, name: "0077_media_durable_ingest_attempts" },
       ],
     );
     assert.equal(
@@ -1186,10 +1189,11 @@ test("EPIC039 declares the complete immutable migration inventory through the 00
         74,
         75,
         76,
+        77,
       ],
     );
-    assert.equal(rows.at(-1)?.name, "0076_public_web_chat_durable_turn_claims");
-    assert.equal(new Set(rows.map((row) => row.name)).size, 75);
+    assert.equal(rows.at(-1)?.name, "0077_media_durable_ingest_attempts");
+    assert.equal(new Set(rows.map((row) => row.name)).size, 76);
     assert.equal(
       rows.every((row) => /^[a-f0-9]{64}$/u.test(row.checksum)),
       true,

@@ -1,45 +1,51 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { MediaAssociationOwnerResolver, MediaInspectorPort, MediaRepositoryPort, MediaStoragePort } from "../application/ports.js";
-import { canonicalMetadata, mediaKind, safeFilename, safeMetadata, MediaDomainError, type MediaAsset, type MediaAssociation, type MediaAssociationOwnerType, type MediaBlob, type MediaMetadataValue } from "../domain/media.js";
+import { canonicalMetadata, mediaKind, safeFilename, safeMetadata, MEDIA_LIMITS, MEDIA_TYPES, MediaDomainError, type MediaAsset, type MediaAssociation, type MediaAssociationOwnerType, type MediaBlob, type MediaIngestAttempt, type MediaMetadataValue } from "../domain/media.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 
 export interface StoreMediaInput { readonly operation: "ingest"; readonly idempotencyKey: string; readonly declaredMediaType: string; readonly filename?: string; readonly metadata?: Readonly<Record<string, MediaMetadataValue>>; readonly content: AsyncIterable<Uint8Array>; }
+export interface MediaIngestTestHook { afterReserved?(): void | Promise<void>; afterStagingWrite?(): void | Promise<void>; afterPromotion?(): void | Promise<void>; afterPromoted?(): void | Promise<void>; }
+/** Test-only interruption preserves durable evidence exactly as a process crash would. */
+export class MediaIngestInterrupted extends Error {}
 
 export class MediaService {
-  public constructor(private readonly repository: MediaRepositoryPort, private readonly storage: MediaStoragePort, private readonly inspector: MediaInspectorPort, private readonly owners: MediaAssociationOwnerResolver, private readonly clock: { now(): string }) {}
+  public constructor(private readonly repository: MediaRepositoryPort, private readonly storage: MediaStoragePort, private readonly inspector: MediaInspectorPort, private readonly owners: MediaAssociationOwnerResolver, private readonly clock: { now(): string }, private readonly testHook?: MediaIngestTestHook) {}
   public async store(context: WorkspaceContext, companyId: number, input: StoreMediaInput): Promise<MediaAsset> {
-    const filename=safeFilename(input.filename), metadata=safeMetadata(input.metadata), mediaType=normalizeType(input.declaredMediaType), kind=mediaKind(mediaType), now=this.clock.now(), assetId=id("mas"),candidateId=id("mbl"); let staged: Awaited<ReturnType<MediaStoragePort["stage"]>> | undefined; let promoted: string | undefined; let reservedAssetId: string | undefined;
+    const filename=safeFilename(input.filename),metadata=safeMetadata(input.metadata),mediaType=normalizeType(input.declaredMediaType),kind=mediaKind(mediaType),bytes=await collect(input.content),digest=createHash("sha256").update(bytes).digest("hex"),inspected=this.inspector.inspect(bytes),now=this.clock.now();
+    if(inspected.mediaType!==mediaType)throw new MediaDomainError("media_type_mismatch");safeMetadata(inspected.metadata);
+    const fingerprint=createHash("sha256").update(JSON.stringify({kind,mediaType,filename,metadata:canonicalMetadata(metadata),digest,sizeBytes:bytes.byteLength})).digest("hex"),operationKey=key(input.idempotencyKey),existing=await this.repository.resolve(context,companyId,input.operation,operationKey,fingerprint);
+    if(existing.kind==="same")return existing.asset;
+    if(existing.kind==="in_progress")throw new MediaDomainError("media_idempotency_in_progress");
+    if(existing.kind==="retryable_failure")throw new MediaDomainError("media_idempotency_retryable_failure");
+    if(existing.kind==="terminal_failure")throw new MediaDomainError("media_idempotency_terminal_failure");
+    if(existing.kind==="legacy_incomplete")throw new MediaDomainError("media_idempotency_legacy_incomplete");
+    if(existing.kind==="divergent")throw new MediaDomainError("media_idempotency_conflict");
+    const assetId=id("mas"),candidateId=id("mbl"),references=this.storage.plan(candidateId,{workspaceId:context.workspaceId,companyId}),ingest:MediaIngestAttempt={assetId,workspaceId:context.workspaceId,companyId,candidateBlobId:candidateId,stagingStorageReference:references.stagingReference,finalStorageReference:references.finalStorageReference,digest,sizeBytes:bytes.byteLength,inspectedMediaType:inspected.mediaType,state:"reserved",leaseOwner:null,leaseToken:null,leaseExpiresAt:null,attemptCount:0,failureCategory:null,createdAt:now,updatedAt:now,settledAt:null};
+    let reserved=false;
     try {
-      staged=await this.storage.stage(candidateId,input.content,{workspaceId:context.workspaceId,companyId});
-      const fingerprint=createHash("sha256").update(JSON.stringify({kind,mediaType,filename,metadata:canonicalMetadata(metadata),digest:staged.digest,sizeBytes:staged.sizeBytes})).digest("hex");
-       const reserved=await this.repository.reserve(context,companyId,input.operation,key(input.idempotencyKey),fingerprint,{id:assetId,workspaceId:context.workspaceId,companyId,kind,mediaType,sizeBytes:null,filename,metadata,status:"pending",createdAt:now,archivedAt:null,deletedAt:null},now);
-      if(reserved.kind==="same"){await this.storage.delete(staged.temporaryReference);return reserved.asset;}
-      if(reserved.kind==="in_progress")throw new MediaDomainError("media_idempotency_in_progress");
-      if(reserved.kind==="divergent")throw new MediaDomainError("media_idempotency_conflict");
-      reservedAssetId=reserved.asset.id;
-      const bytes=await this.storage.readTemporary(staged.temporaryReference,staged.sizeBytes);
-      const inspected=this.inspector.inspect(bytes);
-      if(inspected.mediaType!==mediaType)throw new MediaDomainError("media_type_mismatch");
-      safeMetadata(inspected.metadata);
-      promoted=await this.storage.promote(staged.temporaryReference,candidateId,inspected.mediaType);
-       const existing=await this.repository.findBlob(context,companyId,staged.digest,staged.sizeBytes,inspected.mediaType);
-      if(existing){await this.storage.delete(promoted);promoted=undefined;}
-       const complete=await this.repository.complete(context,companyId,reservedAssetId,{id:candidateId,workspaceId:context.workspaceId,companyId,digest:staged.digest,sizeBytes:staged.sizeBytes,mediaType:inspected.mediaType,storageReference:promoted??candidateId,state:"active",createdAt:this.clock.now()},this.clock.now());
+      const result=await this.repository.reserve(context,companyId,input.operation,operationKey,fingerprint,{id:assetId,workspaceId:context.workspaceId,companyId,kind,mediaType,sizeBytes:null,filename,metadata,status:"pending",createdAt:now,archivedAt:null,deletedAt:null},ingest,now);
+      if(result.kind!=="reserved")return replay(result);
+      reserved=true;if(this.testHook?.afterReserved)await this.testHook.afterReserved();
+      const staged=await this.storage.stage(references,stream(bytes),{workspaceId:context.workspaceId,companyId});
+      if(staged.temporaryReference!==references.stagingReference||staged.finalStorageReference!==references.finalStorageReference||staged.digest!==digest||staged.sizeBytes!==bytes.byteLength)throw new MediaDomainError("media_integrity_invalid");
+      if(this.testHook?.afterStagingWrite)await this.testHook.afterStagingWrite();
+      if(!await this.repository.markStaged(context,companyId,assetId,this.clock.now()))throw new MediaDomainError("media_completion_conflict");
+      const promoted=await this.storage.promote(references.stagingReference,candidateId,inspected.mediaType);
+      if(promoted!==references.finalStorageReference)throw new MediaDomainError("media_integrity_invalid");
+      if(this.testHook?.afterPromotion)await this.testHook.afterPromotion();
+      if(!await this.repository.markPromoted(context,companyId,assetId,this.clock.now()))throw new MediaDomainError("media_completion_conflict");if(this.testHook?.afterPromoted)await this.testHook.afterPromoted();
+      const complete=await this.repository.complete(context,companyId,assetId,{id:candidateId,workspaceId:context.workspaceId,companyId,digest,sizeBytes:bytes.byteLength,mediaType:inspected.mediaType,storageReference:promoted,state:"active",createdAt:this.clock.now()},this.clock.now());
       if(!complete)throw new MediaDomainError("media_completion_conflict");
-       const canonical=await this.repository.findBlob(context,companyId,staged.digest,staged.sizeBytes,inspected.mediaType);
-      if(promoted&&canonical?.id!==candidateId){await this.storage.delete(promoted);promoted=undefined;}
-      return complete;
-    } catch(error:unknown) { if(staged&&!promoted)await this.storage.delete(staged.temporaryReference).catch(()=>undefined);if(promoted)await this.storage.delete(promoted).catch(()=>undefined);if(reservedAssetId)await this.repository.fail(context,companyId,reservedAssetId,error instanceof MediaDomainError?error.code:"media_storage_failed",this.clock.now());throw error; }
+      const canonical=await this.repository.findBlob(context,companyId,digest,bytes.byteLength,inspected.mediaType);if(canonical?.id!==candidateId)await this.storage.delete(promoted).catch(()=>undefined);return complete;
+    } catch(error:unknown) { if(error instanceof MediaIngestInterrupted)throw error;if(reserved)await this.repository.fail(context,companyId,assetId,failureCategory(error),retryable(error),this.clock.now());throw error; }
   }
-  public attach(context:WorkspaceContext,companyId:number,assetId:string,type:MediaAssociationOwnerType,ownerId:string):MediaAssociation|Promise<MediaAssociation> { const now=this.clock.now(),result=this.repository.createAssociation(context,{id:id("maa"),assetId,workspaceId:context.workspaceId,companyId,ownerType:type,ownerId,createdAt:now},now,()=>this.owners.owns(context,companyId,type,ownerId));return result instanceof Promise?result.then(requireAssociation):requireAssociation(result); }
-  public archive(context:WorkspaceContext,companyId:number,assetId:string):MediaAsset|Promise<MediaAsset> { const value=this.repository.archive(context,companyId,assetId,this.clock.now());return value instanceof Promise?value.then(requireAsset):requireAsset(value); }
-  public async delete(context:WorkspaceContext,companyId:number,assetId:string):Promise<MediaAsset> { const outcome=await this.repository.delete(context,companyId,assetId,this.clock.now());if(!outcome)throw new MediaDomainError("media_not_found");if(outcome.reclaim){await this.storage.delete(outcome.reclaim.storageReference);await this.repository.finalizeReclaim(context,companyId,outcome.reclaim.id,this.clock.now());}return outcome.asset; }
+  public attach(context:WorkspaceContext,companyId:number,assetId:string,type:MediaAssociationOwnerType,ownerId:string):MediaAssociation|Promise<MediaAssociation>{const now=this.clock.now(),result=this.repository.createAssociation(context,{id:id("maa"),assetId,workspaceId:context.workspaceId,companyId,ownerType:type,ownerId,createdAt:now},now,()=>this.owners.owns(context,companyId,type,ownerId));return result instanceof Promise?result.then(requireAssociation):requireAssociation(result);}
+  public archive(context:WorkspaceContext,companyId:number,assetId:string):MediaAsset|Promise<MediaAsset>{const value=this.repository.archive(context,companyId,assetId,this.clock.now());return value instanceof Promise?value.then(requireAsset):requireAsset(value);}
+  public async delete(context:WorkspaceContext,companyId:number,assetId:string):Promise<MediaAsset>{const outcome=await this.repository.delete(context,companyId,assetId,this.clock.now());if(!outcome)throw new MediaDomainError("media_not_found");if(outcome.reclaim){await this.storage.delete(outcome.reclaim.storageReference);await this.repository.finalizeReclaim(context,companyId,outcome.reclaim.id,this.clock.now());}return outcome.asset;}
   public async sweepPendingReclaims(context:WorkspaceContext,companyId:number):Promise<void>{for(const blob of await this.repository.listPendingReclaims(context,companyId)){await this.storage.delete(blob.storageReference);await this.repository.finalizeReclaim(context,companyId,blob.id,this.clock.now());}}
-  public async open(context:WorkspaceContext,companyId:number,assetId:string):Promise<Uint8Array> { const value=await this.repository.open(context,companyId,assetId);if(!value)throw new MediaDomainError("media_not_found");const bytes=await this.storage.read(value.storageReference,value.sizeBytes);const digest=createHash("sha256").update(bytes).digest("hex");if(digest!==value.digest)throw new MediaDomainError("media_integrity_invalid");return bytes; }
+  public async open(context:WorkspaceContext,companyId:number,assetId:string):Promise<Uint8Array>{const value=await this.repository.open(context,companyId,assetId);if(!value)throw new MediaDomainError("media_not_found");const bytes=await this.storage.read(value.storageReference,value.sizeBytes);if(createHash("sha256").update(bytes).digest("hex")!==value.digest)throw new MediaDomainError("media_integrity_invalid");return bytes;}
 }
-function id(prefix:string):string{return `${prefix}_${randomUUID().replace(/-/gu,"")}`;}
-function key(value:string):string{const result=value.trim();if(!result||result.length>200)throw new MediaDomainError("media_idempotency_invalid");return result;}
-function normalizeType(value:string):string{const result=value.toLowerCase().split(";",1)[0]!.trim();if(!result||mediaKindSafe(result)===null)throw new MediaDomainError("media_type_unsupported");return result;}
-function mediaKindSafe(value:string):string|null{return ["application/pdf","image/jpeg","image/png","image/gif","image/webp","audio/mpeg","audio/ogg","audio/wav"].includes(value)?value:null;}
-function requireAssociation(value:MediaAssociation|null):MediaAssociation{if(!value)throw new MediaDomainError("media_not_associable");return value;}
-function requireAsset(value:MediaAsset|null):MediaAsset{if(!value)throw new MediaDomainError("media_not_found");return value;}
+async function collect(content:AsyncIterable<Uint8Array>):Promise<Uint8Array>{const chunks:Uint8Array[]=[];let size=0;for await(const chunk of content){if(!(chunk instanceof Uint8Array))throw new MediaDomainError("media_stream_invalid");size+=chunk.byteLength;if(size>MEDIA_LIMITS.maximumBytes)throw new MediaDomainError("media_too_large");chunks.push(chunk);}if(!size)throw new MediaDomainError("media_empty");const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}return bytes;}
+async function* stream(bytes:Uint8Array):AsyncGenerator<Uint8Array>{yield bytes;}
+function replay(value:Exclude<Awaited<ReturnType<MediaRepositoryPort["reserve"]>>,{readonly kind:"reserved"}>):MediaAsset{if(value.kind==="same")return value.asset;throw new MediaDomainError(value.kind==="in_progress"?"media_idempotency_in_progress":value.kind==="retryable_failure"?"media_idempotency_retryable_failure":value.kind==="terminal_failure"?"media_idempotency_terminal_failure":value.kind==="legacy_incomplete"?"media_idempotency_legacy_incomplete":"media_idempotency_conflict");}
+function id(prefix:string):string{return `${prefix}_${randomUUID().replace(/-/gu,"")}`;}function key(value:string):string{const result=value.trim();if(!result||result.length>200)throw new MediaDomainError("media_idempotency_invalid");return result;}function normalizeType(value:string):string{const result=value.toLowerCase().split(";",1)[0]!.trim();if(!result||!MEDIA_TYPES.includes(result as typeof MEDIA_TYPES[number]))throw new MediaDomainError("media_type_unsupported");return result;}function requireAssociation(value:MediaAssociation|null):MediaAssociation{if(!value)throw new MediaDomainError("media_not_associable");return value;}function requireAsset(value:MediaAsset|null):MediaAsset{if(!value)throw new MediaDomainError("media_not_found");return value;}function failureCategory(error:unknown):string{return error instanceof MediaDomainError?error.code:"media_storage_failed";}function retryable(error:unknown):boolean{return !(error instanceof MediaDomainError&&["media_type_mismatch","media_type_unsupported","media_metadata_invalid","media_empty","media_too_large","media_stream_invalid","media_filename_invalid","media_storage_collision"].includes(error.code));}

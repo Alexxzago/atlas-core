@@ -1,7 +1,7 @@
-import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash, randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
-import type { MediaStorageLocation, MediaStoragePort, StagedMedia } from "../application/ports.js";
+import type { MediaStorageLocation, MediaStoragePort, MediaStorageReferences, StagedMedia } from "../application/ports.js";
 import { MEDIA_LIMITS, MediaDomainError } from "../domain/media.js";
 
 const blobId = /^mbl_[a-f0-9]{32}$/u;
@@ -22,9 +22,10 @@ export class S3MediaStorage implements MediaStoragePort {
     if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds < 1 || timeoutMilliseconds > 60_000) throw new Error("S3 media timeout is invalid.");
     this.client = client ?? new S3Client({ endpoint: configuration.endpoint, region: configuration.region, credentials: { accessKeyId: configuration.accessKeyId, secretAccessKey: configuration.secretAccessKey }, forcePathStyle: S3_MEDIA_FORCE_PATH_STYLE, maxAttempts: S3_MEDIA_MAX_ATTEMPTS });
   }
-  public async stage(id: string, content: AsyncIterable<Uint8Array>, location?: MediaStorageLocation): Promise<StagedMedia> {
-    if (!blobId.test(id) || !location || !Number.isSafeInteger(location.workspaceId) || location.workspaceId < 1 || !Number.isSafeInteger(location.companyId) || location.companyId < 1) throw new Error("Invalid media storage location.");
-    const temporaryReference = `workspaces/${location.workspaceId}/companies/${location.companyId}/media/${id}/staging/tmp_${randomUUID().replace(/-/gu, "")}`;
+  public plan(id:string,location:MediaStorageLocation):MediaStorageReferences { if(!blobId.test(id)||!Number.isSafeInteger(location.workspaceId)||location.workspaceId<1||!Number.isSafeInteger(location.companyId)||location.companyId<1)throw new Error("Invalid media storage location.");const stagingReference=`workspaces/${location.workspaceId}/companies/${location.companyId}/media/${id}/staging/tmp_${randomUUID().replace(/-/gu,"")}`;return Object.freeze({stagingReference,finalStorageReference:stagingReference.replace(/\/staging\/tmp_[a-f0-9]{32}$/u,"/object")}); }
+  public async stage(input: MediaStorageReferences|string, content: AsyncIterable<Uint8Array>, location?: MediaStorageLocation): Promise<StagedMedia> {
+    if(typeof input==="string"&&!location)throw new Error("Invalid media storage location.");const references:MediaStorageReferences=typeof input==="string"?this.plan(input,location!):input,temporaryReference=references.stagingReference;
+    if (!location || !temporaryKey.test(temporaryReference) || !objectKey.test(references.finalStorageReference) || references.finalStorageReference!==temporaryReference.replace(/\/staging\/tmp_[a-f0-9]{32}$/u,"/object")) throw new Error("Invalid media storage location.");
     const digest = createHash("sha256"); let sizeBytes = 0;
     const bounded = async function* (): AsyncGenerator<Uint8Array> {
       for await (const chunk of content) {
@@ -37,13 +38,14 @@ export class S3MediaStorage implements MediaStoragePort {
     };
     try { await this.send(new PutObjectCommand({ Bucket: this.configuration.bucket, Key: temporaryReference, ContentType: "application/octet-stream", Body: Readable.from(bounded()) })); }
     catch (error: unknown) { await this.delete(temporaryReference).catch(() => undefined); throw storageError(error); }
-    return Object.freeze({ temporaryReference, digest: digest.digest("hex"), sizeBytes });
+    return Object.freeze({ temporaryReference, finalStorageReference: references.finalStorageReference, digest: digest.digest("hex"), sizeBytes });
   }
   public async readTemporary(reference: string, maximumBytes: number): Promise<Uint8Array> { if (!temporaryKey.test(reference)) throw new Error("Invalid media storage reference."); return this.readKey(reference, maximumBytes); }
   public async promote(temporaryReference: string, id: string, mediaType?: string): Promise<string> {
     if (!temporaryKey.test(temporaryReference) || !blobId.test(id) || !temporaryReference.includes(`/${id}/`) || !mediaType) throw new Error("Invalid media storage reference.");
     const target = temporaryReference.replace(/\/staging\/tmp_[a-f0-9]{32}$/u, "/object");
-    try { await this.send(new CopyObjectCommand({ Bucket: this.configuration.bucket, Key: target, CopySource: `${this.configuration.bucket}/${temporaryReference.split("/").map(encodeURIComponent).join("/")}`, ContentType: mediaType, MetadataDirective: "REPLACE" })); }
+    // A conditional final put is the provider contract: a collision must fail, never overwrite.
+    try { const bytes=await this.readTemporary(temporaryReference,MEDIA_LIMITS.maximumBytes); await this.send(new PutObjectCommand({ Bucket:this.configuration.bucket,Key:target,ContentType:mediaType,IfNoneMatch:"*",Body:Readable.from([bytes]) })); }
     catch (error: unknown) { throw storageError(error); }
     await this.delete(temporaryReference).catch(() => undefined);
     return target;
@@ -79,6 +81,7 @@ export class S3MediaStorage implements MediaStoragePort {
 }
 
 function storageError(error: unknown): MediaDomainError {
-  return missing(error) ? new MediaDomainError("media_not_found") : new MediaDomainError("media_storage_failed");
+  return collision(error)?new MediaDomainError("media_storage_collision"):missing(error) ? new MediaDomainError("media_not_found") : new MediaDomainError("media_storage_failed");
 }
+function collision(error:unknown):boolean{const status=typeof error==="object"&&error!==null&&"$metadata" in error?(error as {$metadata?:{httpStatusCode?:unknown}}).$metadata?.httpStatusCode:undefined;const name=typeof error==="object"&&error!==null&&"name" in error?(error as {name?:unknown}).name:undefined;return status===412||name==="PreconditionFailed";}
 function missing(error: unknown): boolean { const status = typeof error === "object" && error !== null && "$metadata" in error ? (error as { $metadata?: { httpStatusCode?: unknown } }).$metadata?.httpStatusCode : undefined; const name = typeof error === "object" && error !== null && "name" in error ? (error as { name?: unknown }).name : undefined; return status === 404 || name === "NoSuchKey" || name === "NotFound"; }
