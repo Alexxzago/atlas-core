@@ -31,7 +31,7 @@ async function setup(path = ":memory:") {
   const intelligence = new ConversationIntelligenceService(new ConversationIntelligenceRepository(database), { derive: async ({ message }) => { derived.push(message.id); return [{ kind: "set_fact", key: "voice", value: message.content }] as const; } }, { now: () => at });
   const recovery = new VoiceDeferredSemanticRecoveryService(voices, intelligence);
   const status = new WhatsAppDeliveryStatusService(messages, deliveries, new MetaDeliveryStatusMapper(), new DeliveryLifecyclePolicy(), { now: () => at }, { resolveActiveByPhoneNumberId: (phone: unknown) => phone === phoneNumberId ? { id: connectionId } : null, recordWebhookActivity: () => undefined } as never);
-  const webhook = new WhatsAppWebhookService({ appSecret: "", verifyToken: "" }, undefined, undefined, undefined, undefined, undefined, { now: () => at }, undefined, undefined, undefined, undefined, undefined, undefined, undefined, status);
+  const webhook = new WhatsAppWebhookService({ appSecret: "", verifyToken: "" }, undefined, undefined, undefined, undefined, undefined, { now: () => at }, undefined, undefined, status);
   let ordinal = 0;
   const add = async (suffix: string, responsePolicy: "deferred_voice" | "standard" = "deferred_voice", state: "accepted" | "uncertain" = "accepted") => {
     const conversation = await conversations.open(context, company.id, "whatsapp"), participant = await conversations.addParticipant(context, company.id, conversation.id, { type: "assistant" }), message = await conversations.addMessage(context, company.id, conversation.id, { senderParticipantId: participant.id, direction: "outbound", content: `reply ${suffix}` });
