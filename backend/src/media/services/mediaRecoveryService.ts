@@ -49,7 +49,7 @@ export class MediaRecoveryService {
     if (attempt.state === "promoted") { await this.repository.failRecovery(context,companyId,attempt.assetId,owner,token,"not_found",true,this.clock.now()); return; }
     try {
       await this.exact(attempt.stagingStorageReference,attempt);
-      if (!await this.repository.markRecoveryStaged(context,companyId,attempt.assetId,owner,token,this.clock.now()) && attempt.state !== "staged") return;
+      if (attempt.state !== "retryable_failure" && !await this.repository.markRecoveryStaged(context,companyId,attempt.assetId,owner,token,this.clock.now()) && attempt.state !== "staged") return;
       const promoted=await this.storage.promote(attempt.stagingStorageReference,attempt.candidateBlobId,attempt.inspectedMediaType);
       if (promoted !== attempt.finalStorageReference) throw new MediaDomainError("media_integrity_invalid");
       if (!await this.repository.markRecoveryPromoted(context,companyId,attempt.assetId,owner,token,this.clock.now())) return;
