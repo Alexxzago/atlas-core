@@ -74,7 +74,7 @@ function setup(path: string) {
   const conversationRepository = new ConversationRepository(database), conversations = new ConversationService(conversationRepository, clock), events = new ChannelProviderEventRepository(database), bindings = new WhatsAppConversationRepository(database), voices = new WhatsAppVoiceRepository(database);
   const connectionService = new WhatsAppConnectionService(companies, profiles, connections, clock);
   const execution = new Execution(), turns = new OperationalConversationTurnService(companies, new CompanyKnowledgeRepository(database), profiles, conversations, new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), clock), new InMemoryConversationTurnLock(), "test", 4, undefined, undefined, undefined, undefined, conversationRepository, semantic(voices));
-  const webhook = new WhatsAppWebhookService({ appSecret: "", verifyToken: "" }, connectionService, bindings, events, conversations, turns, clock, undefined, undefined, undefined, undefined, undefined, conversationRepository);
+  const webhook = new WhatsAppWebhookService({ appSecret: "", verifyToken: "" }, connectionService, bindings, events, conversations, turns, clock, conversationRepository);
   return { database, context, company, connection, conversationRepository, events, voices, execution, webhook };
 }
 
@@ -199,6 +199,6 @@ function setupRecovery(path: string, execution: Execution | PausedExecution = ne
   const profiles = new AssistantProfileRepository(database), connections = new WhatsAppConnectionRepository(database), conversationRepository = new ConversationRepository(database), conversations = new ConversationService(conversationRepository, clock), events = new ChannelProviderEventRepository(database), bindings = new WhatsAppConversationRepository(database), voices = new WhatsAppVoiceRepository(database), derived: string[] = [];
   const intelligence = new ConversationIntelligenceService(new ConversationIntelligenceRepository(database), { derive: async ({ message }) => { derived.push(message.id); return [{ kind: "set_fact", key: "voice", value: message.content }] as const; } }, clock);
   const turns = new OperationalConversationTurnService(companies, new CompanyKnowledgeRepository(database), profiles, conversations, new OperationalAssistantRuntime(execution, new AssistantExecutionRecordRepository(database), clock), new InMemoryConversationTurnLock(), "test", 4, intelligence, undefined, undefined, undefined, conversationRepository, semantic(voices));
-  const webhook = new WhatsAppWebhookService({ appSecret: "", verifyToken: "" }, new WhatsAppConnectionService(companies, profiles, connections, clock), bindings, events, conversations, turns, clock, undefined, undefined, undefined, undefined, undefined, conversationRepository);
+  const webhook = new WhatsAppWebhookService({ appSecret: "", verifyToken: "" }, new WhatsAppConnectionService(companies, profiles, connections, clock), bindings, events, conversations, turns, clock, conversationRepository);
   return { database, context, company, derived, execution, intelligence, voices, webhook };
 }

@@ -90,7 +90,7 @@ async function fixture(execution: Execution | DeferredExecution = new Execution(
   const connections = new WhatsAppConnectionService(companies, profiles, whatsApp.connections, clock);
   const provider = new FakeWhatsAppOutboundProvider();
   const outbound = new WhatsAppOutboundDeliveryService(conversations.conversations, whatsApp.connections, whatsApp.providerMessages, whatsApp.outboundDeliveries, { resolve: async () => "test-token" }, () => provider, clock, undefined, whatsApp.conversations);
-  const webhook = new WhatsAppWebhookService({ appSecret: "", verifyToken: "" }, connections, undefined, undefined, undefined, turns, clock, undefined, undefined, undefined, undefined, undefined, conversations.conversations, outbound, undefined, whatsApp.inbound);
+  const webhook = new WhatsAppWebhookService({ appSecret: "", verifyToken: "" }, connections, undefined, undefined, undefined, turns, clock, conversations.conversations, outbound, undefined, whatsApp.inbound);
   const inboundMedia = new WhatsAppInboundMediaRecoveryService(whatsApp.inboundMedia, { download: async () => ({ kind: "downloaded" as const, download: { mediaType: "image/png", filename: "image.png", content: (async function* (): AsyncIterable<Uint8Array> { yield png; })() } }) }, media.service, whatsApp.inboundMedia, clock);
   return { directory, database, context, company, connection, profile, execution, conversations, inbound: whatsApp.inbound, inboundMedia, outbound, provider, turns, webhook };
 }
@@ -102,6 +102,20 @@ function request(database: ReturnType<typeof createDatabase>, wamid: string): { 
 async function close(value: Awaited<ReturnType<typeof fixture>>): Promise<void> {
   await new LocalSqlDatabase(value.database).close();
   rmSync(value.directory, { recursive: true, force: true });
+}
+
+async function safeFallbackReady(value: Awaited<ReturnType<typeof fixture>>, wamid: string): Promise<{ readonly executionId: string }> {
+  await value.webhook.acknowledge(payload("text", wamid));
+  await value.webhook.resumeIncomplete();
+  const execution = value.database.prepare("SELECT id FROM assistant_execution_records WHERE state='safe_fallback'").get() as { id: string };
+  assert.equal((value.database.prepare("SELECT state FROM conversation_controls").get() as { state: string }).state, "human_required");
+  return execution;
+}
+
+async function assertSafeFallbackSuppressed(value: Awaited<ReturnType<typeof fixture>>): Promise<void> {
+  await value.outbound.dispatchReady("outbound-worker");
+  assert.deepEqual(value.provider.calls, []);
+  assert.equal((value.database.prepare("SELECT state FROM outbound_deliveries").get() as { state: string }).state, "suppressed");
 }
 
 async function finalization(value: Awaited<ReturnType<typeof fixture>>, leased: { readonly id: string; readonly leaseExpiresAt: string | null }, owner: string, now: string): Promise<AsyncWhatsAppExecutionFinalization> {
@@ -239,6 +253,79 @@ test("EPIC056 async safe fallback retains its outcome and marks the conversation
     assert.equal(requestState.outcome, "safe_fallback");
     assert.equal(control.state, "human_required");
     assert.equal(control.attention_reason, "automation_failure");
+  } finally { await close(value); }
+});
+
+test("EPIC056 dispatches an async image safe fallback once while the conversation requires human attention", async () => {
+  const value = await fixture(new Execution("safe_fallback"));
+  try {
+    await value.webhook.acknowledge(payload("image", "wamid-image-safe-fallback"));
+    assert.equal((await value.inboundMedia.recoverAvailable("media-worker")).length, 1);
+    await value.webhook.resumeIncomplete();
+    const delivery = value.database.prepare("SELECT state,expected_authority_generation FROM outbound_deliveries").get() as { state: string; expected_authority_generation: number };
+    const control = value.database.prepare("SELECT state,authority_generation FROM conversation_controls").get() as { state: string; authority_generation: number };
+    assert.equal(delivery.state, "pending");
+    assert.equal(control.state, "human_required");
+    assert.equal(delivery.expected_authority_generation, control.authority_generation);
+    value.provider.enqueueAccepted("wamid-image-safe-fallback-outbound");
+    await value.outbound.dispatchReady("outbound-worker");
+    assert.deepEqual(value.provider.calls, [{ kind: "text", providerMediaId: null }]);
+    assert.equal((value.database.prepare("SELECT state FROM outbound_deliveries").get() as { state: string }).state, "accepted");
+    assert.equal((value.database.prepare("SELECT COUNT(*) AS count FROM conversation_messages WHERE direction='outbound'").get() as { count: number }).count, 1);
+    assert.equal((value.database.prepare("SELECT COUNT(*) AS count FROM provider_message_records WHERE direction='outbound'").get() as { count: number }).count, 1);
+  } finally { await close(value); }
+});
+
+test("EPIC056 suppresses an async image safe fallback after a human takeover", async () => {
+  const value = await fixture(new Execution("safe_fallback"));
+  try {
+    await value.webhook.acknowledge(payload("image", "wamid-image-fallback-takeover"));
+    assert.equal((await value.inboundMedia.recoverAvailable("media-worker")).length, 1);
+    await value.webhook.resumeIncomplete();
+    const conversation = value.database.prepare("SELECT conversation_id FROM whatsapp_conversation_bindings").get() as { conversation_id: string };
+    const current = await value.conversations.conversations.findConversationControl(value.context, value.company.id, conversation.conversation_id as never);
+    assert.equal(current?.state, "human_required");
+    await new ConversationControlService(new ConversationService(value.conversations.conversations, new Clock()), value.conversations.conversations, new Clock()).takeOver(value.context, "usr_0560000000000000000000000000000a" as never, value.company.id, conversation.conversation_id, { expectedVersion: current!.version, operationId: "cco_0560000000000000000000000000000g" });
+    await value.outbound.dispatchReady("outbound-worker");
+    assert.deepEqual(value.provider.calls, []);
+    assert.equal((value.database.prepare("SELECT state FROM outbound_deliveries").get() as { state: string }).state, "suppressed");
+  } finally { await close(value); }
+});
+
+test("EPIC056 suppresses a safe fallback linked to a foreign-company execution", async () => {
+  const value = await fixture(new Execution("safe_fallback"));
+  try {
+    const execution = await safeFallbackReady(value, "wamid-fallback-foreign-execution");
+    const foreign = new CompanyRepository(value.database).create(value.context, { name: "Foreign Execution", website: "https://foreign-execution.test", status: "ready" });
+    value.database.prepare("UPDATE assistant_execution_records SET company_id=? WHERE id=?").run(foreign.id, execution.id);
+    await assertSafeFallbackSuppressed(value);
+  } finally { await close(value); }
+});
+
+test("EPIC056 suppresses a safe fallback linked to a non-operational execution", async () => {
+  const value = await fixture(new Execution("safe_fallback"));
+  try {
+    const execution = await safeFallbackReady(value, "wamid-fallback-preview-execution");
+    value.database.prepare("UPDATE assistant_execution_records SET purpose='preview' WHERE id=?").run(execution.id);
+    await assertSafeFallbackSuppressed(value);
+  } finally { await close(value); }
+});
+
+test("EPIC056 suppresses a safe fallback with a mismatched execution conversation snapshot", async () => {
+  const value = await fixture(new Execution("safe_fallback"));
+  try {
+    const execution = await safeFallbackReady(value, "wamid-fallback-conversation-snapshot");
+    value.database.prepare("UPDATE assistant_execution_records SET execution_snapshot_json=json_set(execution_snapshot_json,'$.conversationId','cnv_wrong') WHERE id=?").run(execution.id);
+    await assertSafeFallbackSuppressed(value);
+  } finally { await close(value); }
+});
+
+test("EPIC056 suppresses a safe fallback with a mismatched execution authority snapshot", async () => {
+  const value = await fixture(new Execution("safe_fallback"));
+  try {
+    const execution = await safeFallbackReady(value, "wamid-fallback-authority-snapshot");
+    value.database.prepare("UPDATE assistant_execution_records SET execution_snapshot_json=json_set(execution_snapshot_json,'$.authorityGeneration',999) WHERE id=?").run(execution.id);
+    await assertSafeFallbackSuppressed(value);
   } finally { await close(value); }
 });
 
