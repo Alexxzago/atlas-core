@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { link, lstat, mkdir, open, realpath, rm } from "node:fs/promises";
+import { link, lstat, mkdir, open, realpath, readdir, rm } from "node:fs/promises";
 import { basename, dirname, resolve, sep } from "node:path";
-import type { MediaDeleteResult, MediaStoragePort, MediaStorageReferences, StagedMedia } from "../application/ports.js";
+import type { MediaDeleteResult, MediaStorageLocation, MediaStorageObject, MediaStoragePort, MediaStorageReferences, StagedMedia } from "../application/ports.js";
 import { MEDIA_LIMITS, MediaDomainError } from "../domain/media.js";
 
 const blobId = /^mbl_[a-f0-9]{32}$/u;
@@ -55,6 +55,8 @@ export class LocalMediaStorage implements MediaStoragePort {
   }
   public async delete(reference: string): Promise<MediaDeleteResult> { await rm(await this.referencePath(reference), { force: true }); return Object.freeze({status:"absent"}); }
   public async read(reference: string, maximumBytes: number): Promise<Uint8Array> { return this.readReference(reference, blobId, maximumBytes); }
+  /** Local storage is a flat application-owned media root; never traverse outside it. */
+  public async listOwned(_location: MediaStorageLocation, limit: number): Promise<readonly MediaStorageObject[]> { if(!Number.isInteger(limit)||limit<1||limit>100)throw new Error("Invalid media list limit.");const root=await this.root(),entries=await readdir(root,{withFileTypes:true}),objects:MediaStorageObject[]=[];for(const entry of entries){if(objects.length===limit)break;if(!entry.isFile()||(!blobId.test(entry.name)&&!temporaryId.test(entry.name)))continue;const path=await this.safePath(entry.name,blobId.test(entry.name)?blobId:temporaryId),stat=await lstat(path);rejectReparsePoint(stat);objects.push(Object.freeze({reference:entry.name,createdAt:stat.birthtime.toISOString()}));}return Object.freeze(objects); }
   private async readReference(reference: string, expression: RegExp, maximumBytes: number): Promise<Uint8Array> {
     const path = await this.safePath(reference, expression), file = await open(path, "r");
     try { await this.assertOpenedPath(path, file); const stat = await file.stat(); if (stat.size < 1 || stat.size > maximumBytes) throw new MediaDomainError("media_integrity_invalid"); const bytes = new Uint8Array(stat.size); await file.read(bytes); return bytes; } finally { await file.close(); }

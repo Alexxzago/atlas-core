@@ -10,7 +10,8 @@ export interface StagedMedia { readonly temporaryReference: string; readonly fin
 export interface MediaStorageLocation { readonly workspaceId: number; readonly companyId: number; }
 export interface MediaStorageStageOptions { readonly sizeBytes: number; readonly digest: string; readonly mediaType: string; }
 export interface MediaDeleteResult { readonly status: "absent"; }
-export interface MediaStoragePort { plan(blobId: string, location: MediaStorageLocation): MediaStorageReferences; stage(references: MediaStorageReferences, content: AsyncIterable<Uint8Array>, location?: MediaStorageLocation, expected?: MediaStorageStageOptions): Promise<StagedMedia>; readTemporary(reference: string, maximumBytes: number): Promise<Uint8Array>; promote(temporaryReference: string, blobId: string, mediaType?: string): Promise<string>; delete(reference: string): Promise<MediaDeleteResult>; read(reference: string, maximumBytes: number): Promise<Uint8Array>; }
+export interface MediaStorageObject { readonly reference: string; readonly createdAt: string; }
+export interface MediaStoragePort { plan(blobId: string, location: MediaStorageLocation): MediaStorageReferences; stage(references: MediaStorageReferences, content: AsyncIterable<Uint8Array>, location?: MediaStorageLocation, expected?: MediaStorageStageOptions): Promise<StagedMedia>; readTemporary(reference: string, maximumBytes: number): Promise<Uint8Array>; promote(temporaryReference: string, blobId: string, mediaType?: string): Promise<string>; delete(reference: string): Promise<MediaDeleteResult>; read(reference: string, maximumBytes: number): Promise<Uint8Array>; listOwned(location: MediaStorageLocation, limit: number): Promise<readonly MediaStorageObject[]>; }
 export interface MediaAssociationOwnerResolver { owns(context: WorkspaceContext, companyId: number, type: MediaAssociationOwnerType, id: string): AsyncValue<boolean>; }
 
 export interface MediaRepositoryPort {
@@ -30,5 +31,16 @@ export interface MediaRepositoryPort {
   listAssociations(context: WorkspaceContext, companyId: number, assetId: string): AsyncValue<readonly MediaAssociation[]>;
   open(context: WorkspaceContext, companyId: number, assetId: string): AsyncValue<MediaBlob | null>;
   listEvents(context: WorkspaceContext, companyId: number, assetId: string): AsyncValue<readonly string[]>;
-  listPendingReclaims(context: WorkspaceContext, companyId: number): AsyncValue<readonly MediaBlob[]>;
+  listPendingReclaims(context: WorkspaceContext, companyId: number, limit?: number): AsyncValue<readonly MediaBlob[]>;
+  leaseIncomplete(context: WorkspaceContext, companyId: number, owner: string, token: string, now: string, expiresAt: string, limit: number): AsyncValue<readonly MediaIngestAttempt[]>;
+  markRecoveryStaged(context: WorkspaceContext, companyId: number, assetId: string, owner: string, token: string, at: string): AsyncValue<boolean>;
+  markRecoveryPromoted(context: WorkspaceContext, companyId: number, assetId: string, owner: string, token: string, at: string): AsyncValue<boolean>;
+  settleRecovery(context: WorkspaceContext, companyId: number, assetId: string, owner: string, token: string, blob: MediaBlob, at: string): AsyncValue<MediaAsset | null>;
+  failRecovery(context: WorkspaceContext, companyId: number, assetId: string, owner: string, token: string, category: string, retryable: boolean, at: string): AsyncValue<boolean>;
+  leaseReclaims(context: WorkspaceContext, companyId: number, owner: string, token: string, now: string, expiresAt: string, limit: number): AsyncValue<readonly MediaBlob[]>;
+  finalizeLeasedReclaim(context: WorkspaceContext, companyId: number, blobId: string, owner: string, token: string, at: string): AsyncValue<boolean>;
+  listReadyBlobs(context: WorkspaceContext, companyId: number, limit: number): AsyncValue<readonly MediaBlob[]>;
+  markBlobUnavailable(context: WorkspaceContext, companyId: number, blobId: string, category: string, at: string): AsyncValue<boolean>;
+  referencesStorage(context: WorkspaceContext, companyId: number, reference: string): AsyncValue<boolean>;
+  listRecoveryScopes(limit: number): AsyncValue<readonly { readonly workspaceId: number; readonly workspaceKey: string; readonly companyId: number }[]>;
 }

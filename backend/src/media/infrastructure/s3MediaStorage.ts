@@ -1,7 +1,7 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash, randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
-import type { MediaDeleteResult, MediaStorageLocation, MediaStoragePort, MediaStorageReferences, MediaStorageStageOptions, StagedMedia } from "../application/ports.js";
+import type { MediaDeleteResult, MediaStorageLocation, MediaStorageObject, MediaStoragePort, MediaStorageReferences, MediaStorageStageOptions, StagedMedia } from "../application/ports.js";
 import { MEDIA_LIMITS, MediaDomainError, MediaStorageError, type MediaStorageFailureCategory } from "../domain/media.js";
 
 const blobId = /^mbl_[a-f0-9]{32}$/u;
@@ -58,6 +58,8 @@ export class S3MediaStorage implements MediaStoragePort {
     return Object.freeze({status:"absent"});
   }
   public async read(reference: string, maximumBytes: number): Promise<Uint8Array> { if (!objectKey.test(reference)) throw new Error("Invalid media storage reference."); return this.readKey(reference, maximumBytes); }
+  /** One bounded page below the exact tenant-owned Atlas prefix. */
+  public async listOwned(location: MediaStorageLocation, limit: number): Promise<readonly MediaStorageObject[]> { if(!Number.isSafeInteger(location.workspaceId)||location.workspaceId<1||!Number.isSafeInteger(location.companyId)||location.companyId<1||!Number.isInteger(limit)||limit<1||limit>100)throw new Error("Invalid media storage list request.");try{const response=await this.send(new ListObjectsV2Command({Bucket:this.configuration.bucket,Prefix:`workspaces/${location.workspaceId}/companies/${location.companyId}/media/`,MaxKeys:limit})) as {Contents?:Array<{Key?:string;LastModified?:Date}>};return Object.freeze((response.Contents??[]).flatMap(item=>typeof item.Key==="string"&&item.LastModified&&(temporaryKey.test(item.Key)||objectKey.test(item.Key))?[Object.freeze({reference:item.Key,createdAt:item.LastModified.toISOString()})]:[]));}catch(error:unknown){throw storageError(error);}}
   private async readKey(reference: string, maximumBytes: number): Promise<Uint8Array> {
     if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > MEDIA_LIMITS.maximumBytes) throw new MediaDomainError("media_integrity_invalid");
     let response: { Body?: unknown; ContentLength?: number };

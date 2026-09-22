@@ -1077,7 +1077,7 @@ test("EPIC039 inspector failures clean staged bytes before durable reservation",
   }
 });
 
-test("EPIC039 migration preserves the 0049 contract through the current 0076 head", () => {
+test("EPIC039 migration preserves the 0049 contract through the current 0078 head", () => {
   const directory = mkdtempSync(join(tmpdir(), "atlas-media-migration-")),
     path = join(directory, "atlas.sqlite");
   let db = new DatabaseSync(path);
@@ -1134,6 +1134,7 @@ test("EPIC039 migration preserves the 0049 contract through the current 0076 hea
         { id: 75, name: "0075_activation_verification_attempts" },
         { id: 76, name: "0076_public_web_chat_durable_turn_claims" },
         { id: 77, name: "0077_media_durable_ingest_attempts" },
+        { id: 78, name: "0078_media_reclaim_leases" },
       ],
     );
     assert.equal(
@@ -1164,7 +1165,7 @@ test("EPIC039 migration preserves the 0049 contract through the current 0076 hea
   }
 });
 
-test("EPIC039 declares the complete immutable migration inventory through the 0076 head", () => {
+test("EPIC039 declares the complete immutable migration inventory through the 0078 head", () => {
   const db = createDatabase(":memory:");
   try {
     const rows = db
@@ -1190,10 +1191,11 @@ test("EPIC039 declares the complete immutable migration inventory through the 00
         75,
         76,
         77,
+        78,
       ],
     );
-    assert.equal(rows.at(-1)?.name, "0077_media_durable_ingest_attempts");
-    assert.equal(new Set(rows.map((row) => row.name)).size, 76);
+    assert.equal(rows.at(-1)?.name, "0078_media_reclaim_leases");
+    assert.equal(new Set(rows.map((row) => row.name)).size, 77);
     assert.equal(
       rows.every((row) => /^[a-f0-9]{64}$/u.test(row.checksum)),
       true,

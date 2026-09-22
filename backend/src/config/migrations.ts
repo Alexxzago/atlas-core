@@ -2379,6 +2379,12 @@ const migrations: Migration[] = [
     CREATE TRIGGER media_ingest_attempt_scope_insert BEFORE INSERT ON media_ingest_attempts WHEN NOT EXISTS(SELECT 1 FROM media_assets a WHERE a.id=NEW.asset_id AND a.workspace_id=NEW.workspace_id AND a.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Media ingest attempt scope is invalid'); END;
     CREATE TRIGGER media_ingest_attempt_scope_update BEFORE UPDATE OF asset_id,workspace_id,company_id ON media_ingest_attempts WHEN NOT EXISTS(SELECT 1 FROM media_assets a WHERE a.id=NEW.asset_id AND a.workspace_id=NEW.workspace_id AND a.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Media ingest attempt scope is invalid'); END;
   `);}},
+  { id:78,name:"0078_media_reclaim_leases",checksumSource:"media-reclaim-lease-and-recovery-v1",apply(database):void{database.exec(`
+    ALTER TABLE media_blobs ADD COLUMN reclaim_lease_owner TEXT CHECK(reclaim_lease_owner IS NULL OR length(reclaim_lease_owner) BETWEEN 1 AND 100);
+    ALTER TABLE media_blobs ADD COLUMN reclaim_lease_token TEXT CHECK(reclaim_lease_token IS NULL OR length(reclaim_lease_token) BETWEEN 1 AND 200);
+    ALTER TABLE media_blobs ADD COLUMN reclaim_lease_expires_at TEXT;
+    CREATE INDEX idx_media_blobs_reclaim_recovery ON media_blobs(state,reclaim_lease_expires_at,created_at,id) WHERE state='reclaim_pending';
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

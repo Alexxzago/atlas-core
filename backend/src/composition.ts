@@ -251,6 +251,7 @@ const mediaAvailable=mediaStorageAvailable(runtimeConfiguration);
 export const mediaCore = runtimeConfiguration
   ? createAsyncMediaCore(sqlDatabase, runtimeConfiguration.mediaStorage ? new S3MediaStorage(runtimeConfiguration.mediaStorage) : new UnavailableMediaStorage(), identityClock, mediaPersistence)
   : createAsyncLocalMediaCore(sqlDatabase, resolve(repositoryRoot, "media"), identityClock, mediaPersistence);
+export const mediaRecoveryService = mediaCore.recovery;
 const deliveryMode = runtimeConfiguration?.emailDeliveryMode ?? emailDeliveryMode(process.env.EMAIL_PROVIDER ?? process.env.ATLAS_VERIFICATION_DELIVERY, production);
 const providerDelivery = deliveryMode === "smtp"
   ? new SmtpEmailDelivery(smtpConfiguration())
