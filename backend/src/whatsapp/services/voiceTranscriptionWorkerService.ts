@@ -5,6 +5,7 @@ import type { SpeechTranscriptionPort } from "../application/speechTranscription
 import type { AsyncVoiceRepositoryPort, VoiceRepositoryPort, VoiceWorkSettlement } from "../application/voicePorts.js";
 import type { AudioTranscriptionRequest } from "../domain/voice.js";
 import { inspectVoiceAudio } from "../domain/audioInspection.js";
+import { operationalLogger } from "../../observability/operationalLogger.js";
 
 export type VoiceTranscriptionWorkerOutcome = { readonly kind: "completed" | "retryable" | "failed" | "lease_lost" | "conflict"; readonly requestId: string; };
 
@@ -34,7 +35,7 @@ export class VoiceTranscriptionWorkerService {
     if (result.kind !== "completed") return this.settle(context, companyId, request, result.kind === "retryable" ? "retryable" : "failed", result.safeFailureCategory);
     const normalizedTranscript = normalize(result.transcript);
     if (normalizedTranscript === null) return this.settle(context, companyId, request, "failed", "invalid_transcript");
-    const at = this.clock.now(), finalized = await this.voices.finalizeTranscription(context, companyId, request.id, this.options.owner, { transcript: { id: this.options.createTranscriptId(), conversationId: request.conversationId, messageId: request.messageId, mediaAssetId: request.mediaAssetId, normalizedTranscript, languageTag: result.languageTag, inputDigest: createHash("sha256").update(audio).digest("hex"), outcome: "completed", safeFailureCategory: null, createdAt: at }, settlement: { state: "completed", safeOutcome: "completed", safeFailureCategory: null, completedAt: at, updatedAt: at } });
+    const at = this.clock.now(); let finalized: Awaited<ReturnType<VoiceRepositoryPort["finalizeTranscription"]>>; try { finalized = await this.voices.finalizeTranscription(context, companyId, request.id, this.options.owner, { transcript: { id: this.options.createTranscriptId(), conversationId: request.conversationId, messageId: request.messageId, mediaAssetId: request.mediaAssetId, normalizedTranscript, languageTag: result.languageTag, inputDigest: createHash("sha256").update(audio).digest("hex"), outcome: "completed", safeFailureCategory: null, createdAt: at }, settlement: { state: "completed", safeOutcome: "completed", safeFailureCategory: null, completedAt: at, updatedAt: at } }); } catch(error:unknown) { this.log(context,companyId,"failed","persistence_failed"); throw error; }
     return { kind: finalized.kind === "opened" || finalized.kind === "suppressed" ? "completed" : finalized.kind, requestId: request.id };
   }
 
@@ -48,9 +49,10 @@ export class VoiceTranscriptionWorkerService {
   }
 
   private async settle(context: WorkspaceContext, companyId: number, request: AudioTranscriptionRequest, state: "retryable" | "failed", category: string): Promise<VoiceTranscriptionWorkerOutcome> {
-    const at = this.clock.now(), settlement: VoiceWorkSettlement = { state, safeOutcome: state, safeFailureCategory: category, completedAt: state === "failed" ? at : null, updatedAt: at };
+    this.log(context,companyId,state,category); const at = this.clock.now(), settlement: VoiceWorkSettlement = { state, safeOutcome: state, safeFailureCategory: category, completedAt: state === "failed" ? at : null, updatedAt: at };
     return { kind: await this.voices.settleTranscription(context, companyId, request.id, this.options.owner, settlement) === null ? "lease_lost" : state, requestId: request.id };
   }
+  private log(context:WorkspaceContext,companyId:number,outcome:string,safeErrorCategory:string):void{operationalLogger.warn("voice_transcription_failed",{subsystem:"voice",operation:"transcription",outcome,workspaceId:context.workspaceId,companyId,safeErrorCategory});}
 }
 
 function inspect(audio: Uint8Array, maximumDurationMilliseconds: number): Extract<ReturnType<typeof inspectVoiceAudio>, { readonly kind: "processable" }> | null {

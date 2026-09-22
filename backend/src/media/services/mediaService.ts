@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { MediaAssociationOwnerResolver, MediaInspectorPort, MediaRepositoryPort, MediaStoragePort } from "../application/ports.js";
 import { canonicalMetadata, mediaKind, safeFilename, safeMetadata, MEDIA_LIMITS, MEDIA_TYPES, MediaDomainError, type MediaAsset, type MediaAssociation, type MediaAssociationOwnerType, type MediaBlob, type MediaIngestAttempt, type MediaMetadataValue } from "../domain/media.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
+import { operationalLogger } from "../../observability/operationalLogger.js";
 
 export interface StoreMediaInput { readonly operation: "ingest"; readonly idempotencyKey: string; readonly declaredMediaType: string; readonly filename?: string; readonly metadata?: Readonly<Record<string, MediaMetadataValue>>; readonly content: AsyncIterable<Uint8Array>; }
 export interface MediaIngestTestHook { afterReserved?(): void | Promise<void>; afterStagingWrite?(): void | Promise<void>; afterPromotion?(): void | Promise<void>; afterPromoted?(): void | Promise<void>; }
@@ -25,25 +26,30 @@ export class MediaService {
     try {
       const result=await this.repository.reserve(context,companyId,input.operation,operationKey,fingerprint,{id:assetId,workspaceId:context.workspaceId,companyId,kind,mediaType,sizeBytes:null,filename,metadata,status:"pending",createdAt:now,archivedAt:null,deletedAt:null},ingest,now);
       if(result.kind!=="reserved")return replay(result);
-      reserved=true;if(this.testHook?.afterReserved)await this.testHook.afterReserved();
+      reserved=true;this.log("media_ingest_reserved",context,companyId,"reserved","completed");if(this.testHook?.afterReserved)await this.testHook.afterReserved();
       const staged=await this.storage.stage(references,stream(bytes),{workspaceId:context.workspaceId,companyId},{sizeBytes:bytes.byteLength,digest,mediaType:inspected.mediaType});
       if(staged.temporaryReference!==references.stagingReference||staged.finalStorageReference!==references.finalStorageReference||staged.digest!==digest||staged.sizeBytes!==bytes.byteLength)throw new MediaDomainError("media_integrity_invalid");
+      this.log("media_ingest_staged",context,companyId,"staged","completed");
       if(this.testHook?.afterStagingWrite)await this.testHook.afterStagingWrite();
       if(!await this.repository.markStaged(context,companyId,assetId,this.clock.now()))throw new MediaDomainError("media_completion_conflict");
       const promoted=await this.storage.promote(references.stagingReference,candidateId,inspected.mediaType);
       if(promoted!==references.finalStorageReference)throw new MediaDomainError("media_integrity_invalid");
+      this.log("media_ingest_promoted",context,companyId,"promoted","completed");
       if(this.testHook?.afterPromotion)await this.testHook.afterPromotion();
       if(!await this.repository.markPromoted(context,companyId,assetId,this.clock.now()))throw new MediaDomainError("media_completion_conflict");if(this.testHook?.afterPromoted)await this.testHook.afterPromoted();
       const complete=await this.repository.complete(context,companyId,assetId,{id:candidateId,workspaceId:context.workspaceId,companyId,digest,sizeBytes:bytes.byteLength,mediaType:inspected.mediaType,storageReference:promoted,state:"active",createdAt:this.clock.now()},this.clock.now());
       if(!complete)throw new MediaDomainError("media_completion_conflict");
+      this.log("media_ingest_settled",context,companyId,"settled","completed");
       const canonical=await this.repository.findBlob(context,companyId,digest,bytes.byteLength,inspected.mediaType);if(canonical?.id!==candidateId)await this.storage.delete(promoted).catch(()=>undefined);return complete;
-    } catch(error:unknown) { if(error instanceof MediaIngestInterrupted)throw error;if(reserved)await this.repository.fail(context,companyId,assetId,failureCategory(error),retryable(error),this.clock.now());throw error; }
+    } catch(error:unknown) { if(error instanceof MediaIngestInterrupted)throw error;if(reserved){const category=failureCategory(error),canRetry=retryable(error);await this.repository.fail(context,companyId,assetId,category,canRetry,this.clock.now());this.log(canRetry?"media_ingest_retryable_failure":"media_ingest_terminal_failure",context,companyId,"failed",canRetry?"retryable":"failed",category);}throw error; }
   }
   public attach(context:WorkspaceContext,companyId:number,assetId:string,type:MediaAssociationOwnerType,ownerId:string):MediaAssociation|Promise<MediaAssociation>{const now=this.clock.now(),result=this.repository.createAssociation(context,{id:id("maa"),assetId,workspaceId:context.workspaceId,companyId,ownerType:type,ownerId,createdAt:now},now,()=>this.owners.owns(context,companyId,type,ownerId));return result instanceof Promise?result.then(requireAssociation):requireAssociation(result);}
   public archive(context:WorkspaceContext,companyId:number,assetId:string):MediaAsset|Promise<MediaAsset>{const value=this.repository.archive(context,companyId,assetId,this.clock.now());return value instanceof Promise?value.then(requireAsset):requireAsset(value);}
-  public async delete(context:WorkspaceContext,companyId:number,assetId:string):Promise<MediaAsset>{const outcome=await this.repository.delete(context,companyId,assetId,this.clock.now());if(!outcome)throw new MediaDomainError("media_not_found");if(outcome.reclaim){await this.storage.delete(outcome.reclaim.storageReference);await this.repository.finalizeReclaim(context,companyId,outcome.reclaim.id,this.clock.now());}return outcome.asset;}
-  public async sweepPendingReclaims(context:WorkspaceContext,companyId:number):Promise<void>{for(const blob of await this.repository.listPendingReclaims(context,companyId)){await this.storage.delete(blob.storageReference);await this.repository.finalizeReclaim(context,companyId,blob.id,this.clock.now());}}
+  public async delete(context:WorkspaceContext,companyId:number,assetId:string):Promise<MediaAsset>{const outcome=await this.repository.delete(context,companyId,assetId,this.clock.now());if(!outcome)throw new MediaDomainError("media_not_found");if(outcome.reclaim)await this.reclaim(context,companyId,outcome.reclaim);return outcome.asset;}
+  public async sweepPendingReclaims(context:WorkspaceContext,companyId:number):Promise<void>{for(const blob of await this.repository.listPendingReclaims(context,companyId))await this.reclaim(context,companyId,blob);}
   public async open(context:WorkspaceContext,companyId:number,assetId:string):Promise<Uint8Array>{const value=await this.repository.open(context,companyId,assetId);if(!value)throw new MediaDomainError("media_not_found");const bytes=await this.storage.read(value.storageReference,value.sizeBytes);if(createHash("sha256").update(bytes).digest("hex")!==value.digest)throw new MediaDomainError("media_integrity_invalid");return bytes;}
+  private log(event:string,context:WorkspaceContext,companyId:number,phase:string,outcome:string,safeErrorCategory?:string):void{operationalLogger.info(event,{subsystem:"media",operation:"ingest",phase,outcome,workspaceId:context.workspaceId,companyId,...(safeErrorCategory?{safeErrorCategory}:{})});}
+  private async reclaim(context:WorkspaceContext,companyId:number,blob:MediaBlob):Promise<void>{try{const result=await this.storage.delete(blob.storageReference);if(result.status==="absent"){await this.repository.finalizeReclaim(context,companyId,blob.id,this.clock.now());operationalLogger.info("media_reclaim_completed",{subsystem:"media",operation:"reclaim",outcome:"completed",workspaceId:context.workspaceId,companyId});}}catch(error:unknown){operationalLogger.warn("media_reclaim_ambiguous",{subsystem:"media",operation:"reclaim",outcome:"failed",workspaceId:context.workspaceId,companyId,safeErrorCategory:failureCategory(error)});throw error;}}
 }
 async function collect(content:AsyncIterable<Uint8Array>):Promise<Uint8Array>{const chunks:Uint8Array[]=[];let size=0;for await(const chunk of content){if(!(chunk instanceof Uint8Array))throw new MediaDomainError("media_stream_invalid");size+=chunk.byteLength;if(size>MEDIA_LIMITS.maximumBytes)throw new MediaDomainError("media_too_large");chunks.push(chunk);}if(!size)throw new MediaDomainError("media_empty");const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}return bytes;}
 async function* stream(bytes:Uint8Array):AsyncGenerator<Uint8Array>{yield bytes;}

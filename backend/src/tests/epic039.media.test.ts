@@ -1008,8 +1008,9 @@ test("EPIC039 recovers an interrupted reclaim after physical deletion before fin
       v.storage.readTemporary(reference, maximum),
     promote: (reference, blob) => v.storage.promote(reference, blob),
     delete: async (reference) => {
-      await v.storage.delete(reference);
+      const result = await v.storage.delete(reference);
       if (crash) throw new Error("simulated crash");
+      return result;
     },
     read: (reference, maximum) => v.storage.read(reference, maximum),
   };
