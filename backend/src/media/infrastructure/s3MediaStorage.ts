@@ -46,7 +46,7 @@ export class S3MediaStorage implements MediaStoragePort {
     if (!temporaryKey.test(temporaryReference) || !blobId.test(id) || !temporaryReference.includes(`/${id}/`) || !mediaType) throw new Error("Invalid media storage reference.");
     const target = temporaryReference.replace(/\/staging\/tmp_[a-f0-9]{32}$/u, "/object");
     // A conditional final put is the provider contract: a collision must fail, never overwrite.
-    try { const bytes=await this.readTemporary(temporaryReference,MEDIA_LIMITS.maximumBytes); await this.send(new PutObjectCommand({ Bucket:this.configuration.bucket,Key:target,ContentType:mediaType,IfNoneMatch:"*",Body:Readable.from([bytes]) })); }
+    try { const bytes=await this.readTemporary(temporaryReference,MEDIA_LIMITS.maximumBytes); await this.send(new PutObjectCommand({ Bucket:this.configuration.bucket,Key:target,ContentType:mediaType,ContentLength:bytes.byteLength,IfNoneMatch:"*",Body:bytes })); }
     catch (error: unknown) { throw error instanceof MediaDomainError ? error : storageError(error); }
     await this.delete(temporaryReference).catch(() => undefined);
     return target;
