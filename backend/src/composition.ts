@@ -1,4 +1,5 @@
 import { dirname, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { AtlasAgent } from "./agents/atlas.js";
 import { createChatController } from "./controllers/chatController.js";
@@ -15,6 +16,7 @@ import { createScrapeController } from "./controllers/scrapeController.js";
 import { createAuthenticationControllers, createPasswordResetControllers, createPlatformBootstrapControllers, createRegistrationController, createResendVerificationController, createVerifyEmailController } from "./controllers/identityController.js";
 import { runtimeProductionConfiguration, sqlDatabase } from "./config/database.js";
 import { mediaStorageAvailable } from "./config/productionConfiguration.js";
+import { googleCloudSpeechConfiguration } from "./config/googleCloudSpeechConfiguration.js";
 import { DevelopmentVerificationDelivery, UnavailableVerificationDelivery } from "./identity/infrastructure/developmentVerificationDelivery.js";
 import { ScryptPasswordProvider, SecureRandomProvider, Sha256CredentialEnrollmentHashProvider, Sha256SessionIdentifierProvider, Sha256VerificationHashProvider } from "./identity/infrastructure/securityProviders.js";
 import { SystemClock } from "./identity/infrastructure/systemClock.js";
@@ -96,6 +98,8 @@ import { createWhatsAppWebhookControllers } from "./controllers/WhatsAppWebhookC
 import { createWhatsAppWebhookRouter } from "./routes/whatsAppWebhook.js";
 import { WhatsAppCloudApiProvider } from "./whatsapp/providers/WhatsAppCloudApiProvider.js";
 import { MetaInboundMediaProvider } from "./whatsapp/providers/MetaInboundMediaProvider.js";
+import { MetaOutboundMediaUploadProvider } from "./whatsapp/providers/MetaOutboundMediaUploadProvider.js";
+import { GoogleCloudSpeechProvider } from "./whatsapp/providers/GoogleCloudSpeechProvider.js";
 import { whatsAppCredentialCipherFromEnvironment } from "./whatsapp/infrastructure/aesGcmWhatsAppCredentialCipher.js";
 import { AsyncWhatsAppCredentialResolver } from "./whatsapp/services/AsyncWhatsAppCredentialResolver.js";
 import { WhatsAppConnectionService } from "./whatsapp/services/WhatsAppConnectionService.js";
@@ -162,6 +166,10 @@ import { S3MediaStorage } from "./media/infrastructure/s3MediaStorage.js";
 import { UnavailableMediaStorage } from "./media/infrastructure/unavailableMediaStorage.js";
 import { SafeConversationAttachmentService } from "./media/services/safeConversationAttachmentService.js";
 import { WhatsAppInboundMediaRecoveryService } from "./whatsapp/services/WhatsAppInboundMediaRecoveryService.js";
+import { VoiceTranscriptionWorkerService } from "./whatsapp/services/voiceTranscriptionWorkerService.js";
+import { VoiceSynthesisWorkerService } from "./whatsapp/services/voiceSynthesisWorkerService.js";
+import { VoiceMediaUploadWorkerService } from "./whatsapp/services/voiceMediaUploadWorkerService.js";
+import { VoiceWorkerRecoveryService, voiceWorkerOptions } from "./whatsapp/services/voiceWorkerRecoveryService.js";
 import { ProviderAdapterRegistry, RegistryIntegrationProviderValidator } from "./integrations/application/providerAdapterRegistry.js";
 import { ScopedExternalProviderCredentialResolver } from "./integrations/services/scopedExternalProviderCredentialResolver.js";
 import { IntegrationConnectionService } from "./integrations/services/integrationConnectionService.js";
@@ -211,6 +219,7 @@ import { createAsyncWhatsAppPersistence } from "./whatsapp/infrastructure/asyncW
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const runtimeConfiguration = runtimeProductionConfiguration;
+const googleCloudSpeechCredentials = googleCloudSpeechConfiguration();
 const agent = new AtlasAgent(geminiProvider);
 const scrapeService = new ScrapeService(firecrawlProvider);
 const asyncWorkspaceCompanyPersistence = createAsyncWorkspaceCompanyPersistence(sqlDatabase);
@@ -329,7 +338,7 @@ const webChatConnectionService = new WebChatConnectionService(asyncWorkspaceComp
 export const whatsAppCredentialCipher = whatsAppCredentialCipherFromEnvironment();
 const asyncWhatsAppCredentialResolver = new AsyncWhatsAppCredentialResolver(whatsAppPersistence.connections, whatsAppCredentialCipher, process.env.WHATSAPP_ACCESS_TOKEN ?? "", integrationSecretCipher ? { repository: whatsAppPersistence.connections, cipher: integrationSecretCipher } : undefined);
 export const whatsAppInboundMediaProvider = new MetaInboundMediaProvider(whatsAppPersistence.connections, asyncWhatsAppCredentialResolver, { graphVersion: process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0" });
-export const whatsAppInboundMediaRecoveryService = new WhatsAppInboundMediaRecoveryService(whatsAppPersistence.inboundMedia, whatsAppInboundMediaProvider, mediaCore.service, whatsAppPersistence.inboundMedia, identityClock);
+export const whatsAppInboundMediaRecoveryService = new WhatsAppInboundMediaRecoveryService(whatsAppPersistence.inboundMedia, whatsAppInboundMediaProvider, mediaCore.service, whatsAppPersistence.inboundMedia, identityClock, 60_000, googleCloudSpeechCredentials ? { kind: "available", repository: whatsAppPersistence.voice, maximumDurationMilliseconds: 120_000, createTranscriptionRequestId: () => `atr_${randomUUID().replaceAll("-", "")}` } : { kind: "unavailable" });
 const defaultAssistantService = new DefaultAssistantService(assistantPersistence.profiles, assistantPersistence.defaults, identityClock);
 configureProductionDefaultAssistantControllers({get:(context)=>createGetDefaultAssistantController(defaultAssistantService,context),put:(context,actor)=>createPutDefaultAssistantController(defaultAssistantService,context,actor.userId)});
 const assistantReadinessService = new AssistantReadinessService(asyncWorkspaceCompanyPersistence.companies, knowledgePersistence.knowledge, assistantPersistence.profiles, whatsAppPersistence.connections, assistantPersistence.readiness, defaultAssistantService, identityClock);
@@ -337,6 +346,9 @@ configureProductionCompanyOperationalStatusService(new CompanyOperationalStatusS
 configureProductionAssistantReadinessControllers({ get: (context) => createGetAssistantReadinessController(assistantReadinessService, context), refresh: (context) => createRefreshAssistantReadinessController(assistantReadinessService, context) });
 const whatsAppConnectionService = new WhatsAppConnectionService(asyncWorkspaceCompanyPersistence.legacyCompanies, assistantPersistence.profiles, whatsAppPersistence.connections, identityClock, { credentials: whatsAppPersistence.connections, states: whatsAppPersistence.connections, cipher: whatsAppCredentialCipher, resolver: asyncWhatsAppCredentialResolver, validator: new WhatsAppCloudApiProvider("", process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0"), knowledge: knowledgePersistence.knowledge, linked: whatsAppPersistence.connections }, assistantReadinessService, billingEntitlements);
 whatsAppConnectionService.setRateLimiter(rateLimits);
+const googleCloudSpeech = googleCloudSpeechCredentials ? new GoogleCloudSpeechProvider(googleCloudSpeechCredentials) : null;
+const transcriptionWorkerOptions = voiceWorkerOptions("voice-transcription"), synthesisWorkerOptions = voiceWorkerOptions("voice-synthesis"), uploadWorkerOptions = voiceWorkerOptions("voice-upload");
+export const voiceWorkerRecoveryService = googleCloudSpeech ? new VoiceWorkerRecoveryService(whatsAppPersistence.voice, new VoiceTranscriptionWorkerService(whatsAppPersistence.voice, mediaCore.service, googleCloudSpeech, identityClock, { owner: transcriptionWorkerOptions.owner, batchSize: transcriptionWorkerOptions.batchSize, leaseMilliseconds: transcriptionWorkerOptions.leaseMilliseconds, transcriptionTimeoutMilliseconds: transcriptionWorkerOptions.timeoutMilliseconds, maximumDurationMilliseconds: 120_000, createTranscriptId: () => `cat_${randomUUID().replaceAll("-", "")}` }), new VoiceSynthesisWorkerService(whatsAppPersistence.voice, mediaCore.service, googleCloudSpeech, identityClock, { owner: synthesisWorkerOptions.owner, batchSize: synthesisWorkerOptions.batchSize, leaseMilliseconds: synthesisWorkerOptions.leaseMilliseconds, synthesisTimeoutMilliseconds: synthesisWorkerOptions.timeoutMilliseconds }), new VoiceMediaUploadWorkerService(whatsAppPersistence.voice, mediaCore.service, new MetaOutboundMediaUploadProvider(whatsAppPersistence.connections, asyncWhatsAppCredentialResolver, process.env.WHATSAPP_GRAPH_API_VERSION ?? "v26.0"), identityClock, { owner: uploadWorkerOptions.owner, batchSize: uploadWorkerOptions.batchSize, leaseMilliseconds: uploadWorkerOptions.leaseMilliseconds, uploadTimeoutMilliseconds: uploadWorkerOptions.timeoutMilliseconds })) : null;
 const metaEmbeddedSignupAudit = new StructuredMetaEmbeddedSignupAudit();
 const embeddedAttempts = metaEmbeddedSignupProvider && integrationConnectionService && process.env.META_EMBEDDED_SIGNUP_STATE_HMAC_KEY ? new MetaEmbeddedSignupAttemptService(whatsAppPersistence.metaEmbeddedSignupAttempts,new HmacMetaEmbeddedSignupDigestProvider(metaEmbeddedSignupStateHmacKeyFromEnvironment()),identityClock,600_000,metaEmbeddedSignupAudit) : null;
 const embeddedCompletion = embeddedAttempts && metaEmbeddedSignupProvider && integrationConnectionService ? new MetaEmbeddedSignupCompletionService(embeddedAttempts,metaEmbeddedSignupProvider,integrationConnectionService,whatsAppPersistence.metaEmbeddedSignupFinalizer,identityClock,process.env.META_GRAPH_API_VERSION ?? "v26.0",metaEmbeddedSignupAudit) : null;

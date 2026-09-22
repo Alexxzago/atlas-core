@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { MediaService } from "../../media/services/mediaService.js";
 import type { WorkspaceContext } from "../../types/workspaceContext.js";
 import type { SpeechTranscriptionPort } from "../application/speechTranscriptionPort.js";
-import type { VoiceRepositoryPort, VoiceWorkSettlement } from "../application/voicePorts.js";
+import type { AsyncVoiceRepositoryPort, VoiceRepositoryPort, VoiceWorkSettlement } from "../application/voicePorts.js";
 import type { AudioTranscriptionRequest } from "../domain/voice.js";
 import { inspectVoiceAudio } from "../domain/audioInspection.js";
 
@@ -18,10 +18,10 @@ export interface VoiceTranscriptionWorkerOptions {
 }
 
 export class VoiceTranscriptionWorkerService {
-  public constructor(private readonly voices: VoiceRepositoryPort, private readonly media: Pick<MediaService, "open">, private readonly speech: SpeechTranscriptionPort, private readonly clock: { now(): string }, private readonly options: VoiceTranscriptionWorkerOptions) {}
+  public constructor(private readonly voices: VoiceRepositoryPort | AsyncVoiceRepositoryPort, private readonly media: Pick<MediaService, "open">, private readonly speech: SpeechTranscriptionPort, private readonly clock: { now(): string }, private readonly options: VoiceTranscriptionWorkerOptions) {}
 
   public async runOnce(context: WorkspaceContext, companyId: number): Promise<readonly VoiceTranscriptionWorkerOutcome[]> {
-    const now = this.clock.now(), requests = this.voices.leaseTranscriptions(context, companyId, { owner: this.options.owner, now, expiresAt: new Date(Date.parse(now) + this.options.leaseMilliseconds).toISOString(), limit: this.options.batchSize });
+    const now = this.clock.now(), requests = await this.voices.leaseTranscriptions(context, companyId, { owner: this.options.owner, now, expiresAt: new Date(Date.parse(now) + this.options.leaseMilliseconds).toISOString(), limit: this.options.batchSize });
     return Promise.all(requests.map(request => this.transcribe(context, companyId, request)));
   }
 
@@ -34,7 +34,7 @@ export class VoiceTranscriptionWorkerService {
     if (result.kind !== "completed") return this.settle(context, companyId, request, result.kind === "retryable" ? "retryable" : "failed", result.safeFailureCategory);
     const normalizedTranscript = normalize(result.transcript);
     if (normalizedTranscript === null) return this.settle(context, companyId, request, "failed", "invalid_transcript");
-    const at = this.clock.now(), finalized = this.voices.finalizeTranscription(context, companyId, request.id, this.options.owner, { transcript: { id: this.options.createTranscriptId(), conversationId: request.conversationId, messageId: request.messageId, mediaAssetId: request.mediaAssetId, normalizedTranscript, languageTag: result.languageTag, inputDigest: createHash("sha256").update(audio).digest("hex"), outcome: "completed", safeFailureCategory: null, createdAt: at }, settlement: { state: "completed", safeOutcome: "completed", safeFailureCategory: null, completedAt: at, updatedAt: at } });
+    const at = this.clock.now(), finalized = await this.voices.finalizeTranscription(context, companyId, request.id, this.options.owner, { transcript: { id: this.options.createTranscriptId(), conversationId: request.conversationId, messageId: request.messageId, mediaAssetId: request.mediaAssetId, normalizedTranscript, languageTag: result.languageTag, inputDigest: createHash("sha256").update(audio).digest("hex"), outcome: "completed", safeFailureCategory: null, createdAt: at }, settlement: { state: "completed", safeOutcome: "completed", safeFailureCategory: null, completedAt: at, updatedAt: at } });
     return { kind: finalized.kind === "opened" || finalized.kind === "suppressed" ? "completed" : finalized.kind, requestId: request.id };
   }
 
@@ -47,9 +47,9 @@ export class VoiceTranscriptionWorkerService {
     } catch { return { kind: "retryable", safeFailureCategory: controller.signal.aborted ? "timeout" : "provider_unavailable" }; } finally { if (timer) clearTimeout(timer); }
   }
 
-  private settle(context: WorkspaceContext, companyId: number, request: AudioTranscriptionRequest, state: "retryable" | "failed", category: string): VoiceTranscriptionWorkerOutcome {
+  private async settle(context: WorkspaceContext, companyId: number, request: AudioTranscriptionRequest, state: "retryable" | "failed", category: string): Promise<VoiceTranscriptionWorkerOutcome> {
     const at = this.clock.now(), settlement: VoiceWorkSettlement = { state, safeOutcome: state, safeFailureCategory: category, completedAt: state === "failed" ? at : null, updatedAt: at };
-    return { kind: this.voices.settleTranscription(context, companyId, request.id, this.options.owner, settlement) === null ? "lease_lost" : state, requestId: request.id };
+    return { kind: await this.voices.settleTranscription(context, companyId, request.id, this.options.owner, settlement) === null ? "lease_lost" : state, requestId: request.id };
   }
 }
 

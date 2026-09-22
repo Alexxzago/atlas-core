@@ -61,6 +61,7 @@ export interface AsyncVoiceLookupPort {
 
 /** Async write and queue boundary for production voice persistence. */
 export interface AsyncVoiceRepositoryPort extends AsyncVoiceLookupPort {
+  recoverableVoiceWorkScopes(limit:number):Promise<readonly {readonly workspaceId:number;readonly companyId:number}[]>;
   applyPolicy(context:WorkspaceContext,companyId:number,connectionId:string,command:VoicePolicyMutation):Promise<VoicePolicyMutationResult>;
   createTranscript(context:WorkspaceContext,companyId:number,value:TranscriptCreate):Promise<TranscriptCreateResult>;
   enqueueTranscription(context:WorkspaceContext,companyId:number,value:Omit<AudioTranscriptionRequest,"state"|"leaseOwner"|"leaseExpiresAt"|"attemptCount"|"safeOutcome"|"safeFailureCategory"|"completedAt">):Promise<{readonly kind:"created"|"replayed"|"conflict"|"not_found";readonly request?:AudioTranscriptionRequest}>;
