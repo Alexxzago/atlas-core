@@ -1,6 +1,7 @@
 export type MediaKind = "document" | "image" | "audio";
 export type MediaAssetStatus = "pending" | "ready" | "failed" | "archived" | "deleted";
 export type MediaBlobState = "active" | "reclaim_pending" | "reclaimed";
+export type MediaStorageFailureCategory = "timeout" | "transient_provider" | "transport" | "authorization" | "not_found" | "collision" | "integrity" | "permanent";
 /**
  * reserved: exact server-owned references are durable before any external write.
  * staged: validated staging and final references exist; the asset is pending and retry is possible.
@@ -76,6 +77,7 @@ export interface MediaAssociation {
 export const MEDIA_LIMITS = Object.freeze({ maximumBytes: 25 * 1024 * 1024, filenameLength: 180, metadataEntries: 4, metadataValue: 100_000, idempotencyKeyLength: 200 } as const);
 export const MEDIA_TYPES = Object.freeze(["application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp", "audio/mpeg", "audio/ogg", "audio/wav"] as const);
 export class MediaDomainError extends Error { public constructor(public readonly code: string) { super(code); } }
+export class MediaStorageError extends MediaDomainError { public constructor(public readonly category: MediaStorageFailureCategory) { super(category==="not_found"?"media_not_found":category==="collision"?"media_storage_collision":category==="integrity"?"media_integrity_invalid":"media_storage_failed"); } }
 
 export function mediaKind(mediaType: string): MediaKind { return mediaType === "application/pdf" ? "document" : mediaType.startsWith("audio/") ? "audio" : "image"; }
 export function safeFilename(value: string | undefined): string | null { if (value === undefined) return null; const filename = value.normalize("NFC").trim(); if (!filename || filename.length > MEDIA_LIMITS.filenameLength || /[\\/\u0000-\u001f]/u.test(filename)) throw new MediaDomainError("media_filename_invalid"); return filename; }

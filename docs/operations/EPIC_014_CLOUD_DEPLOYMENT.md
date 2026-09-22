@@ -59,6 +59,10 @@ When durable media storage is unavailable, production runs in zero-media mode: i
 
 The live-media credential requires private server-side `PutObject`, `GetObject`, and `DeleteObject` access restricted to the Atlas media prefix. The S3-compatible provider must honor `PutObject` with `If-None-Match: *` atomically: Atlas uses it to create final media objects without overwriting a colliding key. Future bounded orphan reconciliation also requires `ListBucket`/`ListObjectsV2` restricted to that prefix; do not grant broad bucket listing. Atlas uses a 30-second abort deadline and at most two AWS SDK attempts per media operation. It explicitly freezes `forcePathStyle=false`: path-style addressing is not forced and the AWS SDK endpoint resolver determines the effective request form. Before production, validate the selected provider's actual bucket addressing, DNS, TLS, and conditional-put behavior because Atlas provides no addressing-mode environment override. No startup network probe is performed.
 
+Atlas supplies the known media `ContentLength` and inspected content type on staging writes. Application SHA-256 remains the integrity authority: Atlas does not require an S3 checksum extension because generic S3-compatible checksum validation is not frozen by this contract. Reads are bounded by the persisted media size and stream count; promotion performs the one bounded staging read required to issue conditional final `PutObject`. A missing delete is successful, but timeout, transport, authorization, and server failures are not treated as confirmed deletion.
+
+S3 media operations use a 30-second abort deadline and at most two SDK attempts. Delete success means the object was deleted or provider-confirmed absent; timeout, 5xx, transport, and authorization failures remain non-confirmed for later reconciliation.
+
 ## Vercel
 
 1. Import the same GitHub repository as a Vercel project with root directory `frontend`.

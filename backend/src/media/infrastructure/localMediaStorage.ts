@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { link, lstat, mkdir, open, realpath, rm } from "node:fs/promises";
 import { basename, dirname, resolve, sep } from "node:path";
-import type { MediaStoragePort, MediaStorageReferences, StagedMedia } from "../application/ports.js";
+import type { MediaDeleteResult, MediaStoragePort, MediaStorageReferences, StagedMedia } from "../application/ports.js";
 import { MEDIA_LIMITS, MediaDomainError } from "../domain/media.js";
 
 const blobId = /^mbl_[a-f0-9]{32}$/u;
@@ -53,7 +53,7 @@ export class LocalMediaStorage implements MediaStoragePort {
     await link(source, target); await rm(source, { force: true });
     return targetReference;
   }
-  public async delete(reference: string): Promise<void> { await rm(await this.referencePath(reference), { force: true }); }
+  public async delete(reference: string): Promise<MediaDeleteResult> { await rm(await this.referencePath(reference), { force: true }); return Object.freeze({status:"absent"}); }
   public async read(reference: string, maximumBytes: number): Promise<Uint8Array> { return this.readReference(reference, blobId, maximumBytes); }
   private async readReference(reference: string, expression: RegExp, maximumBytes: number): Promise<Uint8Array> {
     const path = await this.safePath(reference, expression), file = await open(path, "r");

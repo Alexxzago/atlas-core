@@ -8,7 +8,9 @@ export interface MediaInspectorPort { inspect(content: Uint8Array): InspectedMed
 export interface MediaStorageReferences { readonly stagingReference: string; readonly finalStorageReference: string; }
 export interface StagedMedia { readonly temporaryReference: string; readonly finalStorageReference: string; readonly digest: string; readonly sizeBytes: number; }
 export interface MediaStorageLocation { readonly workspaceId: number; readonly companyId: number; }
-export interface MediaStoragePort { plan(blobId: string, location: MediaStorageLocation): MediaStorageReferences; stage(references: MediaStorageReferences, content: AsyncIterable<Uint8Array>, location?: MediaStorageLocation): Promise<StagedMedia>; readTemporary(reference: string, maximumBytes: number): Promise<Uint8Array>; promote(temporaryReference: string, blobId: string, mediaType?: string): Promise<string>; delete(reference: string): Promise<void>; read(reference: string, maximumBytes: number): Promise<Uint8Array>; }
+export interface MediaStorageStageOptions { readonly sizeBytes: number; readonly digest: string; readonly mediaType: string; }
+export interface MediaDeleteResult { readonly status: "absent"; }
+export interface MediaStoragePort { plan(blobId: string, location: MediaStorageLocation): MediaStorageReferences; stage(references: MediaStorageReferences, content: AsyncIterable<Uint8Array>, location?: MediaStorageLocation, expected?: MediaStorageStageOptions): Promise<StagedMedia>; readTemporary(reference: string, maximumBytes: number): Promise<Uint8Array>; promote(temporaryReference: string, blobId: string, mediaType?: string): Promise<string>; delete(reference: string): Promise<MediaDeleteResult>; read(reference: string, maximumBytes: number): Promise<Uint8Array>; }
 export interface MediaAssociationOwnerResolver { owns(context: WorkspaceContext, companyId: number, type: MediaAssociationOwnerType, id: string): AsyncValue<boolean>; }
 
 export interface MediaRepositoryPort {

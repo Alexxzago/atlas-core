@@ -26,7 +26,7 @@ export class MediaService {
       const result=await this.repository.reserve(context,companyId,input.operation,operationKey,fingerprint,{id:assetId,workspaceId:context.workspaceId,companyId,kind,mediaType,sizeBytes:null,filename,metadata,status:"pending",createdAt:now,archivedAt:null,deletedAt:null},ingest,now);
       if(result.kind!=="reserved")return replay(result);
       reserved=true;if(this.testHook?.afterReserved)await this.testHook.afterReserved();
-      const staged=await this.storage.stage(references,stream(bytes),{workspaceId:context.workspaceId,companyId});
+      const staged=await this.storage.stage(references,stream(bytes),{workspaceId:context.workspaceId,companyId},{sizeBytes:bytes.byteLength,digest,mediaType:inspected.mediaType});
       if(staged.temporaryReference!==references.stagingReference||staged.finalStorageReference!==references.finalStorageReference||staged.digest!==digest||staged.sizeBytes!==bytes.byteLength)throw new MediaDomainError("media_integrity_invalid");
       if(this.testHook?.afterStagingWrite)await this.testHook.afterStagingWrite();
       if(!await this.repository.markStaged(context,companyId,assetId,this.clock.now()))throw new MediaDomainError("media_completion_conflict");
