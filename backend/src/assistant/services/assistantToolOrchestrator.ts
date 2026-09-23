@@ -7,7 +7,7 @@ import { ToolExecutionError, ToolExecutionService } from "./toolExecutionService
 export class AssistantToolOrchestrator {
   public constructor(private readonly model: AssistantModelPort,private readonly registry:ToolRegistry,private readonly capabilities:AssistantProfileCapabilityRepositoryPort,private readonly availability:ToolAvailabilityPolicy,private readonly execution:ToolExecutionService,private readonly clock:Clock){}
   public async run(prompt:string,context:ToolExecutionContext):Promise<string>{ return (await this.runOutcome(prompt, context)).answer; }
-  public async runOutcome(prompt:string,context:ToolExecutionContext):Promise<{ readonly answer: string; readonly conversationMemory: readonly { readonly traceId: string; readonly value: unknown; readonly facts: readonly { readonly key: string; readonly value: unknown }[]; readonly referenceGroups: readonly { readonly groupKind: string; readonly options: readonly { readonly referenceId: string; readonly label: string; readonly safePayload: unknown }[] }[] }[] }>{
+  public async runOutcome(prompt:string,context:ToolExecutionContext,onSubstage?: (substage: import("../../config/runtimeReadiness.js").WhatsAppResumeSubstage) => void):Promise<{ readonly answer: string; readonly conversationMemory: readonly { readonly traceId: string; readonly value: unknown; readonly facts: readonly { readonly key: string; readonly value: unknown }[]; readonly referenceGroups: readonly { readonly groupKind: string; readonly options: readonly { readonly referenceId: string; readonly label: string; readonly safePayload: unknown }[] }[] }[] }>{
     const assigned=new Set(await this.capabilities.listForProfile({workspaceId:context.workspaceId},context.companyId,context.assistantProfileId));
     const tools=[];
     for(const tool of this.registry.list())if((context.purpose!=="proactive_execution"||tool.operationClass==="read")&&tool.requiredCapabilities.every(capability=>assigned.has(capability))&&await this.availability.isAvailable(tool,context))tools.push(tool);
@@ -15,7 +15,7 @@ export class AssistantToolOrchestrator {
     const candidates: Array<{ readonly traceId: string; readonly value: unknown; readonly facts: readonly { readonly key: string; readonly value: unknown }[]; readonly referenceGroups: readonly { readonly groupKind: string; readonly options: readonly { readonly referenceId: string; readonly label: string; readonly safePayload: unknown }[] }[] }> = [];
     const session=this.model.createSession();
     for(let toolRounds=0;;){
-      const controller=new AbortController(); const step=toolRounds===0
+      const controller=new AbortController(); onSubstage?.("model_provider_call"); const step=toolRounds===0
         ? await session.start({prompt,tools:this.registry.declarations(tools)},controller.signal)
         : await session.continue(Object.freeze([...results]),controller.signal);
       if(step.kind==="final")return Object.freeze({ answer: step.text, conversationMemory: Object.freeze(candidates) });
@@ -26,7 +26,7 @@ export class AssistantToolOrchestrator {
       const currentCapabilities=new Set(await this.capabilities.listForProfile({workspaceId:context.workspaceId},context.companyId,context.assistantProfileId));
       if(!tool.requiredCapabilities.every(capability=>currentCapabilities.has(capability)))throw new ToolExecutionError("tool_execution_failed");
       if(!await this.availability.isAvailable(tool,context))throw new ToolExecutionError("tool_execution_failed");
-      const outcome=await this.execution.executeOutcome(tool,{...context,invocationId:call.id},call.input);
+      onSubstage?.("tool_execution"); const outcome=await this.execution.executeOutcome(tool,{...context,invocationId:call.id},call.input);
       results.push(Object.freeze({toolCallId:call.id,toolName:tool.name,output:outcome.output}));
        if (outcome.conversationMemory !== null || outcome.conversationState !== null) candidates.push(Object.freeze({ traceId: outcome.traceId, value: outcome.conversationMemory ?? null, facts: Object.freeze(outcome.conversationState?.facts ?? []), referenceGroups: Object.freeze(outcome.conversationState?.referenceGroups ?? []) }));
       toolRounds++;

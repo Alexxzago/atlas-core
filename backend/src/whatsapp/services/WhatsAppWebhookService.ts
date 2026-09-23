@@ -74,8 +74,9 @@ export class WhatsAppWebhookService {
         if (event.kind === "inbound_text" || event.kind === "inbound_media") { if (this.inboundPersistence) await this.captureAsync(event); else if (event.kind === "inbound_text") await this.capture(event); else await this.capture(event); } else if (event.kind === "inbound_unsupported") await this.captureUnsupported(event); else if (event.kind === "message_status") await this.statuses?.process(event);
     }
   }
-  public async resumeIncomplete(limit = 25): Promise<void> {
-    if (this.inboundPersistence) { await this.resumeAsync(limit); return; }
+  public async resumeIncomplete(limit = 25, onSubstage: (substage: import("../../config/runtimeReadiness.js").WhatsAppResumeSubstage) => void = () => undefined): Promise<void> {
+    const observe = (substage: import("../../config/runtimeReadiness.js").WhatsAppResumeSubstage): void => { try { onSubstage(substage); } catch { /* Observability must not change recovery semantics. */ } };
+    if (this.inboundPersistence) { await this.resumeAsync(limit, observe); return; }
     if (!this.connections || !this.bindings || !this.events || !this.conversations || !this.turns) return;
     {
       const now = this.clock.now(), leased = this.events.leaseExecutionRequests(this.executionOwner, now, new Date(Date.parse(now) + 60_000).toISOString(), limit);
@@ -106,21 +107,21 @@ export class WhatsAppWebhookService {
       return;
     }
   }
-  private async resumeAsync(limit: number): Promise<void> {
+  private async resumeAsync(limit: number, onSubstage: (substage: import("../../config/runtimeReadiness.js").WhatsAppResumeSubstage) => void): Promise<void> {
     if (!this.inboundPersistence || !this.connections || !this.turns) return;
-    const now = this.clock.now(), leased = await this.inboundPersistence.leaseExecutionRequests(this.executionOwner, now, new Date(Date.parse(now) + 60_000).toISOString(), limit);
+    const now = this.clock.now(); onSubstage("lease_requests"); const leased = await this.inboundPersistence.leaseExecutionRequests(this.executionOwner, now, new Date(Date.parse(now) + 60_000).toISOString(), limit);
     for (const request of leased) {
       const snapshot = request.snapshot, connectionId = typeof snapshot.whatsAppConnectionId === "string" ? snapshot.whatsAppConnectionId : null, assistantParticipantId = typeof snapshot.assistantParticipantId === "string" ? snapshot.assistantParticipantId : null, recipientWaId = typeof snapshot.recipientWaId === "string" ? snapshot.recipientWaId : null, replyIdempotencyKey = typeof snapshot.replyIdempotencyKey === "string" ? snapshot.replyIdempotencyKey : null, assistantProfileId = typeof snapshot.assistantProfileId === "string" ? snapshot.assistantProfileId : null;
       if (!connectionId || !assistantParticipantId || !recipientWaId || !replyIdempotencyKey || !assistantProfileId) { await this.inboundPersistence.settleExecutionRequest(request.id, this.executionOwner, "failed", "unsupported", this.clock.now()); continue; }
-      const connection = await this.connections.resolveForRecovery(connectionId as import("../domain/whatsappConnection.js").WhatsAppConnectionId);
+      onSubstage("resolve_connection"); const connection = await this.connections.resolveForRecovery(connectionId as import("../domain/whatsappConnection.js").WhatsAppConnectionId);
       if (!connection || assistantProfileId !== connection.assistantProfileId) { await this.inboundPersistence.settleExecutionRequest(request.id, this.executionOwner, "failed", "unsupported", this.clock.now()); continue; }
-      const context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }, persisted = await this.inboundPersistence.loadLeasedExecutionContext(context, connection.companyId, connection.id, request.id, this.executionOwner, this.clock.now());
+      const context = { workspaceId: connection.workspaceId, workspaceKey: "whatsapp" }; onSubstage("load_execution_context"); const persisted = await this.inboundPersistence.loadLeasedExecutionContext(context, connection.companyId, connection.id, request.id, this.executionOwner, this.clock.now());
       if (!persisted) continue;
       try {
-        const current = await this.controls?.ensureConversationControl(context, connection.companyId, persisted.binding.conversationId);
+        onSubstage("ensure_control_and_reopen"); const current = await this.controls?.ensureConversationControl(context, connection.companyId, persisted.binding.conversationId);
         await this.reopenForInbound(context, connection.companyId, persisted.binding.conversationId);
         if (!allowsAutomation(current)) { await this.inboundPersistence.settleExecutionRequest(request.id, this.executionOwner, "completed", "unsupported", this.clock.now()); continue; }
-        const turn = await this.turns.executePersistedInbound(context, connection.companyId, persisted.binding.conversationId, { assistantProfileId, outboundParticipantId: assistantParticipantId, replyIdempotencyKey, whatsAppConnectionId: connection.id, whatsAppPhoneNumberId: connection.phoneNumberId }, persisted.inbound, { beforeRuntime: () => this.allowsAutomation(context, connection.companyId, persisted.binding.conversationId), finalizeResponse: input => this.inboundPersistence!.finalizeLeasedExecution({ context, companyId: connection.companyId, connectionId: connection.id, requestId: request.id, owner: this.executionOwner, leaseExpiresAt: request.leaseExpiresAt!, now: this.clock.now(), eventId: persisted.event.id, conversationId: persisted.binding.conversationId, inboundMessageId: persisted.inbound.id, assistantProfileId, assistantParticipantId, executionRecordId: input.executionRecordId, authorityGeneration: input.authorityGeneration, outcome: input.outcome, content: input.content, replyIdempotencyKey, outboundMessageId: conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`), providerMessageId: `pmr_${randomUUID().replaceAll("-", "")}`, deliveryId: `odl_${randomUUID().replaceAll("-", "")}` }) });
+        onSubstage("execute_operational_turn"); const turn = await this.turns.executePersistedInbound(context, connection.companyId, persisted.binding.conversationId, { assistantProfileId, outboundParticipantId: assistantParticipantId, replyIdempotencyKey, whatsAppConnectionId: connection.id, whatsAppPhoneNumberId: connection.phoneNumberId }, persisted.inbound, { beforeRuntime: () => this.allowsAutomation(context, connection.companyId, persisted.binding.conversationId), onSubstage, finalizeResponse: input => this.inboundPersistence!.finalizeLeasedExecution({ context, companyId: connection.companyId, connectionId: connection.id, requestId: request.id, owner: this.executionOwner, leaseExpiresAt: request.leaseExpiresAt!, now: this.clock.now(), eventId: persisted.event.id, conversationId: persisted.binding.conversationId, inboundMessageId: persisted.inbound.id, assistantProfileId, assistantParticipantId, executionRecordId: input.executionRecordId, authorityGeneration: input.authorityGeneration, outcome: input.outcome, content: input.content, replyIdempotencyKey, outboundMessageId: conversationMessageId(`cmsg_${randomUUID().replaceAll("-", "")}`), providerMessageId: `pmr_${randomUUID().replaceAll("-", "")}`, deliveryId: `odl_${randomUUID().replaceAll("-", "")}` }) });
         if (turn.response.outcome === "safe_fallback") await this.markHumanRequired(context, connection.companyId, persisted.binding.conversationId);
         void recipientWaId;
       } catch (error: unknown) {

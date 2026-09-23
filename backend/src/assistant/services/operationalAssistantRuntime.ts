@@ -16,6 +16,7 @@ export interface OperationalAssistantRuntimeContext {
   readonly purpose: AssistantRuntimePurpose;
   readonly provider: string;
   readonly fallbackOnUnavailable: boolean;
+  readonly onSubstage?: (substage: import("../../config/runtimeReadiness.js").WhatsAppResumeSubstage) => void;
   readonly conversationMemory?: string;
   readonly retrieval?: RetrievalContext;
   readonly attachments?: readonly SafeConversationAttachment[];
@@ -58,7 +59,7 @@ export class OperationalAssistantRuntime {
     if (profile.companyId !== company.id || knowledge.companyId !== company.id) throw new Error("Assistant runtime ownership does not match Company.");
     const startedAt = this.clock.now();
     const started = this.record(company, profile, knowledge, context, startedAt);
-    await this.records.create(started);
+    context.onSubstage?.("create_execution_record"); await this.records.create(started);
     try {
       const request = buildAssistantExecution(profile, {
         purpose: context.purpose,
@@ -75,23 +76,25 @@ export class OperationalAssistantRuntime {
           assistantExecutionRecordId: started.id, conversationId: context.snapshotContext?.conversationId ?? null,
           channel: context.snapshotContext?.channelProvider === "whatsapp" ? "whatsapp" : context.snapshotContext?.channelProvider === "web_chat" ? "web_chat" : "internal",
            invocationId: "", idempotencyKey: null, confirmation: null, purpose: context.purpose,
-        }) : null;
-      const result = toolOutcome ? Object.freeze({ outcome: toolOutcome.answer === profile.fallbackMessage ? "safe_fallback" as const : "answered" as const, answer: toolOutcome.answer }) : await this.execution.execute(request);
+        }, context.onSubstage) : null;
+      const result = toolOutcome
+        ? Object.freeze({ outcome: toolOutcome.answer === profile.fallbackMessage ? "safe_fallback" as const : "answered" as const, answer: toolOutcome.answer })
+        : await directExecution(this.execution, request, context.onSubstage);
       const response = validResponse(result)
         ? context.fallbackOnUnavailable && result.outcome === "safe_fallback" ? fallback(profile.fallbackMessage) : result
         : fallback(profile.fallbackMessage);
       const completed = this.complete(started, response, null, this.clock.now());
-      await this.persistCompletion(completed);
+      context.onSubstage?.("persist_execution_record"); await this.persistCompletion(completed);
       return { response, record: completed, toolMemoryCandidates: Object.freeze(toolOutcome?.conversationMemory ?? []) };
     } catch (error: unknown) {
       if (context.fallbackOnUnavailable && (error instanceof AnswerGenerationUnavailableError || error instanceof ToolExecutionError)) {
         const response = fallback(profile.fallbackMessage);
         const completed = this.complete(started, response, null, this.clock.now());
-        await this.persistCompletion(completed);
+        context.onSubstage?.("persist_execution_record"); await this.persistCompletion(completed);
         return { response, record: completed, toolMemoryCandidates: Object.freeze([]) };
       }
       const completed = this.complete(started, null, "provider_unavailable", this.clock.now());
-      await this.persistCompletion(completed);
+      context.onSubstage?.("persist_execution_record"); await this.persistCompletion(completed);
       throw error;
     }
   }
@@ -171,3 +174,8 @@ function validResponse(value: AssistantExecutionResult): boolean {
 }
 
 function fallback(answer: string): AssistantExecutionResult { return { outcome: "safe_fallback", answer }; }
+
+async function directExecution(execution: AssistantExecutionPort, request: Parameters<AssistantExecutionPort["execute"]>[0], onSubstage: OperationalAssistantRuntimeContext["onSubstage"]): Promise<AssistantExecutionResult> {
+  onSubstage?.("model_provider_call");
+  return execution.execute(request);
+}
