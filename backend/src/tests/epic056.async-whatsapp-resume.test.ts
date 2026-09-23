@@ -150,6 +150,20 @@ test("EPIC056 resumes real async text capture, atomically finalizes, and dispatc
   } finally { await close(value); }
 });
 
+test("EPIC056 resumes with numeric limit and observes persisted direct-model substages", async () => {
+  const value = await fixture();
+  try {
+    await value.webhook.acknowledge(payload("text", "wamid-observed-resume"));
+    const substages: string[] = [];
+    await value.webhook.resumeIncomplete(1, substage => substages.push(substage));
+    assert.deepEqual(substages, ["lease_requests", "resolve_connection", "load_execution_context", "ensure_control_and_reopen", "execute_operational_turn", "prepare_turn_context", "create_execution_record", "model_provider_call", "persist_execution_record", "atomic_finalize"]);
+
+    await value.webhook.acknowledge(payload("text", "wamid-observer-throws"));
+    await value.webhook.resumeIncomplete(1, () => { throw new Error("observability failure"); });
+    assert.equal((value.database.prepare("SELECT COUNT(*) AS count FROM assistant_execution_records WHERE state='answered'").get() as { count: number }).count, 2);
+  } finally { await close(value); }
+});
+
 test("EPIC056 recovers real inbound image media before resuming and dispatching", async () => {
   const value = await fixture();
   try {

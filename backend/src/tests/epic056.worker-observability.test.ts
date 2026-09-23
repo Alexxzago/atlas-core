@@ -71,3 +71,13 @@ test("EPIC056 readiness includes safe health for every unavailable worker", asyn
   try { registerRuntimeWorker("billing_reconciliation", { required: true }); registerRuntimeWorker("whatsapp_recovery", { required: true }); markRuntimeReady(); assert.equal((await fetch(`http://127.0.0.1:${address.port}/ready`)).status, 503); const record = logs.records.find(value => value.outcome === "workers_unavailable")!, health = JSON.parse(String(record.unavailableWorkerHealth)) as Array<Record<string, string>>; assert.equal(record.unavailableWorkers, "billing_reconciliation:whatsapp_recovery"); assert.deepEqual(health.map(value => value.worker), ["billing_reconciliation", "whatsapp_recovery"]); assert.equal(health.every(value => value.started === "false" && value.currentStage === "none"), true); }
   finally { logs.restore(); resetRuntimeReadinessForTests(); resetReadinessDiagnosticsForTests(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
+
+test("EPIC056 resume substages identify stalled lease, model, and tool waits without refreshing activity", async () => {
+  for (const substage of ["lease_requests", "model_provider_call", "tool_execution"] as const) {
+    resetRuntimeReadinessForTests(); const originalNow = Date.now; let clock = 1_000, release: (() => void) | null = null;
+    Date.now = () => clock; const blocked = new Promise<void>(resolve => { release = resolve; });
+    const runtime = new WhatsAppRecoveryRuntime(async (stage, observe) => { stage("resume_incomplete_executions"); observe(substage); await blocked; }, { schedule: () => ({ unref() {} }), clear: () => {} });
+    try { runtime.start(); await wait(); clock = 16_001; const health = runtimeWorkerHealth("whatsapp_recovery")!; assert.equal(health.currentStage, "resume_incomplete_executions"); assert.equal(health.currentSubstage, substage); assert.equal(health.lastActivityAt, 1_000); assert.equal(runtimeWorkerIsHealthy("whatsapp_recovery", clock), false); }
+    finally { release!(); await runtime.stop(); Date.now = originalNow; resetRuntimeReadinessForTests(); }
+  }
+});

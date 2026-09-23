@@ -33,6 +33,7 @@ export interface OperationalConversationTurnHooks {
   readonly afterInbound?: (inbound: ConversationMessage) => void | Promise<void>;
   readonly beforeRuntime?: (inbound: ConversationMessage) => boolean | Promise<boolean>;
   readonly finalizeResponse?: (input: { readonly inbound: ConversationMessage; readonly outboundParticipantId: string; readonly executionRecordId: string; readonly authorityGeneration: number; readonly outcome: AssistantExecutionResult["outcome"]; readonly content: string; readonly idempotencyKey: string; readonly occurredAt: string; readonly whatsAppConnectionId?: string }) => AssistantResponseFinalizationResult | Promise<AssistantResponseFinalizationResult>;
+  readonly onSubstage?: (substage: import("../../config/runtimeReadiness.js").WhatsAppResumeSubstage) => void;
 }
 
 export interface ConversationSemanticProjection {
@@ -80,7 +81,7 @@ export class OperationalConversationTurnService {
 
   public async execute(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, input: unknown, hooks?: OperationalConversationTurnHooks): Promise<OperationalConversationTurnResult> {
     const scopedCompanyId = parseCompanyId(companyIdValue), conversationIdValueParsed = parseConversationId(conversationIdValue), parsed = turnInput(input);
-    const company = await this.companies.findById(context, scopedCompanyId);
+    hooks?.onSubstage?.("prepare_turn_context"); const company = await this.companies.findById(context, scopedCompanyId);
     if (!company) throw new OperationalConversationTurnNotFoundError("Company was not found.");
     const conversation = await this.conversations.validateOpen(context, scopedCompanyId, conversationIdValueParsed);
     const release = this.locks.acquire(context, conversation.id);
@@ -125,6 +126,7 @@ export class OperationalConversationTurnService {
 
   public async executePersistedInbound(context: WorkspaceContext, companyIdValue: unknown, conversationIdValue: unknown, input: { readonly assistantProfileId: string; readonly outboundParticipantId: string; readonly replyIdempotencyKey: string; readonly whatsAppConnectionId?: string; readonly whatsAppPhoneNumberId?: string }, inbound: ConversationMessage, hooks?: Omit<OperationalConversationTurnHooks, "afterInbound">): Promise<OperationalConversationTurnResult> {
     const scopedCompanyId = parseCompanyId(companyIdValue), conversationIdValueParsed = parseConversationId(conversationIdValue);
+    hooks?.onSubstage?.("prepare_turn_context");
     const company = await this.companies.findById(context, scopedCompanyId);
     if (!company) throw new OperationalConversationTurnNotFoundError("Company was not found.");
     const conversation = await this.conversations.validateOpen(context, scopedCompanyId, conversationIdValueParsed);
@@ -158,9 +160,9 @@ export class OperationalConversationTurnService {
           ...(input.whatsAppConnectionId ? { whatsAppConnectionId: input.whatsAppConnectionId } : {}),
            ...(input.whatsAppPhoneNumberId ? { whatsAppPhoneNumberId: input.whatsAppPhoneNumberId } : {}), authorityGeneration: authority?.authorityGeneration ?? 1,
              }, conversationMemory: memory, ...(this.retrieval ? { retrieval: await this.retrieval.context(context, scopedCompanyId, knowledge.sourceRevisionIds, semanticInbound.content) } : {}), ...(safeAttachments.length ? { attachments: safeAttachments } : {}),
-      });
+       ...(hooks?.onSubstage ? { onSubstage: hooks.onSubstage } : {}) });
         await this.appendToolMemory(context, scopedCompanyId, conversation.id, executed.toolMemoryCandidates);
-          const finalized = hooks?.finalizeResponse ? await hooks.finalizeResponse({ inbound, outboundParticipantId, executionRecordId: executed.record.id, authorityGeneration: authority?.authorityGeneration ?? 1, outcome: executed.response.outcome, content: executed.response.answer, idempotencyKey: input.replyIdempotencyKey, occurredAt: executed.record.completedAt ?? inbound.createdAt, ...(input.whatsAppConnectionId ? { whatsAppConnectionId: input.whatsAppConnectionId } : {}) }) : await this.finalize(context, scopedCompanyId, conversation.id, inbound, outboundParticipantId, executed.record.id, authority?.authorityGeneration ?? 1, executed.response.answer, input.replyIdempotencyKey, executed.record.completedAt ?? inbound.createdAt, input.whatsAppConnectionId);
+          hooks?.onSubstage?.("atomic_finalize"); const finalized = hooks?.finalizeResponse ? await hooks.finalizeResponse({ inbound, outboundParticipantId, executionRecordId: executed.record.id, authorityGeneration: authority?.authorityGeneration ?? 1, outcome: executed.response.outcome, content: executed.response.answer, idempotencyKey: input.replyIdempotencyKey, occurredAt: executed.record.completedAt ?? inbound.createdAt, ...(input.whatsAppConnectionId ? { whatsAppConnectionId: input.whatsAppConnectionId } : {}) }) : await this.finalize(context, scopedCompanyId, conversation.id, inbound, outboundParticipantId, executed.record.id, authority?.authorityGeneration ?? 1, executed.response.answer, input.replyIdempotencyKey, executed.record.completedAt ?? inbound.createdAt, input.whatsAppConnectionId);
         if (finalized.kind === "authority_lost") throw new OperationalConversationTurnSuppressedError(inbound);
         if (finalized.kind === "not_found" || finalized.kind === "execution_not_owned") throw new OperationalConversationTurnNotFoundError("Conversation was not found.");
         const outbound = finalized.message;
