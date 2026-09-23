@@ -121,7 +121,7 @@ export class AsyncWhatsAppInboundPersistence {
     if (!existing) {
       await database.execute("INSERT INTO conversation_controls(conversation_id,state,controlling_actor_id,last_controlling_actor_id,taken_at,released_at,last_operator_activity_at,attention_reason,resolved_at,resolved_by,version,created_at,updated_at) VALUES(?,'automated',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,1,?,?) ON CONFLICT(conversation_id) DO NOTHING",[value.conversationId,current.updated_at,current.updated_at]);
       const control=(await database.query<{state:string;authority_generation:number}>("SELECT state,authority_generation FROM conversation_controls WHERE conversation_id=?",[value.conversationId]))[0];
-      if (!control || control.state !== "automated" || Number(control.authority_generation) !== value.authorityGeneration) return Object.freeze({kind:"authority_lost"});
+      if (!control || control.state === "human_controlled" || Number(control.authority_generation) !== value.authorityGeneration) return Object.freeze({kind:"authority_lost"});
     }
     let outbound: ConversationMessage;
     if(existing){outbound=message(existing);if(outbound.direction!=="outbound"||outbound.executionRecordId!==value.executionRecordId)throw new Error("WhatsApp outbound finalization conflicts.");}

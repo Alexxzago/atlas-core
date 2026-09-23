@@ -38,10 +38,11 @@ const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 class Clock { public now(): string { return at; } }
 class Execution implements AssistantExecutionPort {
   public readonly requests: AssistantExecutionRequest[] = [];
-  public constructor(private readonly outcome: AssistantExecutionResult["outcome"] = "answered") {}
+  public constructor(private readonly outcome: AssistantExecutionResult["outcome"] | readonly AssistantExecutionResult["outcome"][] = "answered") {}
   public async execute(request: AssistantExecutionRequest): Promise<AssistantExecutionResult> {
     this.requests.push(request);
-    return { outcome: this.outcome, answer: `Answer: ${request.message}` };
+    const outcome = Array.isArray(this.outcome) ? this.outcome[Math.min(this.requests.length - 1, this.outcome.length - 1)]! : this.outcome;
+    return { outcome, answer: `Answer: ${request.message}` };
   }
 }
 
@@ -287,6 +288,49 @@ test("EPIC056 dispatches an async image safe fallback once while the conversatio
     assert.equal((value.database.prepare("SELECT state FROM outbound_deliveries").get() as { state: string }).state, "accepted");
     assert.equal((value.database.prepare("SELECT COUNT(*) AS count FROM conversation_messages WHERE direction='outbound'").get() as { count: number }).count, 1);
     assert.equal((value.database.prepare("SELECT COUNT(*) AS count FROM provider_message_records WHERE direction='outbound'").get() as { count: number }).count, 1);
+  } finally { await close(value); }
+});
+
+test("EPIC056 dispatches a normal async text reply after safe fallback while attention remains active", async () => {
+  const value = await fixture(new Execution(["safe_fallback", "answered"]));
+  try {
+    await value.webhook.acknowledge(payload("text", "wamid-fallback-first"));
+    await value.webhook.resumeIncomplete();
+    value.provider.enqueueAccepted("wamid-fallback-first-outbound");
+    await value.outbound.dispatchReady("outbound-worker");
+
+    await value.webhook.acknowledge(payload("text", "wamid-human-required-text"));
+    await value.webhook.resumeIncomplete();
+    value.provider.enqueueAccepted("wamid-human-required-text-outbound");
+    await value.outbound.dispatchReady("outbound-worker");
+
+    assert.equal(value.execution.requests.length, 2);
+    assert.equal((value.database.prepare("SELECT state FROM conversation_controls").get() as { state: string }).state, "human_required");
+    assert.equal((value.database.prepare("SELECT COUNT(*) AS count FROM assistant_execution_records WHERE state='answered'").get() as { count: number }).count, 1);
+    assert.deepEqual(value.database.prepare("SELECT state FROM outbound_deliveries ORDER BY created_at,id").all().map((delivery: { state: string }) => delivery.state), ["accepted", "accepted"]);
+    assert.equal(value.provider.calls.length, 2);
+  } finally { await close(value); }
+});
+
+test("EPIC056 dispatches a normal async image reply after safe fallback while attention remains active", async () => {
+  const value = await fixture(new Execution(["safe_fallback", "answered"]));
+  try {
+    await value.webhook.acknowledge(payload("text", "wamid-fallback-before-image"));
+    await value.webhook.resumeIncomplete();
+    value.provider.enqueueAccepted("wamid-fallback-before-image-outbound");
+    await value.outbound.dispatchReady("outbound-worker");
+
+    await value.webhook.acknowledge(payload("image", "wamid-human-required-image"));
+    assert.equal((await value.inboundMedia.recoverAvailable("media-worker")).length, 1);
+    await value.webhook.resumeIncomplete();
+    value.provider.enqueueAccepted("wamid-human-required-image-outbound");
+    await value.outbound.dispatchReady("outbound-worker");
+
+    assert.equal(value.execution.requests.length, 2);
+    assert.equal((value.database.prepare("SELECT state FROM conversation_controls").get() as { state: string }).state, "human_required");
+    assert.equal((value.database.prepare("SELECT media_gate_state FROM channel_execution_requests ORDER BY created_at DESC LIMIT 1").get() as { media_gate_state: string }).media_gate_state, "open");
+    assert.deepEqual(value.database.prepare("SELECT state FROM outbound_deliveries ORDER BY created_at,id").all().map((delivery: { state: string }) => delivery.state), ["accepted", "accepted"]);
+    assert.equal(value.provider.calls.length, 2);
   } finally { await close(value); }
 });
 
