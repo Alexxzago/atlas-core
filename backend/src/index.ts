@@ -5,7 +5,7 @@ import { mediaStorageAvailable } from "./config/productionConfiguration.js";
 import { setShuttingDown } from "./routes/health.js";
 import { markRuntimeReady, markRuntimeShuttingDown, registerRuntimeWorker } from "./config/runtimeReadiness.js";
 import { randomUUID } from "node:crypto";
-import { createRunId, normalizeOperationalError, operationalLogger, withRunContext } from "./observability/operationalLogger.js";
+import { normalizeOperationalError, operationalLogger } from "./observability/operationalLogger.js";
 import { WhatsAppRecoveryRuntime } from "./whatsapp/services/WhatsAppRecoveryRuntime.js";
 import { runWhatsAppRecoveryCycle } from "./whatsapp/services/whatsAppRecoveryCycle.js";
 import { migrationHead } from "./config/migrations.js";
@@ -30,7 +30,7 @@ const atlasMediaRecoveryOwner = `atlas-media-recovery-${randomUUID()}`;
 const proactiveWorkerOwner = `proactive-runtime-${randomUUID()}`;
 const voiceRecovery = voiceWorkerRecoveryService;
 const voiceRecoveryStages = voiceRecovery === null ? {} : { transcribeVoice: () => voiceRecovery.transcribeAvailable(), synthesizeVoice: () => voiceRecovery.synthesizeAvailable(), uploadVoice: () => voiceRecovery.uploadAvailable() };
-  const whatsAppRecoveryRuntime = new WhatsAppRecoveryRuntime(async () => { const runId = createRunId(); await withRunContext(runId, async () => { await runWhatsAppRecoveryCycle(mediaRecoveryAvailable, { executeProactive: () => proactiveDueWorkerService.executeAvailable(proactiveWorkerOwner), recoverInboundMedia: () => whatsAppInboundMediaRecoveryService.recoverAvailable(mediaRecoveryOwner), recoverAtlasMedia: () => mediaRecoveryService.recoverAvailable(atlasMediaRecoveryOwner), ...voiceRecoveryStages, resumeIncomplete: () => whatsAppWebhookService.resumeIncomplete(), dispatchOutbound: () => whatsAppOutboundDeliveryService.dispatchReady(dispatchOwner), recoverVoiceSemantics: () => voiceDeferredSemanticRecoveryService.recoverAvailable(), recoverProactiveSemantics: () => proactiveSemanticRecoveryService.recoverAvailable() }); }); }, { reportError: () => operationalLogger.error("worker_cycle_failed", { worker: "whatsapp_recovery", safeErrorCategory: "internal_failure" }) });
+  const whatsAppRecoveryRuntime = new WhatsAppRecoveryRuntime(onStage => runWhatsAppRecoveryCycle(mediaRecoveryAvailable, { executeProactive: () => proactiveDueWorkerService.executeAvailable(proactiveWorkerOwner), recoverInboundMedia: stage => whatsAppInboundMediaRecoveryService.recoverAvailable(mediaRecoveryOwner, 25, stage), recoverAtlasMedia: () => mediaRecoveryService.recoverAvailable(atlasMediaRecoveryOwner), ...voiceRecoveryStages, resumeIncomplete: () => whatsAppWebhookService.resumeIncomplete(), dispatchOutbound: () => whatsAppOutboundDeliveryService.dispatchReady(dispatchOwner), recoverVoiceSemantics: () => voiceDeferredSemanticRecoveryService.recoverAvailable(), recoverProactiveSemantics: () => proactiveSemanticRecoveryService.recoverAvailable() }, onStage));
   whatsAppRecoveryRuntime.start();
 
 let isShuttingDown = false;
