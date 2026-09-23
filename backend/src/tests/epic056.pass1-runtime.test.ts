@@ -8,6 +8,7 @@ test("EPIC056 zero-media recovery skips only inbound media while preserving non-
   const dependencies = {
     executeProactive: async () => { calls.push("proactive"); },
     recoverInboundMedia: async () => { calls.push("media"); },
+    recoverAtlasMedia: async () => { calls.push("durable-media"); },
     resumeIncomplete: async () => { calls.push("resume"); },
     dispatchOutbound: async () => { calls.push("dispatch"); },
     recoverVoiceSemantics: async () => { calls.push("voice"); },
@@ -17,7 +18,7 @@ test("EPIC056 zero-media recovery skips only inbound media while preserving non-
   assert.deepEqual(calls, ["proactive", "resume", "dispatch", "voice", "proactive-semantics"]);
   calls.length = 0;
   await runWhatsAppRecoveryCycle(true, dependencies);
-  assert.deepEqual(calls, ["proactive", "media", "resume", "dispatch", "voice", "proactive-semantics"]);
+  assert.deepEqual(calls, ["proactive", "media", "durable-media", "resume", "dispatch", "voice", "proactive-semantics"]);
 });
 
 test("EPIC056 voice playback is registered only when the composed capability supplies it", () => {
