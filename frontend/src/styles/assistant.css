@@ -22,3 +22,30 @@
 @media (max-width: 767px) { .assistant-profile-detail, .assistant-form, .assistant-capabilities, .assistant-tools, .assistant-status-panel, .assistant-preview { padding: var(--atlas-card-padding-compact); }.assistant-profile-identity { align-items: start; }.assistant-form-actions { align-items: stretch; flex-direction: column; }.assistant-form-actions .action-row, .assistant-form-actions .button { inline-size: 100%; }.assistant-capability-row, .assistant-tool-row { grid-template-columns: 1fr; }.assistant-capability-row__meta, .assistant-tool-row__meta { justify-items: start; }.assistant-tool-row__meta p { justify-content: start; } }
 @media (max-width: 767px) { .assistant-profile-item { grid-template-columns: 1fr; align-items: start; gap: var(--atlas-space-4); }.assistant-profile-facts { grid-template-columns: 1fr; }.assistant-profile-item > .button { inline-size: 100%; }.assistant-form-section { padding: var(--atlas-space-5); }.assistant-form-actions { position: static; align-items: stretch; flex-direction: column; }.assistant-form-actions .action-row, .assistant-form-actions .button { inline-size: 100%; }.assistant-stepper { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: var(--atlas-space-2); }.assistant-stepper__step:nth-child(2)::after { display: none; }.assistant-stepper__step button { font-size: 11px; }.assistant-form--stepper .assistant-form-section { padding: var(--atlas-space-4); }.authenticated-portal .assistant-profile-detail { padding: var(--atlas-space-4); }.authenticated-portal .assistant-profile-identity { align-items: start; }.authenticated-portal .assistant-form-grid, .authenticated-portal .assistant-profile-summary { grid-template-columns: 1fr; }.authenticated-portal .assistant-form-wide { grid-column: auto; }.authenticated-portal .assistant-profile-detail .action-row { align-items: stretch; flex-direction: column; }.authenticated-portal .assistant-profile-detail .action-row .button { inline-size: 100%; }.authenticated-portal .assistant-profile-workspace > .authenticated-section ul, .authenticated-portal .assistant-capabilities__list, .authenticated-portal .assistant-tools__list { grid-template-columns: 1fr; }.authenticated-portal .assistant-test-modes { inline-size: 100%; } }
 @media (min-width: 768px) { .assistant-form--stepper .assistant-form-grid { column-gap: var(--atlas-space-2) !important; row-gap: var(--atlas-space-4) !important; }.assistant-form--stepper .assistant-form-grid > label.form-field + label.form-field { margin-block-start: 0 !important; }.assistant-form--stepper :is(input, select) { block-size: 40px; min-block-size: 40px !important; }.assistant-form--stepper .form-field > select { box-sizing: border-box; block-size: 40px; min-block-size: 40px !important; padding: 0 36px 0 12px; font-family: var(--atlas-font-sans); font-size: var(--atlas-font-size-sm); font-weight: 400; line-height: normal; appearance: auto; } }
+
+.assistant-profiles--focused { inline-size: min(100%, 1120px); max-inline-size: none; }
+.assistant-profile-workspace {
+  inline-size: 100%;
+  margin-inline: 0;
+  padding: var(--atlas-card-padding-compact);
+  background: var(--atlas-color-surface-raised);
+  border: var(--atlas-border-subtle);
+  border-radius: var(--atlas-radius-lg);
+  box-shadow: var(--atlas-shadow-control);
+}
+.assistant-profile-workspace > .assistant-profile-detail,
+.assistant-profile-workspace > .assistant-form,
+.assistant-profile-workspace > .assistant-capabilities,
+.assistant-profile-workspace > .assistant-tools,
+.assistant-profile-workspace > .assistant-status-panel,
+.assistant-profile-workspace > .assistant-preview,
+.assistant-profile-workspace > .scheduling-automations {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.assistant-profile-workspace > .scheduling-automations { max-inline-size: none; }
+.assistant-profile-workspace .scheduling-automations > section { padding: var(--atlas-space-3) 0; background: transparent; border-inline: 0; border-radius: 0; }
+@media (max-width: 767px) { .assistant-profile-workspace { padding: var(--atlas-space-4); } }

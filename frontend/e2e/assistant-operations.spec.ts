@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-type Scenario = { capabilities?: string[]; delayedCompanyOne?: boolean; holdCompanyOneActivationRefresh?: Promise<void>; holdCompanyTwoProjection?: Promise<void>; executionStatus?: 429 | 503 | "network"; pendingPreview?: boolean; platformAdmin?: boolean; locale?: "en" | "es"; billingManage?: boolean };
+type Scenario = { capabilities?: string[]; delayedCompanyOne?: boolean; holdCompanyOneActivationRefresh?: Promise<void>; holdCompanyTwoProjection?: Promise<void>; executionStatus?: 429 | 503 | "network"; pendingPreview?: boolean; platformAdmin?: boolean; locale?: "en" | "es"; billingManage?: boolean; conversationFixture?: "standard" | "longHuman" };
 const allCapabilities = ["company:read", "company:manage", "assistant:capability:manage", "assistant:preview", "chat:use"];
 const rawInternal = /live_data\.read|scheduling\.create_booking|provider-secret|trace-id|schema-version/i;
 
@@ -11,11 +11,15 @@ const operational = { assistant: { status: "ready", evaluatedAt: "2026-01-01T00:
 const catalog = { capabilities: [{ id: "live_data.read", assigned: true, availability: "available", consequence: "read_only", safeReason: null, safeNextAction: null, toolCount: 1 }, { id: "scheduling.create_booking", assigned: false, availability: "available", consequence: "consequential", safeReason: null, safeNextAction: null, toolCount: 1 }] };
 const tools = { tools: [{ id: "live_data.read", enabled: true, availability: "available", capabilityId: "live_data.read", safeReason: null, safeNextAction: null }, { id: "scheduling.create_booking", enabled: false, availability: "available", capabilityId: "scheduling.create_booking", safeReason: null, safeNextAction: null }] };
 function activation(companyId: number) { const nextAction = companyId === 1 ? "start_verification" : "publish_knowledge"; return { stages: ["company", "knowledge", "assistant", "web_chat", "verification", "pilot_ready", "human_ops"].map((id, index) => ({ id, status: index < (companyId === 1 ? 4 : 1) || index === 6 ? "complete" : "incomplete", state: index < (companyId === 1 ? 4 : 1) || index === 6 ? "complete" : "incomplete", owner: index < (companyId === 1 ? 4 : 1) || index === 6 ? null : "customer", reasonCode: index === 4 && companyId === 1 ? "verification_required" : index === 1 && companyId === 2 ? "published_knowledge_missing" : index === 5 ? "pilot_not_ready" : null, action: ["complete_company", "publish_knowledge", "configure_assistant", "activate_web_chat", "start_verification", "resolve_pilot_readiness", "review_human_operations"][index], actionPath: [`/companies/${companyId}`, `/companies/${companyId}/knowledge`, `/companies/${companyId}/assistant`, `/companies/${companyId}/channels/web-chat`, null, null, "/conversations"][index] })), nextAction, evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "activation-projection-v1" }; }
-const pilotReadiness = { overall: "not_ready", classification: "configuration_ready", checks: [], nextAction: "activate_web_chat", evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "pilot-readiness-v1" };
+const pilotReadiness = { overall: "not_ready", classification: "configuration_ready", checks: [{ id: "default_assistant", required: true, status: "complete", owner: null, reasonCode: null, actionPath: null }, { id: "commercial_entitlement", required: true, status: "blocked", owner: "external_provider", reasonCode: "commercial_entitlement_missing", actionPath: "/billing" }, { id: "web_chat", required: true, status: "incomplete", owner: "customer", reasonCode: "web_chat_inactive", actionPath: "/companies/1/channels/web-chat" }], nextAction: "activate_web_chat", evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "pilot-readiness-v1" };
 const webChatConnection = { id: "wcc_1", publicId: "wcp_00000000000000000000000000000000", assistantProfileId: "assistant-one", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
 const scheduling = { data: { aggregateVersion: 7, locations: [{ id: "loc_1", name: "Main", address: "Main Street", timezone: "UTC", active: true, created_at: "2026-01-01", updated_at: "2026-01-01" }], resources: [{ id: "res_1", location_id: "loc_1", name: "Room", timezone: "UTC", capacity: 1, active: true, created_at: "2026-01-01", updated_at: "2026-01-01" }], services: [{ id: "svc_1", resource_id: "res_1", name: "Visit", duration_minutes: 30, buffer_before_minutes: 0, buffer_after_minutes: 0, slot_granularity_minutes: 15, minimum_lead_minutes: 0, maximum_horizon_days: 30, active: true, created_at: "2026-01-01", updated_at: "2026-01-01" }], weeklyWorkingWindows: [{ id: "ww_1", resource_id: "res_1", weekday: 0, start_time: "09:00", end_time: "17:00" }], dateExceptions: [{ id: "ex_1", resource_id: "res_1", local_date: "2026-01-02", kind: "closed", start_time: null, end_time: null }], readiness: { state: "locally_configured", hasLocations: true, hasResources: true, hasServices: true, hasWeeklyAvailability: true } } };
 const whatsAppConnection = { id: "wac_0123456789abcdef0123456789abcdef", assistantProfileId: "assistant-one", phoneNumberId: "123456789012345", whatsappBusinessAccountId: "456789012345678", status: "inactive", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
 const whatsAppStatus = { connection: whatsAppConnection, credentialsConfigured: true, credentialSource: "manual", validationState: "not_validated", validatedAt: null, lastWebhookActivityAt: null, validationFailureCode: null, healthState: "inactive", lastProviderActivityAt: null, healthFailureCode: null, updatedAt: "2026-01-01T00:00:00.000Z" };
+const conversationItem = { conversationId: "conversation-one", channel: "whatsapp", state: "open", controlState: "automated", controlledByCurrentActor: false, attentionReason: null, takenAt: null, releasedAt: null, lastOperatorActivityAt: null, resolvedAt: null, controlVersion: 1, updatedAt: "2026-01-01T00:00:00.000Z", contactLabel: "Conversation customer", participant: "Conversation customer", preview: "A recent customer question", deliveryCategory: null, lastActivityAt: "2026-01-01T00:00:00.000Z", delivery: null, unreadCount: 2 };
+const conversationDetail = { ...conversationItem, messages: Array.from({ length: 16 }, (_, index) => ({ messageId: `message-${index}`, senderRole: index % 2 ? "assistant" : "customer", deliveryCategory: index % 2 ? "sent" : "received", content: `Conversation message ${index + 1}`, createdAt: `2026-01-01T00:${String(index).padStart(2, "0")}:00.000Z`, delivery: null })) };
+const longHumanConversationItem = { ...conversationItem, controlState: "human_required", attentionReason: "automation_failure", preview: "A customer needs human assistance", updatedAt: "2026-01-02T00:00:00.000Z" };
+const longHumanConversationDetail = { ...longHumanConversationItem, messages: Array.from({ length: 72 }, (_, index) => ({ messageId: `long-message-${index}`, senderRole: index % 3 === 0 ? "assistant" : "customer", deliveryCategory: index % 3 === 0 ? "sent" : "received", content: `Long conversation message ${index + 1}: the customer needs assistance with a detailed ongoing request.`, createdAt: `2026-01-01T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:00.000Z`, delivery: null })) };
 
 async function fulfill(route: Route, body: unknown, status = 200) { await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
 async function installApi(page: Page, scenario: Scenario = {}) {
@@ -46,7 +50,9 @@ async function installApi(page: Page, scenario: Scenario = {}) {
     const companyId = Number(companyMatch[1]), suffix = companyMatch[2], current = profile(companyId);
     if (scenario.delayedCompanyOne && companyId === 1 && suffix === "/assistant-profiles") { await new Promise(resolve => setTimeout(resolve, 750)); }
     if (suffix === "/conversations/feed") return fulfill(route, { events: [], nextCursor: "tail", hasMore: false, resyncRequired: false });
-    if (suffix === "/conversations") return fulfill(route, { items: [], nextCursor: null });
+    if (suffix === "/conversations") return fulfill(route, { items: scenario.conversationFixture === "longHuman" ? [longHumanConversationItem] : scenario.conversationFixture === "standard" ? [conversationItem] : [], nextCursor: null });
+    if (suffix === "/conversations/conversation-one") return fulfill(route, scenario.conversationFixture === "longHuman" ? longHumanConversationDetail : scenario.conversationFixture === "standard" ? conversationDetail : {}, scenario.conversationFixture ? 200 : 404);
+    if (suffix === "/conversations/conversation-one/read") return fulfill(route, {}, 204);
     if (suffix === "") return fulfill(route, { data: company(companyId) });
     if (suffix === "/assistant-profiles") return fulfill(route, [current]);
     if (suffix === `/assistant-profiles/${current.id}`) return fulfill(route, current);
@@ -63,6 +69,7 @@ async function installApi(page: Page, scenario: Scenario = {}) {
     if (suffix === "/operational-status") return fulfill(route, operational);
     if (suffix === "/scheduling-configuration") return fulfill(route, scheduling);
     if (suffix === "/proactive-action-policy") return fulfill(route, { enabled: true, version: 1 });
+    if (suffix === "/proactive-actions") return fulfill(route, { items: [] });
     if (suffix === "/whatsapp-connections") return fulfill(route, [whatsAppConnection]);
     if (suffix === `/whatsapp-connections/${whatsAppConnection.id}/status`) return fulfill(route, whatsAppStatus);
     if (suffix === `/whatsapp-connections/${whatsAppConnection.id}/voice-policy`) return fulfill(route, { voiceAiEnabled: false, audioResponseMode: "text_only", version: 1 });
@@ -146,6 +153,93 @@ test("PASS E Today preserves confirmed activation during background refresh and 
   await expect(page.locator(".pilot-readiness--supporting")).toBeVisible();
   expect(await page.locator(".activation-journey").evaluate((element) => element.getBoundingClientRect().top < window.innerHeight)).toBeTruthy();
   expect(await page.locator(".pilot-readiness--supporting").evaluate((element) => element.getBoundingClientRect().top < window.innerHeight + 160)).toBeTruthy();
+});
+
+test("Production polish keeps Today compact at 1366x768", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await installApi(page);
+  await page.goto("/companies/1");
+  await expect(page.getByRole("button", { name: "Iniciar verificación" })).toBeVisible();
+  const today = page.locator(".today-workspace--ready");
+  await expect(today).toBeVisible();
+  expect(await today.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(2);
+  expect(await page.locator(".pilot-readiness--supporting").evaluate((element) => element.getBoundingClientRect().top < window.innerHeight)).toBeTruthy();
+  expect(await page.locator(".pilot-readiness__check").evaluateAll((rows) => rows.every((row) => row.getBoundingClientRect().height <= 80))).toBeTruthy();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
+
+test("Production polish keeps assistant workspace geometry stable across tabs", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await installApi(page);
+  await open(page);
+  const workspace = page.locator(".assistant-profile-workspace");
+  const initial = await workspace.boundingBox();
+  expect(initial).not.toBeNull();
+  for (const name of ["General", "Behavior", "Capabilities", "Tools", "Automatizaciones", "Status", "Test assistant"] as const) {
+    await section(page, name);
+    const bounds = await workspace.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(Math.abs(bounds!.x - initial!.x)).toBeLessThanOrEqual(2);
+    expect(Math.abs(bounds!.y - initial!.y)).toBeLessThanOrEqual(2);
+    expect(Math.abs(bounds!.width - initial!.width)).toBeLessThanOrEqual(2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  }
+  await section(page, "Automatizaciones");
+  const actions = page.locator(".scheduling-automations .button");
+  expect(await actions.count()).toBeGreaterThan(0);
+  expect(await actions.evaluateAll((buttons) => buttons.every((button) => { const workspace = button.closest(".assistant-profile-workspace"); return workspace === null || button.getBoundingClientRect().width < workspace.getBoundingClientRect().width * 0.65; }))).toBeTruthy();
+});
+
+test("Production polish keeps assistant workspace geometry stable at tablet viewports", async ({ page }) => {
+  for (const viewport of [{ width: 1024, height: 768 }, { width: 768, height: 1024 }]) {
+    await page.setViewportSize(viewport);
+    await installApi(page);
+    await open(page);
+    const workspace = page.locator(".assistant-profile-workspace"), initial = await workspace.boundingBox();
+    expect(initial).not.toBeNull();
+    for (const name of ["General", "Behavior", "Capabilities", "Tools", "Automatizaciones", "Status", "Test assistant"] as const) {
+      await section(page, name);
+      const bounds = await workspace.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(Math.abs(bounds!.x - initial!.x)).toBeLessThanOrEqual(2);
+      expect(Math.abs(bounds!.y - initial!.y)).toBeLessThanOrEqual(2);
+      expect(Math.abs(bounds!.width - initial!.width)).toBeLessThanOrEqual(2);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    }
+  }
+});
+
+test("Production polish keeps conversation work internal at desktop and tablet", async ({ page }) => {
+  for (const viewport of [{ width: 1366, height: 768 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }]) {
+    await page.setViewportSize(viewport);
+    await installApi(page, { capabilities: ["company:read", "conversation:manage"], conversationFixture: "standard" });
+    await page.goto("/companies/1");
+    await page.getByRole("link", { name: "Conversations" }).click();
+    await page.getByRole("button", { name: /Conversation customer/ }).click();
+    await expect(page.getByRole("heading", { name: "Conversation customer" })).toBeVisible();
+    const workspace = page.locator(".conversation-workspace"), list = page.locator(".conversation-list"), timeline = page.locator(".conversation-timeline"), action = page.locator(".conversation-control--authority");
+    expect(await workspace.evaluate((element) => element.getBoundingClientRect().bottom <= window.innerHeight + 1)).toBeTruthy();
+    expect(await list.evaluate((element) => getComputedStyle(element).overflowY)).toBe("auto");
+    expect(await timeline.evaluate((element) => getComputedStyle(element).overflowY)).toBe("auto");
+    expect(await action.evaluate((element) => element.getBoundingClientRect().bottom <= window.innerHeight)).toBeTruthy();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  }
+});
+
+test("Production polish keeps a long human-required conversation operable at 1366x768", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await installApi(page, { capabilities: ["company:read", "company:manage", "conversation:manage"], conversationFixture: "longHuman" });
+  await page.goto("/companies/1");
+  await page.getByRole("link", { name: "Conversations" }).click();
+  await page.getByRole("button", { name: /Conversation customer/ }).click();
+  const workspace = page.locator(".conversation-workspace"), article = page.locator(".conversation-detail > article"), timeline = page.locator(".conversation-timeline"), authority = page.locator(".conversation-control--authority");
+  await expect(page.locator(".conversation-detail .conversation-attention")).toBeVisible();
+  await expect(authority.getByRole("button")).toBeVisible();
+  expect(await workspace.evaluate((element) => element.getBoundingClientRect().bottom <= window.innerHeight + 1)).toBeTruthy();
+  expect(await article.evaluate((element) => element.getBoundingClientRect().height > 0)).toBeTruthy();
+  expect(await timeline.evaluate((element) => element.clientHeight >= 120 && element.scrollHeight > element.clientHeight && getComputedStyle(element).overflowY === "auto")).toBeTruthy();
+  expect(await authority.evaluate((element) => element.getBoundingClientRect().bottom <= window.innerHeight && element.getBoundingClientRect().height > 0)).toBeTruthy();
+  expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= window.innerHeight + 32 && document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
 
 test("PASS F admin plan form stays compact at 1366x768", async ({ page }) => {
