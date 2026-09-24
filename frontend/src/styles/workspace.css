@@ -114,7 +114,6 @@
 .app-main .portal-section:hover {
   border-color: var(--atlas-color-border);
 }
-
 .company-context {
   display: grid;
   gap: var(--atlas-space-7);
@@ -742,102 +741,6 @@
   }
 }
 
-.activation-journey {
-  display: grid;
-  gap: var(--atlas-space-3);
-  max-inline-size: 900px;
-}
-.activation-journey .work-anchor {
-  display: grid;
-  gap: var(--atlas-space-2);
-}
-.activation-journey .work-anchor h1 { font-size: clamp(1.8rem, 3vw, 2.5rem); }
-.activation-journey__refresh { margin: 0; color: var(--atlas-color-text-muted); font-size: var(--atlas-font-size-sm); }
-.activation-journey .readiness-evidence { padding-block: var(--atlas-space-3); }
-.activation-journey .readiness-evidence ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--atlas-space-5); padding: 0; margin: 0; list-style: none; }
-.activation-journey .readiness-evidence li { padding-block: var(--atlas-space-2); border-block-end: 1px solid var(--atlas-color-border-subtle); }
-.activation-journey .readiness-evidence li > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--atlas-space-2); }
-.activation-journey .readiness-evidence p { margin: 0; color: var(--atlas-color-text-secondary); font-size: var(--atlas-font-size-sm); }
-.pilot-readiness {
-  display: grid;
-  gap: var(--atlas-space-3);
-  max-inline-size: 900px;
-}
-.pilot-readiness .work-anchor {
-  display: grid;
-  gap: var(--atlas-space-1);
-}
-.pilot-readiness__summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--atlas-space-2);
-  padding: 0;
-  margin: 0;
-  color: var(--atlas-color-text-secondary);
-}
-.pilot-readiness .next-action {
-  justify-self: start;
-}
-.pilot-readiness__checks {
-  display: grid;
-  gap: var(--atlas-space-2);
-  padding: var(--atlas-space-4);
-  border: 1px solid var(--atlas-color-border-subtle);
-  border-radius: var(--atlas-radius-lg);
-}
-.pilot-readiness__checks h2 {
-  font-size: var(--atlas-font-size-md);
-}
-.pilot-readiness__checks ul {
-  display: grid;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-.pilot-readiness__check {
-  min-block-size: 46px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--atlas-space-3);
-  padding-block: var(--atlas-space-2);
-  border-block-end: 1px solid var(--atlas-color-border-subtle);
-}
-.pilot-readiness__check > div {
-  min-inline-size: 0;
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: var(--atlas-space-2);
-}
-.pilot-readiness__check p {
-  margin: 0;
-  color: var(--atlas-color-text-secondary);
-  font-size: var(--atlas-font-size-sm);
-}
-.pilot-readiness__badge {
-  padding: 2px 7px;
-  color: var(--atlas-color-text-secondary);
-  background: var(--atlas-color-surface-muted);
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-}
-.pilot-readiness__check--complete .pilot-readiness__badge {
-  color: var(--atlas-color-success);
-  background: var(--atlas-color-success-surface);
-}
-.pilot-readiness__optional {
-  display: grid;
-  gap: var(--atlas-space-3);
-}
-.pilot-readiness__optional > summary {
-  cursor: pointer;
-  font-weight: 700;
-}
-.pilot-readiness__optional > .pilot-readiness__checks h2 {
-  display: none;
-}
 
 .teach-atlas {
   gap: var(--atlas-space-5);
@@ -866,13 +769,6 @@
   padding-block: var(--atlas-space-3);
 }
 @media (max-width: 767px) {
-  .pilot-readiness__check {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .pilot-readiness__check > .button {
-    min-block-size: 36px;
-  }
   .teaching-method {
     min-block-size: 0;
   }
@@ -905,20 +801,6 @@
   outline-offset: 3px;
 }
 
-.pilot-readiness__checks {
-  gap: 0;
-  padding: var(--atlas-space-3);
-}
-.pilot-readiness__check {
-  min-block-size: 38px;
-  padding-block: 5px;
-}
-.pilot-readiness__badge {
-  padding: 1px 6px;
-}
-.pilot-readiness__optional {
-  gap: var(--atlas-space-2);
-}
 .teach-atlas {
   gap: var(--atlas-space-4);
 }
@@ -926,10 +808,6 @@
   min-block-size: 88px;
   padding-block: var(--atlas-space-3);
 }
-@media (max-width: 767px) {
-  .activation-journey .readiness-evidence ol { grid-template-columns: 1fr; }
-}
-
 .whatsapp-guide {
   display: grid;
   gap: var(--atlas-space-4);
@@ -1485,12 +1363,4 @@
   .scheduling-automations form > :is(h4, .button) {
     grid-column: auto;
   }
-}
-
-/* The card boundary replaces the final required-row separator. */
-.pilot-readiness
-  > .pilot-readiness__checks
-  > ul
-  > .pilot-readiness__check:last-child {
-  border-block-end: 0;
 }
