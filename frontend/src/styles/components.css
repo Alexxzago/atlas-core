@@ -143,16 +143,8 @@
 .authenticated-section select:focus, .authenticated-section input:focus, .authenticated-section textarea:focus { border-color: var(--color-focus); }
 .authenticated-portal .authenticated-company-create { display: grid; gap: var(--space-4); margin-block-end: var(--space-5); padding: var(--space-5); background: var(--color-surface-subtle); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); }
 .authenticated-portal .authenticated-company-create fieldset { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: var(--space-4); min-inline-size: 0; padding: 0; border: 0; }
-.authenticated-portal .whatsapp-onboarding { display: grid; gap: var(--space-5); }
-.authenticated-portal .whatsapp-steps { display: grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap: var(--space-3); padding: 0; overflow-x: auto; list-style: none; }
-.authenticated-portal .whatsapp-steps li { display: grid; gap: var(--space-2); min-inline-size: 120px; padding: var(--space-3); color: var(--color-text-secondary); background: var(--color-surface-subtle); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); font-size: 12px; }
-.authenticated-portal .whatsapp-steps li.is-complete { color: var(--color-success); background: var(--color-success-bg); border-color: var(--color-success-border); }
-.authenticated-portal .whatsapp-workflow, .authenticated-portal .whatsapp-create, .authenticated-portal .whatsapp-credential-row { display: grid; gap: var(--space-4); }
-.authenticated-portal .whatsapp-create { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; }
-.authenticated-portal .whatsapp-credential-row { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
 @media (max-width: 767px) {
   .authenticated-section { padding: var(--space-5); }
   .authenticated-portal .workspace-create-row, .authenticated-portal .authenticated-company-create fieldset { grid-template-columns: 1fr; }
   .authenticated-portal .archived-recovery { align-items: stretch; flex-direction: column; }
-  .authenticated-portal .whatsapp-create, .authenticated-portal .whatsapp-credential-row { grid-template-columns: 1fr; }
 }

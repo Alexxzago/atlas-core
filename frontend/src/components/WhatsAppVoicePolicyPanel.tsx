@@ -71,7 +71,7 @@ export function WhatsAppVoicePolicyPanel({ csrf, workspaceId, companyId, connect
   };
 
   const disabled = !manageable || saving;
-  return <section className="whatsapp-scenario-guidance" aria-busy={loading || saving}>
+  return <section className="whatsapp-scenario-guidance whatsapp-voice-policy" aria-busy={loading || saving}>
     <h4>{t("voicePolicy.title")}</h4>
     <p>{t("voicePolicy.lead")}</p>
     <p>{t("voicePolicy.availability")}</p>

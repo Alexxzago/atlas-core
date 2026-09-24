@@ -14,6 +14,8 @@ const activation = { stages: ["company", "knowledge", "assistant", "web_chat", "
 const pilotReadiness = { overall: "not_ready", classification: "configuration_ready", checks: [], nextAction: "activate_web_chat", evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "pilot-readiness-v1" };
 const webChatConnection = { id: "wcc_1", publicId: "wcp_00000000000000000000000000000000", assistantProfileId: "assistant-one", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
 const scheduling = { data: { aggregateVersion: 7, locations: [{ id: "loc_1", name: "Main", address: "Main Street", timezone: "UTC", active: true, created_at: "2026-01-01", updated_at: "2026-01-01" }], resources: [{ id: "res_1", location_id: "loc_1", name: "Room", timezone: "UTC", capacity: 1, active: true, created_at: "2026-01-01", updated_at: "2026-01-01" }], services: [{ id: "svc_1", resource_id: "res_1", name: "Visit", duration_minutes: 30, buffer_before_minutes: 0, buffer_after_minutes: 0, slot_granularity_minutes: 15, minimum_lead_minutes: 0, maximum_horizon_days: 30, active: true, created_at: "2026-01-01", updated_at: "2026-01-01" }], weeklyWorkingWindows: [{ id: "ww_1", resource_id: "res_1", weekday: 0, start_time: "09:00", end_time: "17:00" }], dateExceptions: [{ id: "ex_1", resource_id: "res_1", local_date: "2026-01-02", kind: "closed", start_time: null, end_time: null }], readiness: { state: "locally_configured", hasLocations: true, hasResources: true, hasServices: true, hasWeeklyAvailability: true } } };
+const whatsAppConnection = { id: "wac_0123456789abcdef0123456789abcdef", assistantProfileId: "assistant-one", phoneNumberId: "123456789012345", whatsappBusinessAccountId: "456789012345678", status: "inactive", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
+const whatsAppStatus = { connection: whatsAppConnection, credentialsConfigured: true, credentialSource: "manual", validationState: "not_validated", validatedAt: null, lastWebhookActivityAt: null, validationFailureCode: null, healthState: "inactive", lastProviderActivityAt: null, healthFailureCode: null, updatedAt: "2026-01-01T00:00:00.000Z" };
 
 async function fulfill(route: Route, body: unknown, status = 200) { await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
 async function installApi(page: Page, scenario: Scenario = {}) {
@@ -55,6 +57,9 @@ async function installApi(page: Page, scenario: Scenario = {}) {
     if (suffix === "/operational-status") return fulfill(route, operational);
     if (suffix === "/scheduling-configuration") return fulfill(route, scheduling);
     if (suffix === "/proactive-action-policy") return fulfill(route, { enabled: true, version: 1 });
+    if (suffix === "/whatsapp-connections") return fulfill(route, [whatsAppConnection]);
+    if (suffix === `/whatsapp-connections/${whatsAppConnection.id}/status`) return fulfill(route, whatsAppStatus);
+    if (suffix === `/whatsapp-connections/${whatsAppConnection.id}/voice-policy`) return fulfill(route, { voiceAiEnabled: false, audioResponseMode: "text_only", version: 1 });
     if (suffix.endsWith("/preview") || suffix === "/assistant/executions") {
       if (scenario.executionStatus === "network") return route.abort("failed");
       if (scenario.executionStatus) return fulfill(route, { error: { code: "temporarily_unavailable", message: "provider-secret trace-id" } }, scenario.executionStatus);
@@ -164,6 +169,44 @@ test("PASS C mobile automation controls retain reachable touch targets", async (
   await expect(checkbox).toBeVisible();
   await expect(page.getByRole("button", { name: "Guardar ubicación" })).toBeVisible();
   expect(await checkbox.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await context.close();
+});
+
+for (const [width, height] of [[1366, 768], [1024, 768], [768, 1024]] as const) test(`PASS D Channels and WhatsApp remain compact at ${width}x${height}`, async ({ page }) => {
+  await page.setViewportSize({ width, height });
+  await installApi(page);
+  await page.goto("/companies/1/channels");
+  await expect(page.locator(".channel-hub__grid .channel-card")).toHaveCount(6);
+  expect(await page.locator(".channel-hub__grid .channel-card").first().evaluate((element) => getComputedStyle(element).minBlockSize)).toBe("0px");
+  if (width === 1366) expect(await page.locator(".channel-hub__grid").evaluate((grid) => getComputedStyle(grid).gridTemplateColumns.split(" ").length >= 2)).toBeTruthy();
+  if (width === 1366) expect(await page.locator(".channel-hub__grid .channel-card").evaluateAll((cards) => { const [first, second] = cards; if (!first || !second) return false; const left = first.getBoundingClientRect(), right = second.getBoundingClientRect(); return left.top < window.innerHeight && right.top < window.innerHeight && left.bottom > 0 && right.bottom > 0 && left.x !== right.x; })).toBeTruthy();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.goto("/companies/1/channels/whatsapp");
+  await expect(page.getByRole("region", { name: "Connection summary" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "WhatsApp setup" })).toBeVisible();
+  await expect(page.locator(".whatsapp-voice-policy")).toBeVisible();
+  if (width === 1366) expect(await page.getByRole("region", { name: /Connection summary|WhatsApp setup/ }).evaluateAll((regions) => regions.every((region) => { const box = region.getBoundingClientRect(); return box.top < window.innerHeight && box.bottom > 0; }))).toBeTruthy();
+  if (width !== 1366) { const summary = page.getByRole("region", { name: "Connection summary" }), workflow = page.getByRole("region", { name: "WhatsApp setup" }); expect(await summary.evaluate((element, workflowElement) => Boolean(workflowElement) && element.compareDocumentPosition(workflowElement) & Node.DOCUMENT_POSITION_FOLLOWING, await workflow.elementHandle())).toBeTruthy(); await summary.scrollIntoViewIfNeeded(); expect(await summary.evaluate((element) => { const box = element.getBoundingClientRect(); return box.top < window.innerHeight && box.bottom > 0; })).toBeTruthy(); await workflow.scrollIntoViewIfNeeded(); expect(await workflow.evaluate((element) => { const box = element.getBoundingClientRect(); return box.top < window.innerHeight && box.bottom > 0; })).toBeTruthy(); }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
+
+test("PASS D mobile WhatsApp voice controls retain usable touch targets", async ({ browser }) => {
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await installApi(page);
+  await page.goto("/companies/1/channels");
+  const channelAction = page.getByRole("button", { name: "Manage Web Chat" });
+  await channelAction.scrollIntoViewIfNeeded();
+  expect(await channelAction.evaluate((element) => { const box = element.getBoundingClientRect(); return box.top >= 0 && box.bottom <= window.innerHeight; })).toBeTruthy();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.goto("/companies/1/channels/whatsapp");
+  const radio = page.getByRole("radio", { name: "Reply with text" });
+  await expect(radio).toBeVisible();
+  const action = page.getByRole("button", { name: "Validate connection" });
+  await action.scrollIntoViewIfNeeded();
+  expect(await action.evaluate((element) => { const box = element.getBoundingClientRect(); return box.top >= 0 && box.bottom <= window.innerHeight; })).toBeTruthy();
+  expect(await radio.locator("xpath=..").evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await context.close();
 });
