@@ -1,5 +1,5 @@
-.language-selector select { min-block-size: 40px; padding-inline: var(--space-4) var(--space-8); color: var(--color-text-primary); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
-.button { display: inline-flex; min-block-size: 44px; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); border: 1px solid transparent; border-radius: var(--radius-md); font-weight: 650; line-height: 20px; cursor: pointer; transition: transform var(--motion-duration-fast) var(--motion-ease-standard), background-color var(--motion-duration-fast) var(--motion-ease-standard), border-color var(--motion-duration-fast) var(--motion-ease-standard), box-shadow var(--motion-duration-fast) var(--motion-ease-standard); }
+.language-selector select { min-block-size: var(--atlas-size-control); padding-inline: var(--atlas-space-4) var(--atlas-space-8); color: var(--atlas-color-text); background: var(--atlas-color-surface); border: 1px solid var(--atlas-color-border); border-radius: var(--atlas-radius-md); }
+.button { display: inline-flex; min-block-size: var(--atlas-size-control); align-items: center; justify-content: center; gap: var(--atlas-space-3); padding: var(--atlas-space-3) var(--atlas-space-5); border: 1px solid transparent; border-radius: var(--atlas-radius-md); font-weight: 650; line-height: 20px; cursor: pointer; transition: transform var(--atlas-motion-fast) var(--atlas-ease-standard), background-color var(--atlas-motion-fast) var(--atlas-ease-standard), border-color var(--atlas-motion-fast) var(--atlas-ease-standard), box-shadow var(--atlas-motion-fast) var(--atlas-ease-standard); }
 .button:hover:not(:disabled) { transform: translateY(calc(-1 * var(--interactive-pressed-translate))); box-shadow: var(--atlas-shadow-control); }
 .button:active:not(:disabled) { transform: translateY(var(--interactive-pressed-translate)); box-shadow: none; transition-duration: var(--motion-duration-instant); }
 .button:disabled { color: var(--atlas-color-text-disabled); background: var(--atlas-color-disabled-surface); border-color: var(--atlas-color-border-subtle); box-shadow: none; cursor: not-allowed; opacity: 1; transform: none; }
@@ -15,7 +15,7 @@
 .button--danger { color: var(--atlas-color-danger-text); background: var(--atlas-color-danger); }
 .button--danger:hover:not(:disabled) { color: var(--atlas-color-danger-text); background: color-mix(in srgb, var(--atlas-color-danger) 88%, var(--atlas-color-text)); }
 .button:focus-visible, .ds-button:focus-visible, .context-back-link:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring-color); outline-offset: var(--focus-ring-offset); box-shadow: 0 0 0 5px var(--atlas-color-focus-halo); }
-.button--compact { min-block-size: 32px; padding: var(--space-2) var(--space-3); font-size: 13px; }
+.button--compact { min-block-size: var(--atlas-size-control-compact); padding: var(--atlas-space-2) var(--atlas-space-3); font-size: 13px; }
 .button--full { inline-size: 100%; }
 .sidebar-heading, .section-heading, .workspace-title-row, .action-row, .onboarding-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .sidebar-heading { margin-block-end: var(--space-5); }
@@ -25,7 +25,7 @@
 .sidebar-form, .edit-form { display: grid; gap: var(--space-4); padding: var(--space-5); margin-block-end: var(--space-5); background: var(--color-surface-subtle); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
 .form-field { display: grid; gap: var(--space-2); color: var(--color-text-primary); font-weight: 600; }
 .form-field small { font-weight: 400; }
-.form-field input, .form-field textarea, .chat-composer textarea { inline-size: 100%; min-block-size: 40px; padding: var(--space-3) var(--space-4); color: var(--color-text-primary); background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); font-weight: 400; }
+.form-field input, .form-field select, .form-field textarea, .chat-composer textarea { inline-size: 100%; min-block-size: var(--atlas-size-control); padding: var(--atlas-space-3) var(--atlas-space-4); color: var(--atlas-color-text); background: var(--atlas-color-surface); border: 1px solid var(--atlas-color-border-strong); border-radius: var(--atlas-radius-md); font-weight: 400; }
 .form-field input:hover, .chat-composer textarea:hover { border-color: var(--color-text-muted); }
 .form-field input:focus, .chat-composer textarea:focus { border-color: var(--color-focus); }
 .company-list { display: grid; gap: var(--space-2); }
@@ -129,12 +129,16 @@
   .portal-notice { inset-inline: var(--space-5); }
 }
 
+@media (pointer: coarse) {
+  .button, .button--compact, .form-field input, .form-field select, .authenticated-section input, .authenticated-section select { min-block-size: var(--atlas-size-control-touch); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
 .authenticated-section { padding: var(--space-6); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
 .authenticated-section > h2 { margin-block-end: var(--space-4); }
-.authenticated-section select, .authenticated-section input, .authenticated-section textarea { inline-size: 100%; min-block-size: 40px; padding: var(--space-3) var(--space-4); color: var(--color-text-primary); background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); }
+.authenticated-section select, .authenticated-section input, .authenticated-section textarea { inline-size: 100%; min-block-size: var(--atlas-size-control); padding: var(--atlas-space-3) var(--atlas-space-4); color: var(--atlas-color-text); background: var(--atlas-color-surface); border: 1px solid var(--atlas-color-border-strong); border-radius: var(--atlas-radius-md); }
 .authenticated-section textarea { min-block-size: 88px; resize: vertical; }
 .authenticated-section select:focus, .authenticated-section input:focus, .authenticated-section textarea:focus { border-color: var(--color-focus); }
 .authenticated-portal .authenticated-company-create { display: grid; gap: var(--space-4); margin-block-end: var(--space-5); padding: var(--space-5); background: var(--color-surface-subtle); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg); }

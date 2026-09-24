@@ -99,6 +99,64 @@ test("authoritative activation journey starts verification through its primary C
   await expect.poll(() => calls).toContain(`POST /public/web-chat/${webChatConnection.publicId}/activation-verifications/${"a".repeat(43)}`);
 });
 
+test("PASS A geometry keeps controls canonical and Web Chat within every acceptance viewport", async ({ page }) => {
+  await installApi(page);
+  for (const viewport of [{ width: 1366, height: 768 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/companies/1/channels/web-chat");
+    await expect(page.getByRole("heading", { name: "Web Chat", exact: true })).toBeVisible();
+    const overflow = await page.evaluate(() => ({
+      viewport,
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth: window.innerWidth,
+      overflowing: [...document.querySelectorAll<HTMLElement>("*")]
+        .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 1)
+        .slice(0, 3)
+        .map((element) => ({ className: element.className, x: element.getBoundingClientRect().x, width: element.getBoundingClientRect().width })),
+    }));
+    if (overflow.scrollWidth !== overflow.innerWidth) throw new Error(JSON.stringify(overflow));
+  }
+  const geometry = await page.evaluate(() => {
+    const host = document.createElement("div");
+    host.innerHTML = '<button class="ds-button">Standard</button><button class="ds-button ds-button--sm">Compact</button><input class="ds-control" /><select class="ds-control ds-select"><option>Plan</option></select><section class="ds-card">Card</section><section class="ds-card ds-card--compact">Compact card</section><label class="ds-radio-label"><input class="ds-radio" type="radio" />Voice</label>';
+    document.body.append(host);
+    const values = [...host.children].map((element) => ({ height: getComputedStyle(element).minBlockSize, padding: getComputedStyle(element).paddingTop }));
+    const radio = host.querySelector(".ds-radio")!;
+    const radioRect = radio.getBoundingClientRect();
+    host.remove();
+    return { values, radio: { width: radioRect.width, height: radioRect.height } };
+  });
+  expect(geometry.values.slice(0, 6).map((value) => value.height)).toEqual(["40px", "32px", "40px", "40px", "0px", "0px"]);
+  expect(geometry.values.slice(4, 6).map((value) => value.padding)).toEqual(["20px", "16px"]);
+  expect(geometry.radio).toEqual({ width: 18, height: 18 });
+  await page.setViewportSize({ width: 1366, height: 480 });
+  await page.goto("/companies/1/channels/web-chat");
+  const accountAction = page.getByRole("button", { name: "Workspace and account" });
+  await accountAction.scrollIntoViewIfNeeded();
+  await expect(accountAction).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("PASS A coarse-pointer controls retain 44px targets", async ({ browser }) => {
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await installApi(page);
+  await page.goto("/companies/1/channels/web-chat");
+  const geometry = await page.evaluate(() => {
+    const host = document.createElement("div");
+    host.innerHTML = '<button class="ds-button ds-button--sm">Compact</button><label class="ds-radio-label"><input class="ds-radio" type="radio" />Voice</label>';
+    document.body.append(host);
+    const button = host.querySelector("button")!.getBoundingClientRect();
+    const label = host.querySelector("label")!.getBoundingClientRect();
+    host.remove();
+    return { button: button.height, label: label.height, scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth };
+  });
+  expect(geometry.button).toBeGreaterThanOrEqual(44);
+  expect(geometry.label).toBeGreaterThanOrEqual(44);
+  expect(geometry.scrollWidth).toBe(geometry.innerWidth);
+  await context.close();
+});
+
 test("ordinary public chat leaves the mocked activation projection incomplete", async ({ page }) => {
   const calls = await installApi(page); await page.goto(`/chat/${webChatConnection.publicId}`);
   await expect(page.getByRole("textbox", { name: "Tu mensaje" })).toBeVisible();

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, atlasApi } from "../api/atlasApi";
 import { useI18n } from "../i18n/I18nContext";
 import type { VoiceAudioResponseMode, WhatsAppVoicePolicy } from "../types/api";
+import { Radio } from "../design-system/primitives";
 
 interface Props { readonly csrf:string; readonly workspaceId:string; readonly companyId:number; readonly connectionId:string; readonly manageable:boolean; }
 type Draft = Pick<WhatsAppVoicePolicy,"voiceAiEnabled"|"audioResponseMode">;
@@ -77,8 +78,8 @@ export function WhatsAppVoicePolicyPanel({ csrf, workspaceId, companyId, connect
     {loading || !policy || !draft ? <p role="status">{t("voicePolicy.loading")}</p> : <>
       <label className="whatsapp-prerequisite-confirm"><input aria-label={t("voicePolicy.toggle")} type="checkbox" checked={draft.voiceAiEnabled} disabled={disabled} onChange={event => change({ voiceAiEnabled: event.target.checked })}/><span>{t("voicePolicy.toggle")}</span></label>
       <fieldset disabled={disabled || !draft.voiceAiEnabled}><legend>{t("voicePolicy.mode")}</legend>
-        <label><input type="radio" name={`voice-policy-${connectionId}`} disabled={disabled || !draft.voiceAiEnabled} checked={draft.audioResponseMode === "text_only"} onChange={() => change({ audioResponseMode: "text_only" })}/>{t("voicePolicy.textOnly")}</label>
-        <label><input type="radio" name={`voice-policy-${connectionId}`} disabled={disabled || !draft.voiceAiEnabled} checked={draft.audioResponseMode === "voice_with_text_fallback"} onChange={() => change({ audioResponseMode: "voice_with_text_fallback" })}/>{t("voicePolicy.voiceFallback")}</label>
+        <label className="ds-radio-label"><Radio name={`voice-policy-${connectionId}`} disabled={disabled || !draft.voiceAiEnabled} checked={draft.audioResponseMode === "text_only"} onChange={() => change({ audioResponseMode: "text_only" })}/>{t("voicePolicy.textOnly")}</label>
+        <label className="ds-radio-label"><Radio name={`voice-policy-${connectionId}`} disabled={disabled || !draft.voiceAiEnabled} checked={draft.audioResponseMode === "voice_with_text_fallback"} onChange={() => change({ audioResponseMode: "voice_with_text_fallback" })}/>{t("voicePolicy.voiceFallback")}</label>
       </fieldset>
       {!manageable && <p>{t("voicePolicy.readOnly")}</p>}
       {manageable && <button className="button button--primary" type="button" disabled={saving || same(policy, draft)} onClick={() => void save()}>{t(saving ? "voicePolicy.saving" : "voicePolicy.save")}</button>}
