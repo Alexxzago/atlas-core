@@ -1,5 +1,5 @@
-.app-shell { min-block-size: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); background: var(--atlas-color-canvas); }
-.app-sidebar { position: sticky; inset-block-start: 0; block-size: 100vh; display: flex; flex-direction: column; padding: var(--atlas-space-7) var(--atlas-space-5); background: color-mix(in srgb, var(--atlas-color-surface) 92%, var(--atlas-color-canvas)); border-inline-end: 1px solid var(--atlas-color-border-subtle); }
+.app-shell { min-block-size: 100vh; display: grid; grid-template-columns: var(--atlas-size-sidebar) minmax(0, 1fr); background: var(--atlas-color-canvas); }
+.app-sidebar { position: sticky; inset-block-start: 0; block-size: 100vh; display: flex; flex-direction: column; overflow-y: auto; padding: var(--atlas-space-7) var(--atlas-space-5); background: color-mix(in srgb, var(--atlas-color-surface) 92%, var(--atlas-color-canvas)); border-inline-end: 1px solid var(--atlas-color-border-subtle); }
 .app-sidebar__brand { display: inline-flex; align-items: center; gap: var(--atlas-space-3); margin: 0 var(--atlas-space-3) var(--atlas-space-8); }
 .app-sidebar__brand > span { inline-size: 8px; block-size: 8px; background: var(--atlas-color-warning); border-radius: 2px; box-shadow: 0 0 0 4px var(--atlas-color-warm-highlight); }
 .app-sidebar__brand strong { font-size: 15px; font-weight: 750; letter-spacing: .14em; }
@@ -16,9 +16,9 @@
 .responsibility-navigation a[aria-current="page"] .responsibility-navigation__signal { block-size:18px;background: var(--atlas-color-warning); box-shadow: 0 0 0 3px var(--atlas-color-warm-highlight);transition:block-size var(--motion-duration-standard) var(--motion-ease-emphasized),background-color var(--motion-duration-fast) var(--motion-ease-standard) }
 .workspace-menu-trigger { margin-block-start: auto; padding-inline: var(--atlas-space-3); text-align: start; border-block-start: 1px solid var(--atlas-color-border-subtle); }
 .workspace-menu-trigger:hover { color: var(--atlas-color-text); }
-.workspace-menu { position: fixed; z-index: var(--atlas-z-overlay); inline-size: min(300px, calc(100vw - 32px)); max-block-size: calc(100vh - 32px); overflow-y: auto; display: grid; gap: var(--atlas-space-2); padding: var(--atlas-space-4); background: var(--atlas-color-surface-overlay); border: 1px solid var(--atlas-color-border-subtle); border-radius: var(--atlas-radius-lg); box-shadow: var(--atlas-shadow-overlay); }
+.workspace-menu { position: fixed; z-index: var(--atlas-z-overlay); inline-size: min(280px, calc(100vw - 32px)); max-block-size: calc(100vh - 32px); overflow-y: auto; display: grid; gap: var(--atlas-space-2); padding: var(--atlas-space-3); background: var(--atlas-color-surface-overlay); border: 1px solid var(--atlas-color-border-subtle); border-radius: var(--atlas-radius-lg); box-shadow: var(--atlas-shadow-overlay); }
 .workspace-menu-backdrop { display: none; }
-.workspace-menu section { display: grid; gap: var(--atlas-space-2); padding: var(--atlas-space-3) var(--atlas-space-2); }
+.workspace-menu section { display: grid; gap: var(--atlas-space-2); padding: var(--atlas-space-2); }
 .workspace-menu section + section { border-block-start: 1px solid var(--atlas-color-border-subtle); }
 .workspace-menu section > p { color: var(--atlas-color-text-muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .workspace-menu small { color: var(--atlas-color-text-muted); overflow-wrap: anywhere; }
@@ -58,6 +58,8 @@
   .mobile-navigation .responsibility-navigation { margin-block-start: 0; }
   .workspace-menu-backdrop { position: fixed; z-index: calc(var(--atlas-z-modal) - 1); inset: 0; display: block; background: color-mix(in srgb, var(--atlas-color-text) 28%, transparent); }
   .workspace-menu { z-index: var(--atlas-z-modal); inset: auto 0 0 !important; inline-size: 100%; max-block-size: min(82vh, 640px); padding: var(--atlas-space-5); border-radius: var(--atlas-radius-xl) var(--atlas-radius-xl) 0 0; }
+  .workspace-menu section > button:not(.theme-selector), .workspace-menu .language-control__trigger, .workspace-menu .theme-selector { min-block-size: calc(var(--atlas-size-control-touch) + var(--atlas-space-3)); }
+  .workspace-menu .theme-selector { min-inline-size: calc(var(--atlas-size-control-touch) + var(--atlas-space-3)); }
   .app-main { padding: var(--atlas-page-section-gap-compact) var(--atlas-page-gutter-compact); }
 }
 @media (prefers-reduced-motion: reduce) { .responsibility-navigation a, .company-context-button { transition: none; } }

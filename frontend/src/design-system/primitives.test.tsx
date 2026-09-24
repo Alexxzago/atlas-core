@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { Alert, Badge, Button, Checkbox, ConfirmDialog, Container, Input, Select, Skeleton, Spinner, Surface, Textarea } from "./primitives";
+import { Alert, Badge, Button, Checkbox, ConfirmDialog, Container, Input, Radio, Select, Skeleton, Spinner, Surface, Textarea } from "./primitives";
 
 afterEach(cleanup);
 
@@ -26,6 +26,13 @@ test("uses the canonical desktop control and textarea variant contracts", () => 
   expect(screen.getByRole("textbox", { name: "Compact notes" }).className).toContain("ds-textarea--compact");
   expect(screen.getByRole("textbox", { name: "Standard notes" }).className).toContain("ds-textarea--standard");
   expect(screen.getByRole("textbox", { name: "Long notes" }).className).toContain("ds-textarea--long");
+});
+
+test("preserves native radio semantics with the shared visual class", () => {
+  render(<label className="ds-radio-label"><Radio name="delivery" value="voice" />Voice response</label>);
+  const radio = screen.getByRole("radio", { name: "Voice response" });
+  expect(radio.getAttribute("type")).toBe("radio");
+  expect(radio.className).toContain("ds-radio");
 });
 
 test("preserves invalid and disabled native control semantics", () => {

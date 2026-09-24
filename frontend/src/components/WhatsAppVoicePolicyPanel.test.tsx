@@ -18,6 +18,7 @@ it("renders the durable Voice policy, preserves mode while disabled, and keeps r
   expect((screen.getByRole("radio", { name: "Reply with text" }) as HTMLInputElement).checked).toBe(true);
   expect((screen.getByRole("radio", { name: "Reply with text" }) as HTMLInputElement).disabled).toBe(true);
   expect(screen.queryByRole("button", { name: "Save preference" })).toBeNull();
+  expect(document.querySelector(".whatsapp-voice-policy")).toBeTruthy();
 });
 
 it("saves only a dirty policy with the server version and bounds duplicate clicks", async () => {

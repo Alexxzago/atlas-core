@@ -215,7 +215,7 @@
 .ds-button--secondary { color: var(--atlas-color-text); background: var(--atlas-color-surface-overlay); border-color: var(--atlas-color-border); }
 .ds-button--quiet { color: var(--atlas-color-text-secondary); background: transparent; }
 .ds-button--danger { color: var(--atlas-color-danger-text); background: var(--atlas-color-danger); }
-.ds-control { inline-size: 100%; min-block-size: var(--atlas-size-control); padding: 0 var(--atlas-space-3); color: var(--atlas-color-text); background: var(--atlas-color-surface); border: 1px solid var(--atlas-color-border-strong); border-radius: var(--atlas-radius-md); font: inherit; font-size: var(--atlas-font-size-body); line-height: var(--atlas-line-height-body); }
+.ds-control { inline-size: 100%; min-inline-size: 0; min-block-size: var(--atlas-size-control); padding: 0 var(--atlas-space-3); color: var(--atlas-color-text); background: var(--atlas-color-surface); border: 1px solid var(--atlas-color-border-strong); border-radius: var(--atlas-radius-md); font: inherit; font-size: var(--atlas-font-size-body); line-height: var(--atlas-line-height-body); }
 .ds-control:disabled { color: var(--atlas-color-text-disabled); background: var(--atlas-color-surface-subtle); }
 .ds-control:hover:not(:disabled) { border-color: var(--atlas-color-text-muted); }
 .ds-control:focus-visible { border-color: var(--atlas-color-focus); }
@@ -225,7 +225,7 @@
 .ds-textarea--compact { min-block-size: var(--atlas-size-textarea-compact); }
 .ds-textarea--standard { min-block-size: var(--atlas-size-textarea-standard); }
 .ds-textarea--long { min-block-size: var(--atlas-size-textarea-long); }
-.ds-field { display: grid; gap: var(--atlas-space-2); }
+.ds-field { min-inline-size: 0; display: grid; gap: var(--atlas-space-2); }
 .ds-field__label { color: var(--atlas-color-text); font-size: var(--atlas-font-size-label); font-weight: 600; line-height: var(--atlas-line-height-label); }
 .ds-field__description { color: var(--atlas-color-text-secondary); font-size: var(--atlas-font-size-helper); line-height: var(--atlas-line-height-helper); }
 .ds-field__error { color: var(--atlas-color-danger); font-size: var(--atlas-font-size-helper); line-height: var(--atlas-line-height-helper); }
@@ -233,7 +233,8 @@
 .ds-password-field .ds-control { padding-inline-end: 5.5rem; }
 .ds-password-field__toggle { position: absolute; inset-block: 4px; inset-inline-end: 4px; min-block-size: calc(var(--atlas-size-control) - 8px); padding-inline: var(--atlas-space-3); color: var(--atlas-color-action); background: transparent; border-radius: var(--atlas-radius-sm); font-size: var(--atlas-font-size-helper); font-weight: 600; }
 .ds-password-field__toggle:hover { background: var(--atlas-color-surface-subtle); }
-.ds-checkbox { inline-size: 18px; block-size: 18px; accent-color: var(--atlas-color-action); }
+.ds-checkbox, .ds-radio { inline-size: 18px; block-size: 18px; flex: 0 0 18px; accent-color: var(--atlas-color-action); }
+.ds-radio-label { display: inline-flex; align-items: center; gap: var(--atlas-space-3); min-inline-size: 0; }
 .ds-badge { display: inline-flex; align-items: center; min-block-size: 24px; padding-inline: var(--atlas-space-3); border: 1px solid var(--atlas-color-border); border-radius: var(--atlas-radius-pill); color: var(--atlas-color-text-secondary); background: var(--atlas-color-surface-subtle); font-size: var(--atlas-font-size-helper); font-weight: 600; }
 .ds-badge--success { color: var(--atlas-color-success); background: var(--atlas-color-success-surface); border-color: var(--atlas-color-success-border); }
 .ds-badge--warning { color: var(--atlas-color-warning); background: var(--atlas-color-warning-surface); border-color: var(--atlas-color-warning-border); }
@@ -275,5 +276,5 @@
   .ds-dialog__actions { align-items: stretch; flex-direction: column-reverse; }
   .ds-dialog__actions .ds-button { inline-size: 100%; }
 }
-@media (pointer: coarse) { .ds-button, .ds-button--sm, .ds-tab, .ds-back-navigation { min-block-size: var(--atlas-size-control-touch); } }
+@media (pointer: coarse) { .ds-button, .ds-button--sm, .ds-control:not(.ds-textarea), .ds-tab, .ds-back-navigation, .ds-radio-label { min-block-size: var(--atlas-size-control-touch); } }
 @media (prefers-reduced-motion: reduce) { .ds-skeleton > span:not(.ds-visually-hidden), .ds-progress__spinner, .ds-spinner { animation: none; } }

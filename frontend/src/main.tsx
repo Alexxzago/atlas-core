@@ -13,6 +13,7 @@ import "./styles/components.css";
 import "./styles/auth.css";
 import "./styles/dashboard.css";
 import "./styles/workspace.css";
+import "./styles/assistant.css";
 import "./styles/design-v2.css";
 import "./styles/conversations.css";
 import "./styles/product.css";

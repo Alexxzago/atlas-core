@@ -77,7 +77,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     const position = (): void => {
       const trigger = accountTrigger.current; if (!trigger) return;
       if (window.matchMedia?.("(max-width: 767px)").matches) { setAccountPosition({}); return; }
-      const bounds = trigger.getBoundingClientRect(), width = 300, gutter = 16;
+       const bounds = trigger.getBoundingClientRect(), width = 280, gutter = 16;
       const left = Math.max(gutter, Math.min(bounds.left, window.innerWidth - width - gutter));
       const bottomSpace = window.innerHeight - bounds.bottom;
       setAccountPosition(bottomSpace >= 360 ? { position:"fixed", left, top:bounds.bottom + 8, width } : { position:"fixed", left, bottom:window.innerHeight - bounds.top + 8, width });

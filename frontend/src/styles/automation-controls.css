@@ -1,8 +1,8 @@
-.scheduling-automations .automation-check {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--atlas-space-2);
-  color: var(--atlas-color-text);
-  font-weight: 650;
-  cursor: pointer;
-}
+.scheduling-automations { display: grid; gap: var(--atlas-space-2); max-inline-size: 1040px; }
+.scheduling-automations > .section-heading { margin: 0; }.scheduling-automations > .section-heading p { margin-block: 0; }
+.automation-tabs { gap: 0; border: var(--atlas-border-subtle); border-radius: var(--atlas-radius-md); }.automation-tabs .ds-tab { min-block-size: var(--atlas-size-control-compact); padding-inline: var(--atlas-space-3); font-size: var(--atlas-font-size-helper); }.automation-tabs .ds-tab[aria-selected="true"] { background: var(--atlas-color-action-subtle); }
+.scheduling-automations > section { display: grid; gap: var(--atlas-space-2); padding: var(--atlas-card-padding-compact); background: var(--atlas-color-surface-raised); border: var(--atlas-border-subtle); border-radius: var(--atlas-radius-lg); }.scheduling-automations > section > :is(h3, h4, p) { margin: 0; }.scheduling-automations > section > ul { display: grid; gap: 0; padding: 0; margin: 0; list-style: none; border-block: var(--atlas-border-subtle); }.scheduling-automations > section > ul > li { display: flex; align-items: center; justify-content: space-between; gap: var(--atlas-space-3); padding-block: var(--atlas-space-1); border-block-end: var(--atlas-border-subtle); }.scheduling-automations > section > ul > li:last-child { border-block-end: 0; }
+.scheduling-automations .automation-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--atlas-space-2); align-items: end; padding-block-start: var(--atlas-space-2); border-block-start: var(--atlas-border-subtle); }.scheduling-automations .automation-form > :is(h4, .button) { grid-column: 1 / -1; }.scheduling-automations .automation-form > .button { justify-self: start; }.scheduling-automations .automation-form--schedule { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.scheduling-automations .automation-check { display: inline-flex; align-items: center; gap: var(--atlas-space-2); min-block-size: var(--atlas-size-control); color: var(--atlas-color-text); font-weight: 650; cursor: pointer; }.scheduling-automations .automation-check .ds-checkbox { flex: 0 0 18px; }
+@media (max-width: 1023px) { .scheduling-automations .automation-form, .scheduling-automations .automation-form--schedule { grid-template-columns: 1fr; }.scheduling-automations .automation-form > :is(h4, .button) { grid-column: auto; } }
+@media (pointer: coarse) { .scheduling-automations .automation-check { min-block-size: var(--atlas-size-control-touch); } }

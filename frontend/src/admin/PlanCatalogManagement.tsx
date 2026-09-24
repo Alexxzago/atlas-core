@@ -119,6 +119,7 @@ function PlanFields({
       <label className="ds-field">
         Descripción
         <Textarea
+          size="compact"
           disabled={disabled}
           value={value.description}
           onChange={(event) => set("description", event.target.value)}
@@ -127,6 +128,7 @@ function PlanFields({
       <label className="ds-field">
         Inclusiones de marketing
         <Textarea
+          size="compact"
           disabled={disabled}
           value={value.inclusions.join("\n")}
           onChange={(event) =>

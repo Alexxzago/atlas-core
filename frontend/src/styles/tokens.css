@@ -10,7 +10,7 @@
   --color-processing: var(--atlas-color-processing); --color-processing-bg: var(--atlas-color-processing-surface); --color-processing-border: var(--atlas-color-processing-border);
   --space-1: var(--atlas-space-1); --space-2: var(--atlas-space-2); --space-3: var(--atlas-space-3); --space-4: var(--atlas-space-4); --space-5: var(--atlas-space-5); --space-6: var(--atlas-space-6); --space-7: var(--atlas-space-7); --space-8: var(--atlas-space-8); --space-9: var(--atlas-space-9); --space-10: var(--atlas-space-10);
   --radius-sm: var(--atlas-radius-sm); --radius-md: var(--atlas-radius-md); --radius-lg: var(--atlas-radius-lg); --radius-xl: var(--atlas-radius-xl); --radius-pill: var(--atlas-radius-pill);
-  --header-height: var(--atlas-size-header, 56px); --sidebar-width: var(--atlas-size-sidebar, 248px); --font-system: var(--atlas-font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif);
+  --header-height: var(--atlas-size-header); --sidebar-width: var(--atlas-size-sidebar); --font-system: var(--atlas-font-sans);
   --motion-duration-instant: var(--atlas-motion-instant); --motion-duration-fast: var(--atlas-motion-fast); --motion-duration-standard: var(--atlas-motion-standard); --motion-duration-slow: var(--atlas-motion-slow);
   --motion-ease-standard: var(--atlas-ease-standard); --motion-ease-enter: var(--atlas-ease-enter); --motion-ease-exit: var(--atlas-ease-exit); --motion-ease-emphasized: var(--atlas-ease-emphasized);
   --interactive-hover-translate: var(--atlas-interactive-hover-translate); --interactive-pressed-translate: var(--atlas-interactive-pressed-translate);

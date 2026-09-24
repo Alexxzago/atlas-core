@@ -10,6 +10,7 @@ import {
   Button,
   ConfirmDialog,
   Input,
+  Radio,
   Select,
   StatusBadge,
 } from "../design-system/primitives";
@@ -353,9 +354,8 @@ export function WorkspaceMembershipPortal(props: Props): React.JSX.Element {
                 <fieldset>
                   <legend>{t("workspaceTeam.chooseRecipient")}</legend>
                   {eligibleRecipients.map((member) => (
-                    <label className="workspace-recipient" key={member.id}>
-                      <input
-                        type="radio"
+                    <label className="workspace-recipient ds-radio-label" key={member.id}>
+                      <Radio
                         name="recipient"
                         checked={transferId === member.id}
                         onChange={() => setTransferId(member.id)}

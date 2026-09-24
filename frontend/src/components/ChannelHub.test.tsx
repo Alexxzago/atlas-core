@@ -17,9 +17,11 @@ test("separates available channels from a non-interactive upcoming channels sect
   expect(document.querySelector('a[href="#web-chat-connections"]')).toBeNull();
   const upcoming = screen.getByRole("region", { name: "Upcoming channels" });
   expect(upcoming.textContent).toContain("We are preparing more places");
-  expect(upcoming.textContent).toContain("Instagram");
+  expect(screen.getByRole("heading", { name: "Instagram" })).toBeTruthy();
   expect(upcoming.querySelector("button, a")).toBeNull();
   expect(upcoming.parentElement).not.toBe(screen.getByRole("button", { name: "Set up WhatsApp" }).closest("article"));
+  expect(document.querySelectorAll(".channel-hub__grid .channel-card")).toHaveLength(6);
+  expect(document.querySelectorAll(".channel-hub__grid .channel-card--future")).toHaveLength(4);
 });
 
 test("shows WhatsApp operational state and the correct next action", async () => {

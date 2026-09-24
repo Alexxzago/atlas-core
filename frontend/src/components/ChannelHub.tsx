@@ -28,12 +28,14 @@ export function ChannelHub({ companyId, workspaceId = null, onNavigate }: Props)
   const state = loading ? t("waGuide.loading") : failed ? t("startup.unavailable") : needsAttention ? t("waGuide.health.degraded") : active ? t("whatsapp.active") : whatsApp.length ? t("waGuide.inactive") : t("experience.channels.ready");
   const manageLabel = whatsApp.length ? t("waGuide.continue") : t("experience.channels.openWhatsApp");
   const next = loading ? t("waGuide.loading") : failed || needsAttention ? t("common.retry") : manageLabel;
+  const futureChannels = ["Instagram", "Messenger", "Telegram", "Email"];
 
   return <Section className="channel-hub" title={t("experience.channels.title")} description={t("experience.channels.description")}>
-    <ObjectGrid>
+    <ObjectGrid className="channel-hub__grid">
       <ObjectSurface className="channel-card" emphasis="featured"><div><span className="channel-card__mark" aria-hidden="true">W</span><p className="channel-card__meta">{state}</p><h3>{t("channels.whatsapp")}</h3><p>{t("experience.channels.whatsappDescription")}</p><p>{next}</p></div><Button disabled={loading} onClick={() => failed ? setRetry(value => value + 1) : onNavigate(`/companies/${companyId}/channels/whatsapp`)}>{failed ? t("common.retry") : manageLabel}</Button></ObjectSurface>
       <ObjectSurface className="channel-card"><div><span className="channel-card__mark" aria-hidden="true">C</span><p className="channel-card__meta">{t("experience.channels.available")}</p><h3>{t("channels.webChat")}</h3><p>{t("experience.channels.webChatDescription")}</p></div><Button variant="secondary" onClick={() => onNavigate(`/companies/${companyId}/channels/web-chat`)}>{t("experience.channels.manageWebChat")}</Button></ObjectSurface>
+      {futureChannels.map((channel) => <ObjectSurface className="channel-card channel-card--future" emphasis="muted" key={channel}><div><p className="channel-card__meta">{t("experience.channels.futureTitle")}</p><h3>{channel}</h3><p>{t("experience.channels.futureDescription")}</p></div></ObjectSurface>)}
     </ObjectGrid>
-    <section className="channel-hub__future" aria-labelledby="upcoming-channels-title"><header><h2 id="upcoming-channels-title">{t("experience.channels.futureTitle")}</h2><p>{t("experience.channels.futureDescription")}</p></header><ul>{["Instagram", "Messenger", "Telegram", "Email"].map((channel) => <li key={channel}>{channel}</li>)}</ul></section>
+    <section className="channel-hub__future" aria-labelledby="upcoming-channels-title"><header><h2 id="upcoming-channels-title">{t("experience.channels.futureTitle")}</h2><p>{t("experience.channels.futureDescription")}</p></header></section>
   </Section>;
 }
