@@ -346,7 +346,7 @@
 .workspace-settings {
   max-inline-size: 960px;
   display: grid;
-  gap: var(--atlas-space-6);
+  gap: var(--atlas-space-5);
 }
 .workspace-settings__role {
   color: var(--atlas-color-text-secondary);

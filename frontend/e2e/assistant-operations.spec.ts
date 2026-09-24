@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-type Scenario = { capabilities?: string[]; delayedCompanyOne?: boolean; holdCompanyOneActivationRefresh?: Promise<void>; holdCompanyTwoProjection?: Promise<void>; executionStatus?: 429 | 503 | "network"; pendingPreview?: boolean; platformAdmin?: boolean };
+type Scenario = { capabilities?: string[]; delayedCompanyOne?: boolean; holdCompanyOneActivationRefresh?: Promise<void>; holdCompanyTwoProjection?: Promise<void>; executionStatus?: 429 | 503 | "network"; pendingPreview?: boolean; platformAdmin?: boolean; locale?: "en" | "es"; billingManage?: boolean };
 const allCapabilities = ["company:read", "company:manage", "assistant:capability:manage", "assistant:preview", "chat:use"];
 const rawInternal = /live_data\.read|scheduling\.create_booking|provider-secret|trace-id|schema-version/i;
 
@@ -21,15 +21,20 @@ async function fulfill(route: Route, body: unknown, status = 200) { await route.
 async function installApi(page: Page, scenario: Scenario = {}) {
   const calls: string[] = [];
   let companyOneActivationRequests = 0;
-  await page.addInitScript(() => { localStorage.setItem("atlas.locale", "en"); localStorage.setItem("atlas-theme", "light"); });
+  await page.addInitScript((locale: "en" | "es") => { localStorage.setItem("atlas.locale", locale); localStorage.setItem("atlas-theme", "light"); }, scenario.locale ?? "en");
   await page.route("**/api/**", async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname.replace(/^\/api/, ""), method = request.method();
     calls.push(`${method} ${path}`);
     if (path !== "/identity/session/bootstrap" && !path.startsWith("/public/web-chat/") && method !== "GET" && request.headers()["x-csrf-token"] !== "e2e-csrf") throw new Error(`Missing CSRF on ${method} ${path}`);
     if (path === "/identity/session/bootstrap") return fulfill(route, { status: "authenticated", identity: { userId: "user-1", email: "operator@example.test", locale: "en", status: "active", isPlatformAdmin: scenario.platformAdmin ?? false, idleExpiresAt: "2026-12-01T00:00:00.000Z", absoluteExpiresAt: "2026-12-02T00:00:00.000Z" }, csrfToken: "e2e-csrf", csrfGeneration: 1 });
     if (path === "/admin/overview") return fulfill(route, { data: { totalUsers: 1, totalWorkspaces: 1, totalCompanies: 1, totalAssistantProfiles: 1, webChatConnections: 0, whatsAppConnections: { total: 0, active: 0, healthy: 0, degraded: 0 } } });
-    if (path === "/workspaces" || path === "/workspaces/selected" || path === "/workspaces/workspace-1/select") return fulfill(route, path === "/workspaces" ? [{ id: "workspace-1", name: "E2E Workspace", role: "owner", capabilities: scenario.capabilities ?? allCapabilities }] : { id: "workspace-1", name: "E2E Workspace", role: "owner", capabilities: scenario.capabilities ?? allCapabilities });
+    if (path === "/workspaces" || path === "/workspaces/selected" || path === "/workspaces/workspace-1/select") { const capabilities = [...(scenario.capabilities ?? allCapabilities), ...(scenario.billingManage ? ["workspace:manage"] : [])]; return fulfill(route, path === "/workspaces" ? [{ id: "workspace-1", name: "E2E Workspace", role: "owner", capabilities }] : { id: "workspace-1", name: "E2E Workspace", role: "owner", capabilities }); }
     if (path === "/workspaces/workspace-1/companies") return fulfill(route, { data: [company(1), company(2)] });
+    if (path === "/workspaces/workspace-1/billing/summary") return fulfill(route, { rolloutMode: "managed", subscription: { state: "active", plan: { key: "starter", name: "Starter", interval: "month", currency: "USD", amountMinor: 1200 } }, entitlement: null, capabilities: { canOpenBillingPortal: true, canCancel: true, canReactivate: false, canStartNewCheckout: true, canSwitchProvider: false } });
+    if (path === "/workspaces/workspace-1/billing/offers") return fulfill(route, { offers: [{ offerId: "offer", provider: "stripe", key: "starter", version: 1, name: "Starter", description: "For small teams", inclusions: [], interval: "month", currency: "USD", amountMinor: 1200, checkoutAvailable: true }] });
+    if (path === "/workspaces/workspace-1/billing/management-actions") return fulfill(route, { actions: [], capabilities: { canOpenBillingPortal: true, canCancel: true, canReactivate: false, canStartNewCheckout: true, canSwitchProvider: false } });
+    if (path === "/workspaces/workspace-1/billing/payer-identity-options") return fulfill(route, { options: [{ identityId: "identity_opaque", email: "payer@example.test" }] });
+    if (path === "/admin/billing/plans/bce_0123456789abcdef0123456789abcdef") return fulfill(route, { data: { id: "bce_0123456789abcdef0123456789abcdef", planKey: "starter", catalogVersion: 1, displayName: "Starter", description: "Small teams", publicationState: "draft", trialDurationDays: null, graceDurationDays: null, maxCompanies: 3, maxAssistantProfiles: 4, maxActiveChannels: 2, mutationEligible: true, version: 1, subscriberCount: 0, offers: [], audit: [] } });
     if (path.startsWith(`/public/web-chat/${webChatConnection.publicId}/`)) {
       if (path.endsWith("/session")) return fulfill(route, {}, method === "POST" ? 201 : 204);
       if (path.endsWith("/messages") && method === "GET") return fulfill(route, { messages: [] });
@@ -141,6 +146,76 @@ test("PASS E Today preserves confirmed activation during background refresh and 
   await expect(page.locator(".pilot-readiness--supporting")).toBeVisible();
   expect(await page.locator(".activation-journey").evaluate((element) => element.getBoundingClientRect().top < window.innerHeight)).toBeTruthy();
   expect(await page.locator(".pilot-readiness--supporting").evaluate((element) => element.getBoundingClientRect().top < window.innerHeight + 160)).toBeTruthy();
+});
+
+test("PASS F admin plan form stays compact at 1366x768", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await installApi(page, { platformAdmin: true });
+  await page.goto("/admin/plans/bce_0123456789abcdef0123456789abcdef");
+  await expect(page.getByRole("heading", { name: "Starter" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Actualizar borrador" })).toBeVisible();
+  expect(await page.locator(".admin-plan-form").evaluate((form) => getComputedStyle(form).gridTemplateColumns.split(" ").length)).toBe(2);
+  expect(await page.locator(".admin-plan-form textarea").evaluateAll((fields) => fields.every((field) => field.getBoundingClientRect().height <= 72))).toBeTruthy();
+  expect(await page.getByRole("button", { name: "Actualizar borrador" }).evaluate((button) => button.getBoundingClientRect().top < window.innerHeight)).toBeTruthy();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
+
+test("PASS F tablet admin, billing, and account menu remain reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await installApi(page, { platformAdmin: true });
+  await page.goto("/admin/plans/bce_0123456789abcdef0123456789abcdef");
+  await expect(page.getByRole("heading", { name: "Starter" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Actualizar borrador" })).toBeVisible();
+  expect(await page.locator(".admin-plan-form textarea").evaluateAll((fields) => fields.every((field) => field.getBoundingClientRect().height <= 72 && field.getBoundingClientRect().width >= 200))).toBeTruthy();
+  expect(await page.getByRole("button", { name: "Actualizar borrador" }).evaluate((button) => button.getBoundingClientRect().bottom <= window.innerHeight)).toBeTruthy();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  const memberPage = await page.context().newPage();
+  await memberPage.setViewportSize({ width: 768, height: 1024 });
+  await installApi(memberPage, { locale: "es", billingManage: true });
+  await memberPage.goto("/billing");
+  await expect(memberPage.getByRole("heading", { name: "Contacto de pago" })).toBeVisible();
+  await expect(memberPage.getByText("Payment contact")).toHaveCount(0);
+  expect(await memberPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await memberPage.goto("/companies/1");
+  await memberPage.getByRole("button", { name: "Espacio y cuenta" }).click();
+  const accountMenu = memberPage.getByRole("dialog", { name: "Espacio y cuenta" });
+  await expect(accountMenu).toBeVisible();
+  await expect(accountMenu.getByRole("button", { name: "Facturación" })).toBeVisible();
+  await expect(accountMenu.getByRole("button", { name: "Espacio y equipo" })).toBeVisible();
+  expect(await accountMenu.evaluate((element) => { const bounds = element.getBoundingClientRect(); return bounds.left >= 0 && bounds.right <= window.innerWidth && bounds.top >= 0 && bounds.bottom <= window.innerHeight; })).toBeTruthy();
+  expect(await memberPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await memberPage.close();
+});
+
+test("PASS F billing Spanish copy and account menu stay compact", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await installApi(page, { locale: "es", billingManage: true });
+  await page.goto("/billing");
+  await expect(page.getByRole("heading", { name: "Contacto de pago" })).toBeVisible();
+  await expect(page.getByText("Seleccioná un correo verificado antes de elegir un plan en ARS.")).toBeVisible();
+  await expect(page.getByText("Payment contact")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.goto("/companies/1");
+  await page.getByRole("button", { name: "Espacio y cuenta" }).click();
+  const accountMenu = page.getByRole("dialog", { name: "Espacio y cuenta" });
+  await expect(accountMenu).toBeVisible();
+  expect(await accountMenu.evaluate((element) => element.getBoundingClientRect().width <= 280)).toBeTruthy();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
+
+test("PASS F mobile account menu keeps controls reachable", async ({ browser }) => {
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await installApi(page, { locale: "es" });
+  await page.goto("/companies/1");
+  await page.getByRole("button", { name: "Espacio y cuenta" }).click();
+  const accountMenu = page.getByRole("dialog", { name: "Espacio y cuenta" });
+  await expect(accountMenu).toBeVisible();
+  expect(await accountMenu.evaluate((element) => element.getBoundingClientRect().width <= window.innerWidth)).toBeTruthy();
+  const controls = accountMenu.locator("button:not(:disabled), select:not(:disabled)");
+  expect(await controls.evaluateAll((elements) => elements.every((element) => element.getBoundingClientRect().height >= 44 && element.getBoundingClientRect().width >= 44))).toBeTruthy();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await context.close();
 });
 
 test("PASS B focused routes keep one compact context shell and compact operational rows", async ({ page }) => {

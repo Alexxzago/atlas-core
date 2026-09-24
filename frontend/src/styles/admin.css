@@ -35,7 +35,7 @@
 }
 .admin-page {
   display: grid;
-  gap: var(--atlas-space-7);
+  gap: var(--atlas-space-5);
 }
 .admin-page > header {
   display: grid;
@@ -78,7 +78,7 @@
 }
 .admin-state {
   display: grid;
-  gap: var(--atlas-space-4);
+  gap: var(--atlas-space-3);
   max-inline-size: 960px;
 }
 .admin-readiness-list {

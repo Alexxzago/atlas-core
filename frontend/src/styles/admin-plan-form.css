@@ -1,18 +1,18 @@
 .admin-plan-form {
   display: grid;
-  gap: var(--atlas-space-4);
+  gap: var(--atlas-space-3);
   max-inline-size: 920px;
 }
 .admin-plan-form__limits {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--atlas-space-3);
+  gap: var(--atlas-space-2);
 }
 .admin-plan-form__eligibility {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
-  column-gap: var(--atlas-space-3);
+  column-gap: var(--atlas-space-2);
 }
 .admin-plan-form__eligibility small {
   grid-column: 2;
@@ -22,15 +22,24 @@
   .admin-plan-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .admin-plan-form > label:nth-child(3),
-  .admin-plan-form > label:nth-child(4),
   .admin-plan-form__limits,
   .admin-plan-form__eligibility {
     grid-column: 1 / -1;
   }
 }
+.admin-plan-offer-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--atlas-space-3);
+  max-inline-size: 640px;
+}
+.admin-plan-offer-editor > .ds-button,
+.admin-plan-offer-editor > .ds-alert { justify-self: start; }
+.admin-plan-offer-editor > .ds-alert { grid-column: 1 / -1; }
 @media (max-width: 767px) {
   .admin-plan-form__limits {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .admin-plan-offer-editor { grid-template-columns: 1fr; }
+  .admin-plan-offer-editor > .ds-alert { grid-column: auto; }
 }
