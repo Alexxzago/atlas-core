@@ -42,7 +42,7 @@ test("EPIC046 PASS4F6 lifecycle is idempotent, non-overlapping, and recovers fro
   const callback = { value: null as (() => void) | null };
   const worker: CycleWorker = { async runBatch(): Promise<readonly []> { calls += 1; if (calls === 1) await gate; else if (calls === 2) throw new Error("provider secret must not be reported"); return []; } };
   const subject = new BillingReconciliationRuntime(worker as BillingReconciliationWorker, { intervalMilliseconds: 1_000, batchSize: 2 }, { schedule: (scheduled) => { callback.value = scheduled; return { unref() {} }; }, clear: () => {}, reportError: (message) => { failures += 1; assert.equal(message, "Billing reconciliation cycle failed."); } });
-  subject.start(); subject.start(); callback.value!(); callback.value!();
+  subject.start(); subject.start();
   assert.equal(calls, 1);
   release!(); await new Promise<void>((resolve) => setImmediate(resolve));
   callback.value!(); await new Promise<void>((resolve) => setImmediate(resolve));

@@ -12,7 +12,7 @@ export interface RuntimeWorkerHealth {
   readonly lastErrorCategory: "internal_failure" | "provider_failure" | "database_failure" | null;
   readonly lastFailedStage: WhatsAppRecoveryStage | null;
   readonly lastFailedSubstage: WhatsAppResumeSubstage | null;
-  readonly consecutiveFailures: number; readonly lastActivityAt: number | null;
+  readonly consecutiveFailures: number; readonly lastActivityAt: number | null; readonly cycleStartedAt: number | null; readonly nextScheduledAt: number | null;
   readonly backlogUnsafe: boolean; readonly staleLease: boolean; readonly staleAfterMilliseconds: number;
 }
 
@@ -33,22 +33,24 @@ export function registerRuntimeWorker(name: RuntimeWorkerName | string, options:
   const required = options.required ?? existing?.required ?? (name === "billing_reconciliation" || name === "whatsapp_recovery");
   const staleAfterMilliseconds = options.staleAfterMilliseconds ?? existing?.staleAfterMilliseconds ?? defaultStaleAfterMilliseconds;
   if (!Number.isSafeInteger(staleAfterMilliseconds) || staleAfterMilliseconds < 1) throw new Error("Runtime worker stale timeout must be a positive integer.");
-  workers.set(name, Object.freeze({ registered: true, configured: options.configured ?? existing?.configured ?? required, required, started: existing?.started ?? false, running: false, currentStage: existing?.currentStage ?? null, currentSubstage: existing?.currentSubstage ?? null, lastSuccessfulCycleAt: existing?.lastSuccessfulCycleAt ?? null, lastFailedCycleAt: existing?.lastFailedCycleAt ?? null, lastErrorCategory: existing?.lastErrorCategory ?? null, lastFailedStage: existing?.lastFailedStage ?? null, lastFailedSubstage: existing?.lastFailedSubstage ?? null, consecutiveFailures: existing?.consecutiveFailures ?? 0, lastActivityAt: existing?.lastActivityAt ?? null, backlogUnsafe: existing?.backlogUnsafe ?? false, staleLease: existing?.staleLease ?? false, staleAfterMilliseconds }));
+  workers.set(name, Object.freeze({ registered: true, configured: options.configured ?? existing?.configured ?? required, required, started: existing?.started ?? false, running: false, currentStage: existing?.currentStage ?? null, currentSubstage: existing?.currentSubstage ?? null, lastSuccessfulCycleAt: existing?.lastSuccessfulCycleAt ?? null, lastFailedCycleAt: existing?.lastFailedCycleAt ?? null, lastErrorCategory: existing?.lastErrorCategory ?? null, lastFailedStage: existing?.lastFailedStage ?? null, lastFailedSubstage: existing?.lastFailedSubstage ?? null, consecutiveFailures: existing?.consecutiveFailures ?? 0, lastActivityAt: existing?.lastActivityAt ?? null, cycleStartedAt: existing?.cycleStartedAt ?? null, nextScheduledAt: existing?.nextScheduledAt ?? null, backlogUnsafe: existing?.backlogUnsafe ?? false, staleLease: existing?.staleLease ?? false, staleAfterMilliseconds }));
 }
 function ensureWorker(name: string): void { if (!workers.has(name)) registerRuntimeWorker(name, { required: false }); }
 export function runtimeWorkerStarted(name: string): void { ensureWorker(name); update(name, { started: true, lastActivityAt: now() }); }
-export function runtimeWorkerCycleStarted(name: string): void { ensureWorker(name); update(name, { running: true, currentStage: null, currentSubstage: null, lastActivityAt: now() }); }
+export function runtimeWorkerCycleStarted(name: string): void { ensureWorker(name); const at=now(); update(name, { running: true, currentStage: null, currentSubstage: null, lastActivityAt: at, cycleStartedAt: at, nextScheduledAt: null }); }
 export function runtimeWorkerStageStarted(name: string, stage: WhatsAppRecoveryStage): void { ensureWorker(name); update(name, { running: true, currentStage: stage, currentSubstage: null }); }
 export function runtimeWorkerStageCleared(name: string): void { ensureWorker(name); update(name, { currentStage: null, currentSubstage: null }); }
 export function runtimeWorkerSubstageStarted(name: string, substage: WhatsAppResumeSubstage): void { ensureWorker(name); update(name, { currentSubstage: substage }); }
-export function runtimeWorkerCycleSucceeded(name: string, options: { readonly backlogUnsafe?: boolean; readonly staleLease?: boolean } = {}): void { ensureWorker(name); const at = now(); update(name, { running: false, currentStage: null, currentSubstage: null, lastSuccessfulCycleAt: at, lastActivityAt: at, lastErrorCategory: null, consecutiveFailures: 0, backlogUnsafe: options.backlogUnsafe ?? false, staleLease: options.staleLease ?? false }); }
-export function runtimeWorkerCycleFailed(name: string, safeError: RuntimeWorkerHealth["lastErrorCategory"] = "internal_failure"): void { ensureWorker(name); const at = now(), worker = current(name); update(name, { running: false, currentStage: null, currentSubstage: null, lastFailedCycleAt: at, lastActivityAt: at, lastErrorCategory: safeError, lastFailedStage: worker.currentStage, lastFailedSubstage: worker.currentSubstage, consecutiveFailures: worker.consecutiveFailures + 1 }); }
-export function runtimeWorkerStopped(name: string): void { if (workers.has(name)) update(name, { running: false, lastActivityAt: now() }); }
+export function runtimeWorkerCycleSucceeded(name: string, options: { readonly backlogUnsafe?: boolean; readonly staleLease?: boolean } = {}): void { ensureWorker(name); const at = now(); update(name, { running: false, currentStage: null, currentSubstage: null, lastSuccessfulCycleAt: at, lastActivityAt: at, cycleStartedAt: null, lastErrorCategory: null, consecutiveFailures: 0, backlogUnsafe: options.backlogUnsafe ?? false, staleLease: options.staleLease ?? false }); }
+export function runtimeWorkerCycleFailed(name: string, safeError: RuntimeWorkerHealth["lastErrorCategory"] = "internal_failure"): void { ensureWorker(name); const at = now(), worker = current(name); update(name, { running: false, currentStage: null, currentSubstage: null, lastFailedCycleAt: at, lastActivityAt: at, cycleStartedAt: null, lastErrorCategory: safeError, lastFailedStage: worker.currentStage, lastFailedSubstage: worker.currentSubstage, consecutiveFailures: worker.consecutiveFailures + 1 }); }
+export function runtimeWorkerScheduled(name: string, nextScheduledAt: number): void { ensureWorker(name); update(name, { nextScheduledAt }); }
+export function runtimeWorkerStopped(name: string): void { if (workers.has(name)) update(name, { running: false, cycleStartedAt: null, nextScheduledAt: null, lastActivityAt: now() }); }
 export function runtimeWorkerHealth(name: string): RuntimeWorkerHealth | null { return workers.get(name) ?? null; }
 export function runtimeWorkerIsHealthy(name: string, at = now()): boolean {
   const worker = workers.get(name);
   if (!worker || !worker.required || !worker.started || worker.lastSuccessfulCycleAt === null || worker.lastErrorCategory !== null || worker.backlogUnsafe || worker.staleLease) return false;
-  return at - worker.lastActivityAt! <= worker.staleAfterMilliseconds;
+  if (worker.running) { const maximum = name === "whatsapp_recovery" ? 55_000 : name === "billing_reconciliation" ? 120_000 : worker.staleAfterMilliseconds; return worker.cycleStartedAt !== null && at-worker.cycleStartedAt <= maximum; }
+  return worker.nextScheduledAt !== null && at <= worker.nextScheduledAt + 5_000;
 }
 export function runtimeMissingRequiredWorkers(): readonly string[] { return Object.freeze([...workers.entries()].filter(([name, worker]) => worker.required && !runtimeWorkerIsHealthy(name)).map(([name]) => name).sort()); }
 export function markRuntimeReady(): void { status = "ready"; }

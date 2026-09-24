@@ -53,9 +53,13 @@ export class WhatsAppOutboundDeliveryService {
     return safe(createdDelivery ?? delivery);
   }
 
-  public async dispatchReady(owner: string, limit = 25): Promise<void> {
+  public async dispatchReady(owner: string, limit = 25): Promise<number> {
     const now = this.clock.now(), expiresAt = new Date(Date.parse(now) + 60_000).toISOString();
-    for (const delivery of await this.deliveries.leaseReady(owner, now, expiresAt, limit)) await this.dispatch(owner, delivery);
+    const ready = "leaseReadyWithRecovery" in this.deliveries
+      ? await this.deliveries.leaseReadyWithRecovery(owner, now, expiresAt, limit)
+      : { deliveries: await this.deliveries.leaseReady(owner, now, expiresAt, limit), recoveredAbandonedCount: 0 };
+    for (const delivery of ready.deliveries) await this.dispatch(owner, delivery);
+    return ready.recoveredAbandonedCount + ready.deliveries.length;
   }
 
   private async dispatch(owner: string, delivery: OutboundDelivery): Promise<void> {

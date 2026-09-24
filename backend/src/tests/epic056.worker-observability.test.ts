@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import express from "express";
-import { markRuntimeReady, registerRuntimeWorker, resetRuntimeReadinessForTests, runtimeWorkerHealth, runtimeWorkerIsHealthy } from "../config/runtimeReadiness.js";
+import { markRuntimeReady, registerRuntimeWorker, resetRuntimeReadinessForTests, runtimeWorkerCycleFailed, runtimeWorkerCycleStarted, runtimeWorkerCycleSucceeded, runtimeWorkerHealth, runtimeWorkerIsHealthy, runtimeWorkerScheduled, runtimeWorkerStageStarted, runtimeWorkerStarted, runtimeWorkerSubstageStarted } from "../config/runtimeReadiness.js";
 import type { SqlDatabase, SqlResult, SqlValue } from "../config/sqlDatabase.js";
 import { setOperationalLogSinkForTests } from "../observability/operationalLogger.js";
 import { createHealthRouter, resetReadinessDiagnosticsForTests } from "../routes/health.js";
@@ -80,4 +80,20 @@ test("EPIC056 resume substages identify stalled lease, model, and tool waits wit
     try { runtime.start(); await wait(); clock = 16_001; const health = runtimeWorkerHealth("whatsapp_recovery")!; assert.equal(health.currentStage, "resume_incomplete_executions"); assert.equal(health.currentSubstage, substage); assert.equal(health.lastActivityAt, 1_000); assert.equal(runtimeWorkerIsHealthy("whatsapp_recovery", clock), false); }
     finally { release!(); await runtime.stop(); Date.now = originalNow; resetRuntimeReadinessForTests(); }
   }
+});
+
+test("EPIC056 resumed execution work contributes directly to the WhatsApp recovery cycle", async () => {
+  const dependencies = (resumed: number) => ({ executeProactive: async () => 0, recoverInboundMedia: async () => 0, recoverAtlasMedia: async () => 0, resumeIncomplete: async () => resumed, dispatchOutbound: async () => 0, recoverVoiceSemantics: async () => 0, recoverProactiveSemantics: async () => 0 });
+  assert.equal(await runWhatsAppRecoveryCycle(false, dependencies(1)), 1);
+  assert.equal(await runWhatsAppRecoveryCycle(false, dependencies(0)), 0);
+});
+
+test("EPIC056 readiness applies scheduled and running timing boundaries without masking authoritative failures", () => {
+  resetRuntimeReadinessForTests(); const originalNow = Date.now; let clock = 1_000; Date.now = () => clock;
+  try {
+    registerRuntimeWorker("whatsapp_recovery", { required: true }); runtimeWorkerStarted("whatsapp_recovery"); runtimeWorkerCycleSucceeded("whatsapp_recovery"); runtimeWorkerScheduled("whatsapp_recovery", 2_000); assert.equal(runtimeWorkerIsHealthy("whatsapp_recovery", 7_000), true); assert.equal(runtimeWorkerIsHealthy("whatsapp_recovery", 7_001), false);
+    runtimeWorkerCycleStarted("whatsapp_recovery"); runtimeWorkerStageStarted("whatsapp_recovery", "resume_incomplete_executions"); runtimeWorkerSubstageStarted("whatsapp_recovery", "model_provider_call"); assert.equal(runtimeWorkerIsHealthy("whatsapp_recovery", 56_000), true); assert.equal(runtimeWorkerIsHealthy("whatsapp_recovery", 56_001), false); assert.equal(runtimeWorkerHealth("whatsapp_recovery")?.currentStage, "resume_incomplete_executions"); assert.equal(runtimeWorkerHealth("whatsapp_recovery")?.currentSubstage, "model_provider_call");
+    registerRuntimeWorker("billing_reconciliation", { required: true }); runtimeWorkerStarted("billing_reconciliation"); runtimeWorkerCycleSucceeded("billing_reconciliation"); runtimeWorkerCycleStarted("billing_reconciliation"); assert.equal(runtimeWorkerIsHealthy("billing_reconciliation", 121_000), true); assert.equal(runtimeWorkerIsHealthy("billing_reconciliation", 121_001), false);
+    runtimeWorkerCycleSucceeded("whatsapp_recovery", { backlogUnsafe: true }); assert.equal(runtimeWorkerIsHealthy("whatsapp_recovery", clock), false); runtimeWorkerCycleSucceeded("whatsapp_recovery", { staleLease: true }); assert.equal(runtimeWorkerIsHealthy("whatsapp_recovery", clock), false); runtimeWorkerCycleFailed("whatsapp_recovery", "provider_failure"); assert.equal(runtimeWorkerIsHealthy("whatsapp_recovery", clock), false);
+  } finally { Date.now = originalNow; resetRuntimeReadinessForTests(); }
 });

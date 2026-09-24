@@ -138,7 +138,8 @@ test("EPIC056 resumes real async text capture, atomically finalizes, and dispatc
   const value = await fixture();
   try {
     await value.webhook.acknowledge(payload("text", "wamid-async-text"));
-    await value.webhook.resumeIncomplete();
+    assert.equal(await value.webhook.resumeIncomplete(), 1);
+    assert.equal(await value.webhook.resumeIncomplete(), 0);
     value.provider.enqueueAccepted("wamid-outbound-text");
     await value.outbound.dispatchReady("outbound-worker");
     const requestState = value.database.prepare("SELECT state,outcome FROM channel_execution_requests").get() as { state: string; outcome: string };

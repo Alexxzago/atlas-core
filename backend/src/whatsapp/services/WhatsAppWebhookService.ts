@@ -74,10 +74,10 @@ export class WhatsAppWebhookService {
         if (event.kind === "inbound_text" || event.kind === "inbound_media") { if (this.inboundPersistence) await this.captureAsync(event); else if (event.kind === "inbound_text") await this.capture(event); else await this.capture(event); } else if (event.kind === "inbound_unsupported") await this.captureUnsupported(event); else if (event.kind === "message_status") await this.statuses?.process(event);
     }
   }
-  public async resumeIncomplete(limit = 25, onSubstage: (substage: import("../../config/runtimeReadiness.js").WhatsAppResumeSubstage) => void = () => undefined): Promise<void> {
+  public async resumeIncomplete(limit = 25, onSubstage: (substage: import("../../config/runtimeReadiness.js").WhatsAppResumeSubstage) => void = () => undefined): Promise<number> {
     const observe = (substage: import("../../config/runtimeReadiness.js").WhatsAppResumeSubstage): void => { try { onSubstage(substage); } catch { /* Observability must not change recovery semantics. */ } };
-    if (this.inboundPersistence) { await this.resumeAsync(limit, observe); return; }
-    if (!this.connections || !this.bindings || !this.events || !this.conversations || !this.turns) return;
+    if (this.inboundPersistence) return this.resumeAsync(limit, observe);
+    if (!this.connections || !this.bindings || !this.events || !this.conversations || !this.turns) return 0;
     {
       const now = this.clock.now(), leased = this.events.leaseExecutionRequests(this.executionOwner, now, new Date(Date.parse(now) + 60_000).toISOString(), limit);
       for (const request of leased) {
@@ -104,11 +104,11 @@ export class WhatsAppWebhookService {
           const completedAt = this.clock.now(); this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", turn.response.outcome, completedAt); this.events.updateState(event.id, "claimed", "completed", completedAt);
         } catch (error: unknown) { const failedAt = this.clock.now(); if (error instanceof OperationalConversationTurnSuppressedError || error instanceof VoiceSemanticContentUnavailableError) { this.events.completeExecutionRequest(request.id, this.executionOwner, "completed", "suppressed", failedAt); this.events.updateState(event.id, "claimed", "completed", failedAt); } else { await this.markHumanRequired(context, connection.companyId, binding.conversationId); this.events.completeExecutionRequest(request.id, this.executionOwner, "failed", "provider_unavailable", failedAt); this.events.updateState(event.id, "claimed", "failed", failedAt); } }
       }
-      return;
+      return leased.length;
     }
   }
-  private async resumeAsync(limit: number, onSubstage: (substage: import("../../config/runtimeReadiness.js").WhatsAppResumeSubstage) => void): Promise<void> {
-    if (!this.inboundPersistence || !this.connections || !this.turns) return;
+  private async resumeAsync(limit: number, onSubstage: (substage: import("../../config/runtimeReadiness.js").WhatsAppResumeSubstage) => void): Promise<number> {
+    if (!this.inboundPersistence || !this.connections || !this.turns) return 0;
     const now = this.clock.now(); onSubstage("lease_requests"); const leased = await this.inboundPersistence.leaseExecutionRequests(this.executionOwner, now, new Date(Date.parse(now) + 60_000).toISOString(), limit);
     for (const request of leased) {
       const snapshot = request.snapshot, connectionId = typeof snapshot.whatsAppConnectionId === "string" ? snapshot.whatsAppConnectionId : null, assistantParticipantId = typeof snapshot.assistantParticipantId === "string" ? snapshot.assistantParticipantId : null, recipientWaId = typeof snapshot.recipientWaId === "string" ? snapshot.recipientWaId : null, replyIdempotencyKey = typeof snapshot.replyIdempotencyKey === "string" ? snapshot.replyIdempotencyKey : null, assistantProfileId = typeof snapshot.assistantProfileId === "string" ? snapshot.assistantProfileId : null;
@@ -131,6 +131,7 @@ export class WhatsAppWebhookService {
         else { await this.markHumanRequired(context, connection.companyId, persisted.binding.conversationId); await this.inboundPersistence.settleExecutionRequest(request.id, this.executionOwner, "failed", "provider_unavailable", failedAt); }
       }
     }
+    return leased.length;
   }
   public async leaseInboundExecutionRequests(owner: string, now: string, expiresAt: string, limit = 25): Promise<readonly import("../../transport/domain/providerDelivery.js").ChannelExecutionRequest[]> { return this.inboundPersistence ? this.inboundPersistence.leaseExecutionRequests(owner, now, expiresAt, limit) : []; }
   public async settleInboundExecutionRequest(id: import("../../transport/domain/providerDelivery.js").ChannelExecutionRequestId, owner: string, state: "completed" | "failed", outcome: string | null, updatedAt: string): Promise<import("../../transport/domain/providerDelivery.js").ChannelExecutionRequest | null> { return this.inboundPersistence ? this.inboundPersistence.settleExecutionRequest(id, owner, state, outcome, updatedAt) : null; }
