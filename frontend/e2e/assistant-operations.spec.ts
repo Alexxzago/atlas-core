@@ -99,6 +99,30 @@ test("authoritative activation journey starts verification through its primary C
   await expect.poll(() => calls).toContain(`POST /public/web-chat/${webChatConnection.publicId}/activation-verifications/${"a".repeat(43)}`);
 });
 
+test("PASS B focused routes keep one compact context shell and compact operational rows", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await installApi(page);
+  await open(page);
+  for (const name of ["General", "Behavior", "Capabilities", "Tools", "Automatizaciones", "Status", "Test assistant"] as const) {
+    await section(page, name);
+    await expect(page.locator("[aria-label='Assistant context']")).toHaveCount(1);
+    await expect(page.locator(".assistant-section-navigation")).toHaveCount(1);
+    await expect(page.locator(".assistant-profile-detail h1")).toHaveCount(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  }
+  await section(page, "Capabilities");
+  await expect(page.locator(".assistant-capability-row")).toHaveCount(2);
+  await expect(page.locator(".assistant-capability-card")).toHaveCount(0);
+  await section(page, "Tools");
+  await expect(page.locator(".assistant-tool-row")).toHaveCount(2);
+  await expect(page.locator(".assistant-tool-card")).toHaveCount(0);
+  expect(await page.locator(".assistant-profile-detail").evaluate((element) => element.getBoundingClientRect().height < 220)).toBeTruthy();
+  for (const name of ["General", "Status", "Test assistant"] as const) {
+    await section(page, name);
+    expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= window.innerHeight + 96)).toBeTruthy();
+  }
+});
+
 test("PASS A geometry keeps controls canonical and Web Chat within every acceptance viewport", async ({ page }) => {
   await installApi(page);
   for (const viewport of [{ width: 1366, height: 768 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
