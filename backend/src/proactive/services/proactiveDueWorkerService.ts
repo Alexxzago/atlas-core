@@ -19,10 +19,10 @@ export class ProactiveDueWorkerService {
     return Object.freeze((await Promise.all(leases.map(async lease => (await this.actions.validateClaim(lease, now)) === "valid" ? lease : null))).filter((lease): lease is ProactiveActionLease => lease !== null));
   }
 
-  public async executeAvailable(owner: string, limit = 25): Promise<void> {
-    if (!this.runtime) return;
+  public async executeAvailable(owner: string, limit = 25): Promise<number> {
+    if (!this.runtime) return 0;
     await this.actions.materializeCompleted(this.clock.now(), limit);
-    for (const lease of await this.claimDue(owner, limit)) await this.runtime.execute(lease);
+    const leases=await this.claimDue(owner, limit); for (const lease of leases) await this.runtime.execute(lease);
     await this.actions.materializeCompleted(this.clock.now(), limit);
-  }
+    return leases.length; }
 }

@@ -5,6 +5,8 @@ import { outboundDeliveryId, providerMessageRecordId, reconstructOutboundDeliver
 import { whatsAppConnectionId } from "../whatsapp/domain/whatsappConnection.js";
 import { WhatsAppCloudApiError } from "../whatsapp/providers/WhatsAppCloudApiProvider.js";
 import { WhatsAppOutboundDeliveryService } from "../whatsapp/services/WhatsAppOutboundDeliveryService.js";
+import type { SqlDatabase } from "../config/sqlDatabase.js";
+import { AsyncWhatsAppOutboundDeliveryPersistence } from "../whatsapp/infrastructure/asyncWhatsAppOutboundPersistence.js";
 
 const at = "2026-07-31T12:00:00.000Z";
 const context = { workspaceId: 1, workspaceKey: "whatsapp" };
@@ -14,7 +16,7 @@ const connectionId = whatsAppConnectionId("wac_0123456789abcdef0123456789abcdef"
 
 function delivery(attemptCount = 0, state: OutboundDelivery["state"] = "pending"): OutboundDelivery { return reconstructOutboundDelivery({ id: outboundDeliveryId("odl_0123456789abcdef0123456789abcdef"), providerMessageRecordId: providerMessageRecordId("pmr_0123456789abcdef0123456789abcdef"), transportConnectionId: connectionId, state, attemptCount, nextAttemptAt: at, leaseOwner: state === "leased" ? "stale" : null, leaseExpiresAt: state === "leased" ? "2026-07-31T11:59:00.000Z" : null, safeErrorCategory: null, createdAt: at, updatedAt: at }); }
 
-function setup(failure: unknown | null, initial = delivery(), authorized = true) {
+function setup(failure: unknown | null, initial = delivery(), authorized = true, synchronous = false) {
   let current = initial, sends = 0;
   const attempts: Array<{ outcome: string; category: string | null; next: string | null }> = [];
   const message = { id: messageId, conversationId: conversation, direction: "outbound", content: "Reply" } as ConversationMessage;
@@ -23,7 +25,7 @@ function setup(failure: unknown | null, initial = delivery(), authorized = true)
     { findConversation: () => ({ id: conversation }), findMessage: () => message } as never,
     { findById: () => ({ id: connectionId, workspaceId: 1, companyId: 1, status: "active", phoneNumberId: "phone" }), findByIdForRecovery: () => ({ id: connectionId, workspaceId: 1, companyId: 1, status: "active", phoneNumberId: "phone" }) } as never,
     { create: (value: { id: string }) => { if (records.length) return null; records.push(value); return value; }, findByMessageAndConnection: () => records[0] ?? null, findById: () => ({ id: "pmr_0123456789abcdef0123456789abcdef", direction: "outbound", communicationChannel: "whatsapp", conversationMessageId: messageId }), attachExternalMessageId: () => null } as never,
-    { create: () => current, findByProviderMessageRecordAndConnection: () => current, leaseReady: (owner: string) => { current = reconstructOutboundDelivery({ ...current, state: "leased", attemptCount: current.attemptCount + 1, leaseOwner: owner, leaseExpiresAt: "2026-07-31T12:01:00.000Z" }); return [current]; }, authorizeLease: () => authorized, beginSend: () => true, acceptSend: (_id: string, _owner: string) => { attempts.push({ outcome: "accepted", category: null, next: null }); current = { ...current, state: "accepted", leaseOwner: null, leaseExpiresAt: null }; return current; }, settleUncertainSend: (_id: string, _owner: string, category: string) => { attempts.push({ outcome: "uncertain", category, next: null }); current = { ...current, state: "uncertain", leaseOwner: null, leaseExpiresAt: null, safeErrorCategory: category }; return current; }, settleLease: (_id: string, _owner: string, outcome: OutboundDelivery["state"], next: string | null, category: string | null) => { attempts.push({ outcome, category, next }); current = { ...current, state: outcome, nextAttemptAt: next ?? current.nextAttemptAt, leaseOwner: null, leaseExpiresAt: null, safeErrorCategory: category }; return current; } } as never,
+    { create: () => current, findByProviderMessageRecordAndConnection: () => current, ...(synchronous ? { leaseReady: (owner: string) => { current = reconstructOutboundDelivery({ ...current, state: "leased", attemptCount: current.attemptCount + 1, leaseOwner: owner, leaseExpiresAt: "2026-07-31T12:01:00.000Z" }); return [current]; } } : { leaseReadyWithRecovery: (owner: string) => { current = reconstructOutboundDelivery({ ...current, state: "leased", attemptCount: current.attemptCount + 1, leaseOwner: owner, leaseExpiresAt: "2026-07-31T12:01:00.000Z" }); return { deliveries: [current], recoveredAbandonedCount: 0 }; } }), authorizeLease: () => authorized, beginSend: () => true, acceptSend: (_id: string, _owner: string) => { attempts.push({ outcome: "accepted", category: null, next: null }); current = { ...current, state: "accepted", leaseOwner: null, leaseExpiresAt: null }; return current; }, settleUncertainSend: (_id: string, _owner: string, category: string) => { attempts.push({ outcome: "uncertain", category, next: null }); current = { ...current, state: "uncertain", leaseOwner: null, leaseExpiresAt: null, safeErrorCategory: category }; return current; }, settleLease: (_id: string, _owner: string, outcome: OutboundDelivery["state"], next: string | null, category: string | null) => { attempts.push({ outcome, category, next }); current = { ...current, state: outcome, nextAttemptAt: next ?? current.nextAttemptAt, leaseOwner: null, leaseExpiresAt: null, safeErrorCategory: category }; return current; } } as never,
     { resolve: () => "token" } as never,
     () => ({ sendText: async () => { sends += 1; if (failure) throw failure; return "wamid-out"; } }) as never,
     { now: () => at },
@@ -112,4 +114,31 @@ test("EPIC-027 Phase 5 keeps outbound queueing idempotent and never recreates co
   await value.service.deliverWhatsAppText(context, 1, input);
   assert.equal(value.records.length, 1);
   assert.equal(value.sends(), 0);
+});
+
+test("EPIC056 dispatches through synchronous outbound repositories without recovery extensions", async () => {
+  const value = setup(null, delivery(), true, true);
+  assert.equal(await value.service.dispatchReady("worker"), 1);
+  assert.equal(value.sends(), 1);
+  assert.equal(value.attempts[0]?.outcome, "accepted");
+});
+
+test("EPIC056 skips the empty abandoned-send recovery UPDATE while leasing ready delivery work", async () => {
+  const queries: string[] = [], executions: string[] = [], id = "odl_0123456789abcdef0123456789abcdef";
+  const row = { id, provider_message_record_id: "pmr_0123456789abcdef0123456789abcdef", transport_connection_id: connectionId, state: "leased", attempt_count: 1, next_attempt_at: at, lease_owner: "worker", lease_expires_at: "2026-07-31T12:01:00.000Z", safe_error_category: null, payload_kind: "text", response_policy: "standard", media_asset_id: null, expected_authority_generation: null, send_started_at: null, created_at: at, updated_at: at };
+  const database: SqlDatabase = { async execute(sql) { executions.push(sql); return { rowsAffected: sql.startsWith("UPDATE outbound_deliveries SET state='leased'") ? 1 : 0 }; }, async query(sql) { queries.push(sql); if (sql.startsWith("SELECT id,proactive_action_id")) return []; if (sql.startsWith("SELECT d.id FROM outbound_deliveries")) return [{ id }]; if (sql === "SELECT * FROM outbound_deliveries WHERE id=?") return [row]; return []; }, async writeBatch() { return []; }, async executeScript() {}, async transaction(operation) { return operation(database); }, async close() {} };
+  const result = await new AsyncWhatsAppOutboundDeliveryPersistence(database).leaseReadyWithRecovery("worker", at, "2026-07-31T12:01:00.000Z", 1);
+  const recoveryUpdate = "UPDATE outbound_deliveries SET state='uncertain',lease_owner=NULL,lease_expires_at=NULL,safe_error_category='send_outcome_unknown',updated_at=? WHERE state='leased' AND send_started_at IS NOT NULL";
+  assert.equal(queries.some(sql => sql.startsWith("SELECT id,proactive_action_id FROM outbound_deliveries WHERE state='leased' AND send_started_at IS NOT NULL")), true);
+  assert.equal(executions.includes(recoveryUpdate), false);
+  assert.equal(result.recoveredAbandonedCount, 0);
+  assert.equal(result.deliveries.length, 1);
+});
+
+test("EPIC056 executes abandoned-send recovery UPDATE when candidates exist", async () => {
+  const executions: string[] = [];
+  const database: SqlDatabase = { async execute(sql) { executions.push(sql); return { rowsAffected: 1 }; }, async query(sql) { if (sql.startsWith("SELECT id,proactive_action_id")) return [{ id: "odl_0123456789abcdef0123456789abcdef", proactive_action_id: null }]; return []; }, async writeBatch() { return []; }, async executeScript() {}, async transaction(operation) { return operation(database); }, async close() {} };
+  const result = await new AsyncWhatsAppOutboundDeliveryPersistence(database).leaseReadyWithRecovery("worker", at, "2026-07-31T12:01:00.000Z", 1);
+  assert.equal(executions.some(sql => sql.startsWith("UPDATE outbound_deliveries SET state='uncertain',lease_owner=NULL,lease_expires_at=NULL,safe_error_category='send_outcome_unknown'")), true);
+  assert.equal(result.recoveredAbandonedCount, 1);
 });
