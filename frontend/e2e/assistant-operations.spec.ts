@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-type Scenario = { capabilities?: string[]; delayedCompanyOne?: boolean; executionStatus?: 429 | 503 | "network"; pendingPreview?: boolean; platformAdmin?: boolean };
+type Scenario = { capabilities?: string[]; delayedCompanyOne?: boolean; holdCompanyOneActivationRefresh?: Promise<void>; holdCompanyTwoProjection?: Promise<void>; executionStatus?: 429 | 503 | "network"; pendingPreview?: boolean; platformAdmin?: boolean };
 const allCapabilities = ["company:read", "company:manage", "assistant:capability:manage", "assistant:preview", "chat:use"];
 const rawInternal = /live_data\.read|scheduling\.create_booking|provider-secret|trace-id|schema-version/i;
 
@@ -10,7 +10,7 @@ function readiness(companyId: number) { return { assistantIdentifier: "default",
 const operational = { assistant: { status: "ready", evaluatedAt: "2026-01-01T00:00:00.000Z", blockers: [] }, whatsApp: [], voice: { status: "unavailable" } };
 const catalog = { capabilities: [{ id: "live_data.read", assigned: true, availability: "available", consequence: "read_only", safeReason: null, safeNextAction: null, toolCount: 1 }, { id: "scheduling.create_booking", assigned: false, availability: "available", consequence: "consequential", safeReason: null, safeNextAction: null, toolCount: 1 }] };
 const tools = { tools: [{ id: "live_data.read", enabled: true, availability: "available", capabilityId: "live_data.read", safeReason: null, safeNextAction: null }, { id: "scheduling.create_booking", enabled: false, availability: "available", capabilityId: "scheduling.create_booking", safeReason: null, safeNextAction: null }] };
-const activation = { stages: ["company", "knowledge", "assistant", "web_chat", "verification", "pilot_ready", "human_ops"].map((id, index) => ({ id, status: index < 4 || index === 6 ? "complete" : "incomplete", state: index < 4 || index === 6 ? "complete" : "incomplete", owner: index < 4 || index === 6 ? null : "customer", reasonCode: index === 4 ? "verification_required" : index === 5 ? "pilot_not_ready" : null, action: ["complete_company", "publish_knowledge", "configure_assistant", "activate_web_chat", "start_verification", "resolve_pilot_readiness", "review_human_operations"][index], actionPath: ["/companies/1", "/companies/1/knowledge", "/companies/1/assistant", "/companies/1/channels/web-chat", null, null, "/conversations"][index] })), nextAction: "start_verification", evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "activation-projection-v1" };
+function activation(companyId: number) { const nextAction = companyId === 1 ? "start_verification" : "publish_knowledge"; return { stages: ["company", "knowledge", "assistant", "web_chat", "verification", "pilot_ready", "human_ops"].map((id, index) => ({ id, status: index < (companyId === 1 ? 4 : 1) || index === 6 ? "complete" : "incomplete", state: index < (companyId === 1 ? 4 : 1) || index === 6 ? "complete" : "incomplete", owner: index < (companyId === 1 ? 4 : 1) || index === 6 ? null : "customer", reasonCode: index === 4 && companyId === 1 ? "verification_required" : index === 1 && companyId === 2 ? "published_knowledge_missing" : index === 5 ? "pilot_not_ready" : null, action: ["complete_company", "publish_knowledge", "configure_assistant", "activate_web_chat", "start_verification", "resolve_pilot_readiness", "review_human_operations"][index], actionPath: [`/companies/${companyId}`, `/companies/${companyId}/knowledge`, `/companies/${companyId}/assistant`, `/companies/${companyId}/channels/web-chat`, null, null, "/conversations"][index] })), nextAction, evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "activation-projection-v1" }; }
 const pilotReadiness = { overall: "not_ready", classification: "configuration_ready", checks: [], nextAction: "activate_web_chat", evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "pilot-readiness-v1" };
 const webChatConnection = { id: "wcc_1", publicId: "wcp_00000000000000000000000000000000", assistantProfileId: "assistant-one", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
 const scheduling = { data: { aggregateVersion: 7, locations: [{ id: "loc_1", name: "Main", address: "Main Street", timezone: "UTC", active: true, created_at: "2026-01-01", updated_at: "2026-01-01" }], resources: [{ id: "res_1", location_id: "loc_1", name: "Room", timezone: "UTC", capacity: 1, active: true, created_at: "2026-01-01", updated_at: "2026-01-01" }], services: [{ id: "svc_1", resource_id: "res_1", name: "Visit", duration_minutes: 30, buffer_before_minutes: 0, buffer_after_minutes: 0, slot_granularity_minutes: 15, minimum_lead_minutes: 0, maximum_horizon_days: 30, active: true, created_at: "2026-01-01", updated_at: "2026-01-01" }], weeklyWorkingWindows: [{ id: "ww_1", resource_id: "res_1", weekday: 0, start_time: "09:00", end_time: "17:00" }], dateExceptions: [{ id: "ex_1", resource_id: "res_1", local_date: "2026-01-02", kind: "closed", start_time: null, end_time: null }], readiness: { state: "locally_configured", hasLocations: true, hasResources: true, hasServices: true, hasWeeklyAvailability: true } } };
@@ -20,6 +20,7 @@ const whatsAppStatus = { connection: whatsAppConnection, credentialsConfigured: 
 async function fulfill(route: Route, body: unknown, status = 200) { await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
 async function installApi(page: Page, scenario: Scenario = {}) {
   const calls: string[] = [];
+  let companyOneActivationRequests = 0;
   await page.addInitScript(() => { localStorage.setItem("atlas.locale", "en"); localStorage.setItem("atlas-theme", "light"); });
   await page.route("**/api/**", async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname.replace(/^\/api/, ""), method = request.method();
@@ -49,8 +50,8 @@ async function installApi(page: Page, scenario: Scenario = {}) {
     if (suffix.endsWith("/tools/catalog")) return fulfill(route, tools);
     if (suffix.endsWith("/capabilities") && method === "PUT") return fulfill(route, { capabilities: ["live_data.read"] });
     if (suffix === "/assistant/readiness") return fulfill(route, readiness(companyId));
-    if (suffix === "/pilot-readiness") return fulfill(route, pilotReadiness);
-    if (suffix === "/activation") return fulfill(route, activation);
+    if (suffix === "/pilot-readiness") { if (companyId === 2) await scenario.holdCompanyTwoProjection; return fulfill(route, pilotReadiness); }
+    if (suffix === "/activation") { if (companyId === 1) { companyOneActivationRequests += 1; if (companyOneActivationRequests > 1) await scenario.holdCompanyOneActivationRefresh; } if (companyId === 2) await scenario.holdCompanyTwoProjection; return fulfill(route, activation(companyId)); }
     if (suffix === "/activation/verification-attempts" && method === "POST") return fulfill(route, { token: "a".repeat(43), expiresAt: "2026-01-01T00:15:00.000Z" }, 201);
     if (suffix === "/web-chat-connections") return fulfill(route, [webChatConnection]);
     if (suffix === "/assistant/readiness/refresh") return fulfill(route, readiness(companyId));
@@ -105,6 +106,41 @@ test("authoritative activation journey starts verification through its primary C
   await page.getByRole("button", { name: "Iniciar verificación" }).click();
   await expect.poll(() => calls).toContain("POST /workspaces/workspace-1/companies/1/activation/verification-attempts");
   await expect.poll(() => calls).toContain(`POST /public/web-chat/${webChatConnection.publicId}/activation-verifications/${"a".repeat(43)}`);
+});
+
+test("PASS E Today preserves confirmed activation during background refresh and fences company changes", async ({ page }) => {
+  let releaseCompanyOne!: () => void, releaseCompanyTwo!: () => void;
+  const companyOnePending = new Promise<void>(resolve => { releaseCompanyOne = resolve; });
+  const companyTwoPending = new Promise<void>(resolve => { releaseCompanyTwo = resolve; });
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await installApi(page, { holdCompanyOneActivationRefresh: companyOnePending, holdCompanyTwoProjection: companyTwoPending });
+  await page.goto("/companies/1");
+  const primary = page.getByRole("button", { name: "Iniciar verificación" });
+  await expect(primary).toBeVisible();
+  const height = await page.evaluate(() => document.scrollingElement!.scrollHeight);
+  await page.evaluate(() => { window.open = () => null; });
+  await primary.click();
+  await expect(primary).toBeVisible();
+  await expect(page.getByText("Actualizando estado...")).toBeVisible();
+  await expect(page.getByText("Verificando el estado de activación...")).toHaveCount(0);
+  expect(Math.abs(await page.evaluate(() => document.scrollingElement!.scrollHeight) - height)).toBeLessThanOrEqual(48);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.getByRole("button", { name: "Current company: Northwind Homes" }).click();
+  await page.getByRole("button", { name: /Contoso Realty/ }).click();
+  await expect(page.getByRole("button", { name: "Current company: Contoso Realty" })).toBeVisible();
+  await expect(page.getByText("Verificando el estado de activación...")).toBeVisible();
+  await expect(primary).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Publicar conocimiento" })).toHaveCount(0);
+  releaseCompanyTwo();
+  await expect(page.getByRole("button", { name: "Publicar conocimiento" })).toBeVisible();
+  await expect(primary).toHaveCount(0);
+  releaseCompanyOne();
+  await expect(page.getByRole("button", { name: "Publicar conocimiento" })).toBeVisible();
+  await expect(primary).toHaveCount(0);
+  await expect(page.locator(".activation-journey")).toBeVisible();
+  await expect(page.locator(".pilot-readiness--supporting")).toBeVisible();
+  expect(await page.locator(".activation-journey").evaluate((element) => element.getBoundingClientRect().top < window.innerHeight)).toBeTruthy();
+  expect(await page.locator(".pilot-readiness--supporting").evaluate((element) => element.getBoundingClientRect().top < window.innerHeight + 160)).toBeTruthy();
 });
 
 test("PASS B focused routes keep one compact context shell and compact operational rows", async ({ page }) => {

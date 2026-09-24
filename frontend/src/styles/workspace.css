@@ -742,17 +742,38 @@
   }
 }
 
+.activation-journey {
+  display: grid;
+  gap: var(--atlas-space-3);
+  max-inline-size: 900px;
+}
+.activation-journey .work-anchor {
+  display: grid;
+  gap: var(--atlas-space-2);
+}
+.activation-journey .work-anchor h1 { font-size: clamp(1.8rem, 3vw, 2.5rem); }
+.activation-journey__refresh { margin: 0; color: var(--atlas-color-text-muted); font-size: var(--atlas-font-size-sm); }
+.activation-journey .readiness-evidence { padding-block: var(--atlas-space-3); }
+.activation-journey .readiness-evidence ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--atlas-space-5); padding: 0; margin: 0; list-style: none; }
+.activation-journey .readiness-evidence li { padding-block: var(--atlas-space-2); border-block-end: 1px solid var(--atlas-color-border-subtle); }
+.activation-journey .readiness-evidence li > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--atlas-space-2); }
+.activation-journey .readiness-evidence p { margin: 0; color: var(--atlas-color-text-secondary); font-size: var(--atlas-font-size-sm); }
 .pilot-readiness {
   display: grid;
-  gap: var(--atlas-space-4);
+  gap: var(--atlas-space-3);
   max-inline-size: 900px;
 }
 .pilot-readiness .work-anchor {
   display: grid;
-  gap: var(--atlas-space-2);
+  gap: var(--atlas-space-1);
 }
 .pilot-readiness__summary {
-  padding: var(--atlas-space-3) var(--atlas-space-4);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--atlas-space-2);
+  padding: 0;
+  margin: 0;
+  color: var(--atlas-color-text-secondary);
 }
 .pilot-readiness .next-action {
   justify-self: start;
@@ -884,15 +905,6 @@
   outline-offset: 3px;
 }
 
-.pilot-readiness {
-  gap: var(--atlas-space-3);
-}
-.pilot-readiness .work-anchor {
-  gap: var(--atlas-space-1);
-}
-.pilot-readiness__summary {
-  padding: var(--atlas-space-2) var(--atlas-space-3);
-}
 .pilot-readiness__checks {
   gap: 0;
   padding: var(--atlas-space-3);
@@ -915,6 +927,7 @@
   padding-block: var(--atlas-space-3);
 }
 @media (max-width: 767px) {
+  .activation-journey .readiness-evidence ol { grid-template-columns: 1fr; }
 }
 
 .whatsapp-guide {
