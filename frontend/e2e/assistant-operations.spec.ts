@@ -13,6 +13,7 @@ const tools = { tools: [{ id: "live_data.read", enabled: true, availability: "av
 const activation = { stages: ["company", "knowledge", "assistant", "web_chat", "verification", "pilot_ready", "human_ops"].map((id, index) => ({ id, status: index < 4 || index === 6 ? "complete" : "incomplete", state: index < 4 || index === 6 ? "complete" : "incomplete", owner: index < 4 || index === 6 ? null : "customer", reasonCode: index === 4 ? "verification_required" : index === 5 ? "pilot_not_ready" : null, action: ["complete_company", "publish_knowledge", "configure_assistant", "activate_web_chat", "start_verification", "resolve_pilot_readiness", "review_human_operations"][index], actionPath: ["/companies/1", "/companies/1/knowledge", "/companies/1/assistant", "/companies/1/channels/web-chat", null, null, "/conversations"][index] })), nextAction: "start_verification", evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "activation-projection-v1" };
 const pilotReadiness = { overall: "not_ready", classification: "configuration_ready", checks: [], nextAction: "activate_web_chat", evaluatedAt: "2026-01-01T00:00:00.000Z", policyVersion: "pilot-readiness-v1" };
 const webChatConnection = { id: "wcc_1", publicId: "wcp_00000000000000000000000000000000", assistantProfileId: "assistant-one", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
+const scheduling = { data: { aggregateVersion: 7, locations: [{ id: "loc_1", name: "Main", address: "Main Street", timezone: "UTC", active: true, created_at: "2026-01-01", updated_at: "2026-01-01" }], resources: [{ id: "res_1", location_id: "loc_1", name: "Room", timezone: "UTC", capacity: 1, active: true, created_at: "2026-01-01", updated_at: "2026-01-01" }], services: [{ id: "svc_1", resource_id: "res_1", name: "Visit", duration_minutes: 30, buffer_before_minutes: 0, buffer_after_minutes: 0, slot_granularity_minutes: 15, minimum_lead_minutes: 0, maximum_horizon_days: 30, active: true, created_at: "2026-01-01", updated_at: "2026-01-01" }], weeklyWorkingWindows: [{ id: "ww_1", resource_id: "res_1", weekday: 0, start_time: "09:00", end_time: "17:00" }], dateExceptions: [{ id: "ex_1", resource_id: "res_1", local_date: "2026-01-02", kind: "closed", start_time: null, end_time: null }], readiness: { state: "locally_configured", hasLocations: true, hasResources: true, hasServices: true, hasWeeklyAvailability: true } } };
 
 async function fulfill(route: Route, body: unknown, status = 200) { await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }); }
 async function installApi(page: Page, scenario: Scenario = {}) {
@@ -52,6 +53,8 @@ async function installApi(page: Page, scenario: Scenario = {}) {
     if (suffix === "/web-chat-connections") return fulfill(route, [webChatConnection]);
     if (suffix === "/assistant/readiness/refresh") return fulfill(route, readiness(companyId));
     if (suffix === "/operational-status") return fulfill(route, operational);
+    if (suffix === "/scheduling-configuration") return fulfill(route, scheduling);
+    if (suffix === "/proactive-action-policy") return fulfill(route, { enabled: true, version: 1 });
     if (suffix.endsWith("/preview") || suffix === "/assistant/executions") {
       if (scenario.executionStatus === "network") return route.abort("failed");
       if (scenario.executionStatus) return fulfill(route, { error: { code: "temporarily_unavailable", message: "provider-secret trace-id" } }, scenario.executionStatus);
@@ -121,6 +124,48 @@ test("PASS B focused routes keep one compact context shell and compact operation
     await section(page, name);
     expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= window.innerHeight + 96)).toBeTruthy();
   }
+});
+
+test("PASS C automations keep compact secondary tabs and contained forms", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await installApi(page);
+  await open(page);
+  await section(page, "Automatizaciones");
+  const tabs = page.locator(".automation-tabs");
+  await expect(tabs).toBeVisible();
+  await expect(tabs.getByRole("tab")).toHaveCount(7);
+  await tabs.getByRole("tab", { name: "Ubicaciones" }).click();
+  await expect(tabs.getByRole("tab", { name: "Ubicaciones" })).toHaveAttribute("aria-selected", "true");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
+
+for (const [width, height, columns] of [[1366, 768, 2], [1024, 768, 2], [768, 1024, 1]] as const) test(`PASS C automation forms remain contained at ${width}x${height}`, async ({ page }) => {
+  await page.setViewportSize({ width, height });
+  await installApi(page);
+  await open(page);
+  await section(page, "Automatizaciones");
+  await page.getByRole("tab", { name: "Ubicaciones" }).click();
+  const form = page.locator(".automation-form").first();
+  await expect(form).toBeVisible();
+  await expect(form.getByRole("button", { name: "Guardar ubicación" })).toBeVisible();
+  expect(await form.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(columns);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  if (width === 1366) expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= window.innerHeight + 128)).toBeTruthy();
+});
+
+test("PASS C mobile automation controls retain reachable touch targets", async ({ browser }) => {
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await installApi(page);
+  await open(page);
+  await section(page, "Automatizaciones");
+  await page.getByRole("tab", { name: "Ubicaciones" }).click();
+  const checkbox = page.locator(".automation-check").filter({ hasText: "Ubicación activa" });
+  await expect(checkbox).toBeVisible();
+  await expect(page.getByRole("button", { name: "Guardar ubicación" })).toBeVisible();
+  expect(await checkbox.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await context.close();
 });
 
 test("PASS A geometry keeps controls canonical and Web Chat within every acceptance viewport", async ({ page }) => {

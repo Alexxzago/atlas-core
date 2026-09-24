@@ -415,6 +415,7 @@ export function SchedulingAutomationsPanel(props: Props): React.JSX.Element {
         </div>
       </header>
       <Tabs
+        className="automation-tabs"
         label="Secciones de automatizaciones"
         selectedId={tab}
         tabs={[
@@ -553,7 +554,7 @@ export function SchedulingAutomationsPanel(props: Props): React.JSX.Element {
               ))}
             </ul>
             {canManage && (
-              <form
+              <form className="automation-form"
                 onSubmit={(event) => {
                   event.preventDefault();
                   const payload = editingLocationId
@@ -628,7 +629,7 @@ export function SchedulingAutomationsPanel(props: Props): React.JSX.Element {
               ))}
             </ul>
             {canManage && (
-              <form
+              <form className="automation-form"
                 onSubmit={(event) => {
                   event.preventDefault();
                   const payload = {
@@ -717,7 +718,7 @@ export function SchedulingAutomationsPanel(props: Props): React.JSX.Element {
               ))}
             </ul>
             {canManage && (
-              <form
+              <form className="automation-form"
                 onSubmit={(event) => {
                   event.preventDefault();
                   const payload = {
@@ -825,7 +826,7 @@ export function SchedulingAutomationsPanel(props: Props): React.JSX.Element {
           <section>
             <h3>Disponibilidad semanal</h3>
             {canManage && (
-              <form
+              <form className="automation-form automation-form--schedule"
                 onSubmit={(event) => {
                   event.preventDefault();
                   void execute("replace_weekly_availability", {
@@ -897,7 +898,7 @@ export function SchedulingAutomationsPanel(props: Props): React.JSX.Element {
               ))}
             </ul>
             {canManage && (
-              <form
+              <form className="automation-form automation-form--schedule"
                 onSubmit={(event) => {
                   event.preventDefault();
                   void execute("add_date_exception", {
