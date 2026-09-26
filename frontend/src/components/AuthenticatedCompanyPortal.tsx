@@ -80,8 +80,9 @@ function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmi
     if (requestedCompanyId || !state.selectedWorkspace || state.companiesLoading || state.companyError || state.selectedCompanyId !== null || state.companies.length !== 1) return;
     const companyId = state.companies[0]!.id;
     setAutoSelectingCompanyId(companyId);
-    void selectCompany(companyId).then((selected) => { if (selected) navigate(`/companies/${companyId}`, { replace: true }); }).finally(() => setAutoSelectingCompanyId(null));
-  }, [requestedCompanyId, state.selectedWorkspace?.id, state.companiesLoading, state.companyError, state.selectedCompanyId, state.companies]);
+    const shouldRedirect = route.name === "dashboard" || route.name === "companies";
+    void selectCompany(companyId).then((selected) => { if (selected && shouldRedirect) navigate(`/companies/${companyId}`, { replace: true }); }).finally(() => setAutoSelectingCompanyId(null));
+  }, [requestedCompanyId, state.selectedWorkspace?.id, state.companiesLoading, state.companyError, state.selectedCompanyId, state.companies, route.name, navigate, selectCompany]);
 
   useEffect(() => {
     if (state.notice?.type !== "success") return;
@@ -91,9 +92,75 @@ function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmi
 
   const assistantSection=route.name==="company-assistant-section"&&(route.section==="general"||route.section==="behavior"||route.section==="capabilities"||route.section==="tools"||route.section==="automations"||route.section==="status"||route.section==="test")?route.section:undefined;
   const assistantContextKey=`${state.selectedWorkspace?.id??"none"}:${state.selectedCompanyId??"none"}:${selectedProfile?.id??"none"}:${selectedProfile?.status??"none"}:${(state.selectedWorkspace?.capabilities??[]).join(",")}`;
-  const assistantPanel = assistantSection==="capabilities"&&selectedProfile?<><AssistantProfilesPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} workspaceRole={state.selectedWorkspace?.role ?? null} capabilities={state.selectedWorkspace?.capabilities ?? []} companyId={state.selectedCompanyId} companyName={selectedCompany?.name ?? null} companySelected={state.selectedCompanyId !== null} profiles={state.profiles} selectedProfile={selectedProfile} transientArchivedProfile={state.transientArchivedProfile} loading={state.profilesLoading} error={state.profileError} formMode={state.formMode} submitting={state.submitting} transitionTarget={state.transitionTarget} activeSection={assistantSection} onNavigate={navigate} onSelectProfile={(id) => {void selectProfile(id);navigate(`/companies/${state.selectedCompanyId}/assistant/${id}/general`);}} onOpenCreate={() => openProfileForm("create")} onOpenEdit={() => openProfileForm("edit")} onCloseForm={closeProfileForm} onSubmitForm={(input) => void submitProfile(input)} onTransition={(profile, target) => void transitionProfile(profile, target)} onRetry={reloadProfiles}/><AssistantCapabilitiesPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id??null} companyId={state.selectedCompanyId} profileId={selectedProfile.id} canManage={(state.selectedWorkspace?.capabilities??[]).includes("assistant:capability:manage")}/></>:assistantSection==="tools"&&selectedProfile?<><AssistantProfilesPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} workspaceRole={state.selectedWorkspace?.role ?? null} capabilities={state.selectedWorkspace?.capabilities ?? []} companyId={state.selectedCompanyId} companyName={selectedCompany?.name ?? null} companySelected={state.selectedCompanyId !== null} profiles={state.profiles} selectedProfile={selectedProfile} transientArchivedProfile={state.transientArchivedProfile} loading={state.profilesLoading} error={state.profileError} formMode={state.formMode} submitting={state.submitting} transitionTarget={state.transitionTarget} activeSection={assistantSection} onNavigate={navigate} onSelectProfile={(id) => {void selectProfile(id);navigate(`/companies/${state.selectedCompanyId}/assistant/${id}/general`);}} onOpenCreate={() => openProfileForm("create")} onOpenEdit={() => openProfileForm("edit")} onCloseForm={closeProfileForm} onSubmitForm={(input) => void submitProfile(input)} onTransition={(profile, target) => void transitionProfile(profile, target)} onRetry={reloadProfiles}/><AssistantToolsPanel workspaceId={state.selectedWorkspace?.id??null} companyId={state.selectedCompanyId} profileId={selectedProfile.id} onNavigate={navigate}/></>:<AssistantProfilesPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} workspaceRole={state.selectedWorkspace?.role ?? null} capabilities={state.selectedWorkspace?.capabilities ?? []} companyId={state.selectedCompanyId} companyName={selectedCompany?.name ?? null} companySelected={state.selectedCompanyId !== null} profiles={state.profiles} selectedProfile={selectedProfile} transientArchivedProfile={state.transientArchivedProfile} loading={state.profilesLoading} error={state.profileError} formMode={state.formMode} submitting={state.submitting} transitionTarget={state.transitionTarget} {...(assistantSection ? { activeSection: assistantSection } : {})} onNavigate={navigate} onSelectProfile={(id) => {void selectProfile(id);navigate(`/companies/${state.selectedCompanyId}/assistant/${id}/general`);}} onOpenCreate={() => openProfileForm("create")} onOpenEdit={() => openProfileForm("edit")} onCloseForm={closeProfileForm} onSubmitForm={(input) => void submitProfile(input)} onTransition={(profile, target) => void transitionProfile(profile, target)} onRetry={reloadProfiles}/>;
-  const testPanel = assistantSection === "test" && selectedProfile ? <><AssistantProfilesPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} workspaceRole={state.selectedWorkspace?.role ?? null} capabilities={state.selectedWorkspace?.capabilities ?? []} companyId={state.selectedCompanyId} companyName={selectedCompany?.name ?? null} companySelected={state.selectedCompanyId !== null} profiles={state.profiles} selectedProfile={selectedProfile} transientArchivedProfile={state.transientArchivedProfile} loading={state.profilesLoading} error={state.profileError} formMode={state.formMode} submitting={state.submitting} transitionTarget={state.transitionTarget} activeSection={assistantSection} onNavigate={navigate} onSelectProfile={(id) => { void selectProfile(id); navigate(`/companies/${state.selectedCompanyId}/assistant/${id}/general`); }} onOpenCreate={() => openProfileForm("create")} onOpenEdit={() => openProfileForm("edit")} onCloseForm={closeProfileForm} onSubmitForm={(input) => void submitProfile(input)} onTransition={(profile, target) => void transitionProfile(profile, target)} onRetry={reloadProfiles}/><AssistantTestPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} companyId={state.selectedCompanyId} profile={selectedProfile} capabilities={state.selectedWorkspace?.capabilities ?? []} onNavigate={navigate}/></> : null;
-   const automationsPanel=assistantSection==="automations"&&selectedProfile?<><AssistantProfilesPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} workspaceRole={state.selectedWorkspace?.role ?? null} capabilities={state.selectedWorkspace?.capabilities ?? []} companyId={state.selectedCompanyId} companyName={selectedCompany?.name ?? null} companySelected={state.selectedCompanyId !== null} profiles={state.profiles} selectedProfile={selectedProfile} transientArchivedProfile={state.transientArchivedProfile} loading={state.profilesLoading} error={state.profileError} formMode={state.formMode} submitting={state.submitting} transitionTarget={state.transitionTarget} activeSection="automations" onNavigate={navigate} onSelectProfile={(id) => { void selectProfile(id); navigate(`/companies/${state.selectedCompanyId}/assistant/${id}/general`); }} onOpenCreate={() => openProfileForm("create")} onOpenEdit={() => openProfileForm("edit")} onCloseForm={closeProfileForm} onSubmitForm={(input) => void submitProfile(input)} onTransition={(profile, target) => void transitionProfile(profile, target)} onRetry={reloadProfiles}/><SchedulingAutomationsPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id??null} companyId={state.selectedCompanyId} profileId={selectedProfile.id} capabilities={state.selectedWorkspace?.capabilities??[]} onNavigate={navigate}/></>:null;
+  const assistantPanel = (
+    <AssistantProfilesPanel
+      csrf={csrf}
+      workspaceId={state.selectedWorkspace?.id ?? null}
+      workspaceRole={state.selectedWorkspace?.role ?? null}
+      capabilities={state.selectedWorkspace?.capabilities ?? []}
+      companyId={state.selectedCompanyId}
+      companyName={selectedCompany?.name ?? null}
+      companySelected={state.selectedCompanyId !== null}
+      profiles={state.profiles}
+      selectedProfile={selectedProfile}
+      transientArchivedProfile={state.transientArchivedProfile}
+      loading={state.profilesLoading}
+      error={state.profileError}
+      formMode={state.formMode}
+      submitting={state.submitting}
+      transitionTarget={state.transitionTarget}
+      {...(assistantSection ? { activeSection: assistantSection } : {})}
+      onNavigate={navigate}
+      onSelectProfile={(id) => {
+        void selectProfile(id);
+        navigate(`/companies/${state.selectedCompanyId}/assistant/${id}/general`);
+      }}
+      onOpenCreate={() => openProfileForm("create")}
+      onOpenEdit={() => openProfileForm("edit")}
+      onCloseForm={closeProfileForm}
+      onSubmitForm={(input) => void submitProfile(input)}
+      onTransition={(profile, target) => void transitionProfile(profile, target)}
+      onRetry={reloadProfiles}
+    >
+      {assistantSection === "capabilities" && selectedProfile && (
+        <AssistantCapabilitiesPanel
+          csrf={csrf}
+          workspaceId={state.selectedWorkspace?.id ?? null}
+          companyId={state.selectedCompanyId}
+          profileId={selectedProfile.id}
+          canManage={(state.selectedWorkspace?.capabilities ?? []).includes("assistant:capability:manage")}
+        />
+      )}
+      {assistantSection === "tools" && selectedProfile && (
+        <AssistantToolsPanel
+          workspaceId={state.selectedWorkspace?.id ?? null}
+          companyId={state.selectedCompanyId}
+          profileId={selectedProfile.id}
+          onNavigate={navigate}
+        />
+      )}
+      {assistantSection === "automations" && selectedProfile && (
+        <SchedulingAutomationsPanel
+          csrf={csrf}
+          workspaceId={state.selectedWorkspace?.id ?? null}
+          companyId={state.selectedCompanyId}
+          profileId={selectedProfile.id}
+          capabilities={state.selectedWorkspace?.capabilities ?? []}
+          onNavigate={navigate}
+        />
+      )}
+      {assistantSection === "test" && selectedProfile && (
+        <AssistantTestPanel
+          csrf={csrf}
+          workspaceId={state.selectedWorkspace?.id ?? null}
+          companyId={state.selectedCompanyId}
+          profile={selectedProfile}
+          capabilities={state.selectedWorkspace?.capabilities ?? []}
+          onNavigate={navigate}
+        />
+      )}
+    </AssistantProfilesPanel>
+  );
   const knowledgePanel = <CompanyKnowledgePanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} companyId={state.selectedCompanyId} capabilities={state.selectedWorkspace?.capabilities ?? []} onPublicationCompleted={refreshSelectedCompany}/>;
   const whatsappPanel = <WhatsAppOnboardingPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} companyId={state.selectedCompanyId} profiles={state.profiles} capabilities={state.selectedWorkspace?.capabilities ?? []}/>;
   const webChatPanel = <WebChatConnectionsPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} companyId={state.selectedCompanyId} companyStatus={selectedCompany?.status ?? null} profiles={state.profiles} capabilities={state.selectedWorkspace?.capabilities ?? []} onNavigate={navigate}/>;
@@ -108,7 +175,7 @@ function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmi
     if (route.name === "analytics") return <><PageHeader title={t("shell.analyticsTitle")} description={t("shell.analyticsDescription")} /><EmptyState title={t("shell.analyticsTitle")} description={t("shell.analyticsDescription")} /></>;
     if (route.name === "billing") return <BillingPage csrf={csrf} workspace={state.selectedWorkspace} search={search} pathname={pathname} onNavigateDashboard={() => navigate("/dashboard")}/>;
     if (route.name === "settings") return <WorkspaceMembershipPortal csrf={csrf} currentUserId={userId} currentUserEmail={email} workspaces={state.workspaces} selectedWorkspace={state.selectedWorkspace} pendingWorkspaceId={state.pendingWorkspaceId} loading={state.workspacesLoading} error={state.workspaceError} onSelectWorkspace={(id) => { void selectWorkspace(id).then((selected) => { if (selected) navigate("/companies", { replace: true }); }); }} onWorkspacesChanged={() => void refresh()} onActiveWorkspaceLeft={clearWorkspace} onNavigateDashboard={() => navigate("/dashboard")}/>;
-    if (route.name === "company-assistant" || route.name === "company-assistant-section") return <div className="assistant-detail-view" key={assistantContextKey}>{automationsPanel ?? testPanel ?? assistantPanel}</div>;
+    if (route.name === "company-assistant" || route.name === "company-assistant-section") return <div className="assistant-detail-view" key={assistantContextKey}>{assistantPanel}</div>;
     if (route.name === "company-knowledge") return knowledgePanel;
     if (route.name === "company-channels") return <>{requestedCompanyId && <ChannelHub companyId={requestedCompanyId} workspaceId={state.selectedWorkspace?.id ?? null} onNavigate={navigate}/>}</>;
     if (route.name === "company-web-chat") return <><ContextBackLink href={`/companies/${requestedCompanyId}/channels`} label={t("channels.back")} onNavigate={(event)=>{event.preventDefault();navigate(`/companies/${requestedCompanyId}/channels`);}}/>{webChatPanel}</>;

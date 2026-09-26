@@ -1,75 +1,9 @@
 .app-shell {
   background: var(--atlas-color-canvas);
 }
-.app-sidebar {
-  display: flex;
-  flex-direction: column;
-  padding: var(--atlas-space-6) var(--atlas-space-4);
-  background: var(--atlas-color-surface);
-  border-inline-end: 1px solid var(--atlas-color-border-subtle);
-}
-.app-sidebar__brand {
-  display: grid;
-  grid-template-columns: 9px auto;
-  align-items: center;
-  column-gap: var(--atlas-space-3);
-  margin: var(--atlas-space-2) var(--atlas-space-3) var(--atlas-space-9);
-  color: var(--atlas-color-text);
-}
-.app-sidebar__brand > span {
-  inline-size: 9px;
-  block-size: 9px;
-  background: var(--atlas-color-warning);
-  border-radius: 2px;
-  box-shadow: 0 0 0 4px var(--atlas-color-warm-highlight);
-}
-.app-sidebar__brand strong {
-  font-size: 15px;
-  letter-spacing: 0.13em;
-}
-.app-sidebar__brand small {
-  grid-column: 2;
-  color: var(--atlas-color-text-muted);
-  font-size: 11px;
-  font-weight: 600;
-}
-.app-sidebar__navigation {
-  gap: var(--atlas-space-2);
-}
-.app-sidebar__navigation button {
-  min-block-size: 42px;
-  display: flex;
-  align-items: center;
-  gap: var(--atlas-space-3);
-  padding-inline: var(--atlas-space-3);
-  border: 1px solid transparent;
-  font-size: var(--atlas-font-size-sm);
-  font-weight: 550;
-  transition:
-    color var(--atlas-motion-fast) var(--atlas-ease-enter),
-    background-color var(--atlas-motion-fast) var(--atlas-ease-enter),
-    border-color var(--atlas-motion-fast) var(--atlas-ease-enter);
-}
-.app-sidebar__navigation button:hover {
-  background: var(--atlas-color-surface-muted);
-}
-.app-sidebar__navigation button.is-active {
-  color: var(--atlas-color-text);
-  background: var(--atlas-color-action-subtle);
-  border-color: var(--atlas-color-action-border);
-}
-.app-nav-icon {
-  inline-size: 18px;
-  block-size: 18px;
-  flex: 0 0 auto;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.7;
-}
+
 .app-main {
-  padding: 44px var(--atlas-space-9) 64px;
+  padding: 24px var(--atlas-space-7) 40px;
 }
 .app-main > * {
   max-inline-size: 1240px;
@@ -104,24 +38,20 @@
 }
 .app-main .authenticated-section,
 .app-main .portal-section {
-  padding: var(--atlas-space-7);
-  background: var(--atlas-color-surface-raised);
-  border: 1px solid var(--atlas-color-border-subtle);
-  border-radius: var(--atlas-radius-xl);
-  box-shadow: var(--atlas-shadow-control);
-}
-.app-main .authenticated-section:hover,
-.app-main .portal-section:hover {
-  border-color: var(--atlas-color-border);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 .company-context {
   display: grid;
-  gap: var(--atlas-space-7);
-  padding: clamp(var(--atlas-space-7), 4vw, var(--atlas-space-8));
-  background: var(--atlas-color-surface-raised);
-  border: 1px solid var(--atlas-color-border-subtle);
-  border-radius: var(--atlas-radius-xl);
-  box-shadow: var(--atlas-shadow-raised);
+  gap: var(--atlas-space-6);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 .company-context__heading {
   display: flex;
@@ -145,8 +75,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 0.72fr);
   gap: var(--atlas-space-6);
-  padding: var(--atlas-space-6);
-  background: var(--atlas-color-surface-muted);
+  padding: var(--atlas-space-5);
+  background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--atlas-color-border-subtle);
   border-radius: var(--atlas-radius-lg);
 }
@@ -233,10 +163,12 @@
   justify-content: space-between;
   gap: var(--atlas-space-3);
   padding: var(--atlas-card-padding-compact);
-  background: var(--atlas-color-surface-raised);
-  border: var(--atlas-border-subtle);
+  background: rgba(14, 18, 27, 0.65);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--atlas-radius-lg);
-  box-shadow: var(--atlas-shadow-control);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
 }
 .channel-card--featured {
   background: linear-gradient(
@@ -356,9 +288,12 @@
   justify-content: space-between;
   gap: var(--atlas-space-5);
   padding: var(--atlas-space-4);
-  background: var(--atlas-color-surface-raised);
-  border: 1px solid var(--atlas-color-border-subtle);
+  background: rgba(14, 18, 27, 0.65);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--atlas-radius-lg);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
 }
 .workspace-summary > div {
   display: grid;
@@ -1310,16 +1245,7 @@
 .scheduling-automations form > :is(h4, .button) {
   grid-column: 1 / -1;
 }
-.scheduling-automations[data-tab="agenda"]
-  > section:not(:nth-of-type(1)):not(:nth-of-type(3)),
-.scheduling-automations[data-tab="followups"] > section:not(:nth-of-type(2)),
-.scheduling-automations[data-tab="locations"] > section:not(:nth-of-type(4)),
-.scheduling-automations[data-tab="resources"] > section:not(:nth-of-type(5)),
-.scheduling-automations[data-tab="services"] > section:not(:nth-of-type(6)),
-.scheduling-automations[data-tab="availability"] > section:not(:nth-of-type(7)),
-.scheduling-automations[data-tab="exceptions"] > section:not(:nth-of-type(8)) {
-  display: none;
-}
+
 @media (min-width: 768px) {
   .app-main {
     padding-block: 32px 48px;

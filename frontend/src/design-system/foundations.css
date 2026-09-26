@@ -18,14 +18,14 @@
   --atlas-color-border: #d8d9df;
   --atlas-color-border-subtle: #e8e6e1;
   --atlas-color-border-strong: #b8beca;
-  --atlas-color-action: #3f419f;
-  --atlas-color-action-subtle: #ebe9fa;
-  --atlas-color-action-hover: #30327f;
-  --atlas-color-action-active: #272966;
-  --atlas-color-action-border: #c9c5ee;
-  --atlas-color-warm-highlight: rgb(190 140 59 / 16%);
-  --atlas-color-focus: #3f419f;
-  --atlas-color-focus-halo: rgb(70 86 199 / 24%);
+  --atlas-color-action: #d97706;
+  --atlas-color-action-subtle: #fef3c7;
+  --atlas-color-action-hover: #b45309;
+  --atlas-color-action-active: #92400e;
+  --atlas-color-action-border: #fcd34d;
+  --atlas-color-warm-highlight: rgb(217 119 6 / 16%);
+  --atlas-color-focus: #d97706;
+  --atlas-color-focus-halo: rgb(217 119 6 / 24%);
   --atlas-color-success: #287857;
   --atlas-color-success-surface: #e7f3eb;
   --atlas-color-success-border: #b8ddc7;
@@ -69,7 +69,8 @@
   --atlas-size-textarea-standard: 96px;
   --atlas-size-textarea-long: 160px;
   --atlas-size-header: 56px;
-  --atlas-size-sidebar: 248px;
+  --atlas-size-sidebar: 68px;
+  --atlas-size-sidebar-expanded: 240px;
   --atlas-page-gutter: 24px;
   --atlas-page-gutter-compact: 16px;
   --atlas-page-section-gap: 32px;
@@ -124,41 +125,49 @@
 }
 
 :root[data-theme="dark"] {
-  --atlas-color-canvas: #111418;
-  --atlas-color-surface: #181d24;
-  --atlas-color-surface-raised: #202630;
-  --atlas-color-surface-elevated: var(--atlas-color-surface-raised);
-  --atlas-color-surface-muted: #272e38;
-  --atlas-color-surface-subtle: var(--atlas-color-surface-muted);
-  --atlas-color-surface-overlay: #2d3541;
-  --atlas-color-surface-selected: #35344f;
-  --atlas-color-text: #f5f1e9;
-  --atlas-color-text-secondary: #c7c1b7;
-  --atlas-color-text-muted: #938e86;
-  --atlas-color-text-disabled: #6e6a65;
-  --atlas-color-action: #b8b0ff;
-  --atlas-color-action-subtle: #302f54;
-  --atlas-color-action-hover: #d0caff;
-  --atlas-color-action-active: #e3dfff;
-  --atlas-color-action-border: #65609a;
-  --atlas-color-focus: #c2baff;
-  --atlas-color-focus-halo: rgb(194 186 255 / 28%);
-  --atlas-color-success: #78c59c;
-  --atlas-color-success-surface: #183a30;
-  --atlas-color-success-border: #37745b;
-  --atlas-color-warning: #e1b25e;
-  --atlas-color-warning-surface: #44371f;
-  --atlas-color-warning-border: #785f31;
-  --atlas-color-danger: #ee9995;
-  --atlas-color-danger-surface: #482b30;
-  --atlas-color-danger-border: #7e4b52;
-  --atlas-shadow-overlay: 0 20px 48px rgb(0 0 0 / 46%);
-  --atlas-shadow-raised: 0 1px 2px rgb(0 0 0 / 30%), 0 18px 38px rgb(0 0 0 / 25%);
-  --atlas-shadow-control: 0 1px 2px rgb(0 0 0 / 25%);
-  --atlas-shadow-action: 0 1px 2px rgb(0 0 0 / 28%), 0 6px 16px rgb(92 82 180 / 22%);
-  --atlas-color-action-text: #171426;
-  --atlas-color-danger-text: #241416;
-  --atlas-color-disabled-surface: #252a31;
+  --atlas-color-canvas: #06080e;
+  --atlas-color-surface: rgba(13, 17, 26, 0.75);
+  --atlas-color-surface-raised: rgba(18, 23, 35, 0.8);
+  --atlas-color-surface-elevated: rgba(24, 30, 46, 0.85);
+  --atlas-color-surface-muted: rgba(22, 28, 42, 0.6);
+  --atlas-color-surface-subtle: rgba(14, 18, 28, 0.5);
+  --atlas-color-surface-overlay: rgba(20, 26, 40, 0.95);
+  --atlas-color-surface-selected: rgba(245, 158, 11, 0.12);
+  --atlas-color-text: #f8fafc;
+  --atlas-color-text-secondary: #94a3b8;
+  --atlas-color-text-muted: #64748b;
+  --atlas-color-text-disabled: #475569;
+  --atlas-color-border: rgba(255, 255, 255, 0.08);
+  --atlas-color-border-subtle: rgba(255, 255, 255, 0.05);
+  --atlas-color-border-strong: rgba(255, 255, 255, 0.18);
+  --atlas-color-action: #f59e0b;
+  --atlas-color-action-subtle: rgba(245, 158, 11, 0.14);
+  --atlas-color-action-hover: #fbbf24;
+  --atlas-color-action-active: #d97706;
+  --atlas-color-action-border: rgba(245, 158, 11, 0.4);
+  --atlas-color-warm-highlight: rgba(245, 158, 11, 0.22);
+  --atlas-color-focus: #f59e0b;
+  --atlas-color-focus-halo: rgba(245, 158, 11, 0.32);
+  --atlas-color-selected-border: rgba(245, 158, 11, 0.6);
+  --atlas-color-success: #34d399;
+  --atlas-color-success-surface: rgba(16, 185, 129, 0.15);
+  --atlas-color-success-border: rgba(16, 185, 129, 0.35);
+  --atlas-color-warning: #fbbf24;
+  --atlas-color-warning-surface: rgba(245, 158, 11, 0.15);
+  --atlas-color-warning-border: rgba(245, 158, 11, 0.35);
+  --atlas-color-danger: #f87171;
+  --atlas-color-danger-surface: rgba(239, 68, 68, 0.15);
+  --atlas-color-danger-border: rgba(239, 68, 68, 0.35);
+  --atlas-shadow-overlay: 0 24px 56px rgba(0, 0, 0, 0.7);
+  --atlas-shadow-raised: 0 4px 24px rgba(0, 0, 0, 0.45), 0 1px 1px rgba(255, 255, 255, 0.04) inset;
+  --atlas-shadow-control: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --atlas-shadow-action: 0 0 20px rgba(245, 158, 11, 0.35), 0 2px 4px rgba(0, 0, 0, 0.5);
+  --atlas-shadow-card: 0 4px 20px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+  --atlas-color-action-text: #080a0f;
+  --atlas-color-danger-text: #ffffff;
+  --atlas-color-disabled-surface: #141923;
+  --atlas-gold-gradient: linear-gradient(135deg, #fef08a 0%, #f59e0b 60%, #d97706 100%);
+  --atlas-gold-glow: radial-gradient(ellipse at 75% 0%, rgba(245, 158, 11, 0.2) 0%, rgba(217, 119, 6, 0.08) 35%, transparent 70%);
 }
 
 .ds-stack { display: grid; gap: var(--ds-gap, var(--atlas-space-5)); }
@@ -209,7 +218,7 @@
 .ds-button { display: inline-flex; min-block-size: var(--atlas-size-control); align-items: center; justify-content: center; gap: var(--atlas-space-3); padding-inline: var(--atlas-space-4); border: 1px solid transparent; border-radius: var(--atlas-radius-md); font: inherit; font-size: var(--atlas-font-size-label); font-weight: 600; line-height: var(--atlas-line-height-label); cursor: pointer; transition: background-color var(--atlas-motion-fast) var(--atlas-ease-enter), border-color var(--atlas-motion-fast) var(--atlas-ease-enter), color var(--atlas-motion-fast) var(--atlas-ease-enter), box-shadow var(--atlas-motion-fast) var(--atlas-ease-enter); }
 .ds-button:disabled { cursor: not-allowed; opacity: .65; }
 .ds-button--sm { min-block-size: var(--atlas-size-control-compact); padding-inline: var(--atlas-space-3); font-size: var(--atlas-font-size-helper); }
-.ds-button--primary { color: var(--atlas-color-text-inverse); background: var(--atlas-color-action); box-shadow: var(--atlas-shadow-action); }
+.ds-button--primary { color: var(--atlas-color-action-text); background: var(--atlas-color-action); border-radius: var(--atlas-radius-pill); font-weight: 700; box-shadow: var(--atlas-shadow-action); }
 .ds-button--primary:hover:not(:disabled) { background: var(--atlas-color-action-hover); }
 .ds-button--primary:active:not(:disabled) { background: var(--atlas-color-action-active); box-shadow: none; }
 .ds-button--secondary { color: var(--atlas-color-text); background: var(--atlas-color-surface-overlay); border-color: var(--atlas-color-border); }
@@ -241,7 +250,8 @@
 .ds-badge--danger { color: var(--atlas-color-danger); background: var(--atlas-color-danger-surface); border-color: var(--atlas-color-danger-border); }
 .ds-badge--info { color: var(--atlas-color-action); background: var(--atlas-color-action-subtle); border-color: var(--atlas-color-action-border); }
 
-.ds-tabs { display: flex; gap: var(--atlas-space-1); overflow-x: auto; border-block-end: 1px solid var(--atlas-color-border-subtle); }
+.ds-tabs { display: flex; gap: var(--atlas-space-1); overflow-x: auto; border-block-end: 1px solid var(--atlas-color-border-subtle); scrollbar-width: none; -ms-overflow-style: none; }
+.ds-tabs::-webkit-scrollbar { display: none; }
 .ds-tab { min-block-size: var(--atlas-size-control); padding-inline: var(--atlas-space-4); color: var(--atlas-color-text-secondary); background: transparent; border-block-end: 2px solid transparent; font-size: var(--atlas-font-size-label); font-weight: 600; white-space: nowrap; cursor: pointer; }
 .ds-tab[aria-selected="true"] { color: var(--atlas-color-text); border-block-end-color: var(--atlas-color-action); }
 .ds-stepper { display: flex; gap: var(--atlas-space-3); overflow-x: auto; padding: 0; margin: 0; list-style: none; }

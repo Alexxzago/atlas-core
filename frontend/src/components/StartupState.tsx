@@ -1,14 +1,19 @@
 import { useI18n } from "../i18n/I18nContext";
 import { Button, Page, Spinner, Surface } from "../design-system/primitives";
+import { AtlasGlyph } from "./AtlasGlyph";
+import { AtlasAtmosphere } from "./AtlasAtmosphere";
 
 interface Props { readonly unavailable?: boolean; readonly onRetry?: () => void; }
 
 export function StartupState({ unavailable = false, onRetry }: Props): React.JSX.Element {
   const { t } = useI18n();
-  return <Page className="startup-state" id="main-content">
-    <Surface className="startup-state__card" tone="raised" aria-labelledby="startup-title" {...(unavailable ? { role: "alert" } : {})}>
-      <div className="startup-state__brand" aria-label="Atlas">ATLAS</div>
-      {unavailable ? <><h1 id="startup-title">{t("startup.unavailable")}</h1><p>{t("startup.unavailableDescription")}</p>{onRetry && <Button onClick={onRetry}>{t("startup.retry")}</Button>}</> : <><Spinner label={t("startup.loading")} /><h1 id="startup-title">{t("startup.loading")}</h1><p>{t("startup.loadingDescription")}</p></>}
-    </Surface>
-  </Page>;
+  return (
+    <Page className="startup-state" id="main-content">
+      <AtlasAtmosphere />
+      <Surface className="startup-state__card" tone="raised" aria-labelledby="startup-title" {...(unavailable ? { role: "alert" } : {})}>
+        <div className="startup-state__brand" aria-label="Atlas"><AtlasGlyph size={24} /><strong>ATLAS</strong></div>
+        {unavailable ? <><h1 id="startup-title">{t("startup.unavailable")}</h1><p>{t("startup.unavailableDescription")}</p>{onRetry && <Button onClick={onRetry}>{t("startup.retry")}</Button>}</> : <><Spinner label={t("startup.loading")} /><h1 id="startup-title">{t("startup.loading")}</h1><p>{t("startup.loadingDescription")}</p></>}
+      </Surface>
+    </Page>
+  );
 }

@@ -1,8 +1,224 @@
-.scheduling-automations { display: grid; gap: var(--atlas-space-2); max-inline-size: 1040px; }
-.scheduling-automations > .section-heading { margin: 0; }.scheduling-automations > .section-heading p { margin-block: 0; }
-.automation-tabs { gap: 0; border: var(--atlas-border-subtle); border-radius: var(--atlas-radius-md); }.automation-tabs .ds-tab { min-block-size: var(--atlas-size-control-compact); padding-inline: var(--atlas-space-3); font-size: var(--atlas-font-size-helper); }.automation-tabs .ds-tab[aria-selected="true"] { background: var(--atlas-color-action-subtle); }
-.scheduling-automations > section { display: grid; gap: var(--atlas-space-2); padding: var(--atlas-card-padding-compact); background: var(--atlas-color-surface-raised); border: var(--atlas-border-subtle); border-radius: var(--atlas-radius-lg); }.scheduling-automations > section > :is(h3, h4, p) { margin: 0; }.scheduling-automations > section > ul { display: grid; gap: 0; padding: 0; margin: 0; list-style: none; border-block: var(--atlas-border-subtle); }.scheduling-automations > section > ul > li { display: flex; align-items: center; justify-content: space-between; gap: var(--atlas-space-3); padding-block: var(--atlas-space-1); border-block-end: var(--atlas-border-subtle); }.scheduling-automations > section > ul > li:last-child { border-block-end: 0; }
-.scheduling-automations .automation-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--atlas-space-2); align-items: end; padding-block-start: var(--atlas-space-2); border-block-start: var(--atlas-border-subtle); }.scheduling-automations .automation-form > :is(h4, .button) { grid-column: 1 / -1; }.scheduling-automations .automation-form > .button { justify-self: start; }.scheduling-automations .automation-form--schedule { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.scheduling-automations .automation-check { display: inline-flex; align-items: center; gap: var(--atlas-space-2); min-block-size: var(--atlas-size-control); color: var(--atlas-color-text); font-weight: 650; cursor: pointer; }.scheduling-automations .automation-check .ds-checkbox { flex: 0 0 18px; }
-@media (max-width: 1023px) { .scheduling-automations .automation-form, .scheduling-automations .automation-form--schedule { grid-template-columns: 1fr; }.scheduling-automations .automation-form > :is(h4, .button) { grid-column: auto; } }
-@media (pointer: coarse) { .scheduling-automations .automation-check { min-block-size: var(--atlas-size-control-touch); } }
+/* ==========================================================================
+   SCHEDULING AUTOMATIONS - HOTFIX054 V4 OBSIDIAN DESIGN
+   Master-Detail Split Layout & Flat Editor Plane
+   ========================================================================== */
+
+.scheduling-automations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--atlas-space-5);
+  max-inline-size: 1100px;
+  animation: atlas-fade-in 0.2s ease-out;
+}
+
+.scheduling-automations > .section-heading {
+  margin: 0;
+}
+
+.scheduling-automations > .section-heading h2 {
+  font-size: var(--atlas-font-size-lg);
+  font-weight: 700;
+  color: var(--atlas-color-text);
+  margin: 0 0 2px;
+}
+
+.scheduling-automations > .section-heading p {
+  margin: 0;
+  font-size: var(--atlas-font-size-xs);
+  color: var(--atlas-color-text-secondary);
+}
+
+/* Master-detail split layout */
+.scheduling-split-layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--atlas-space-6);
+  align-items: start;
+}
+
+/* Master Rail */
+.scheduling-master-rail {
+  position: sticky;
+  top: var(--atlas-space-4);
+}
+
+.scheduling-master-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scheduling-master-nav__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: var(--atlas-font-size-sm);
+  font-weight: 500;
+  color: var(--atlas-color-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--atlas-radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.scheduling-master-nav__item:hover {
+  color: var(--atlas-color-text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.scheduling-master-nav__item.is-active {
+  color: var(--atlas-color-action);
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.2);
+  font-weight: 600;
+}
+
+/* Detail Plane */
+.scheduling-detail-plane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--atlas-space-5);
+  min-width: 0;
+}
+
+.scheduling-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--atlas-space-4);
+  padding: var(--atlas-space-5);
+  background: rgba(14, 18, 27, 0.65);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--atlas-radius-lg);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.scheduling-section > :is(h3, h4, p) {
+  margin: 0;
+}
+
+.scheduling-section > h3 {
+  font-size: var(--atlas-font-size-md);
+  font-weight: 650;
+  color: var(--atlas-color-text);
+}
+
+.scheduling-section > p {
+  font-size: var(--atlas-font-size-sm);
+  color: var(--atlas-color-text-secondary);
+  line-height: 1.5;
+}
+
+.scheduling-tool-card,
+.scheduling-section-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--atlas-space-3);
+  padding-top: var(--atlas-space-4);
+  border-top: 1px solid var(--atlas-color-border-subtle);
+}
+
+.scheduling-tool-card > h3,
+.scheduling-section-block > h3 {
+  font-size: var(--atlas-font-size-sm);
+  font-weight: 650;
+  color: var(--atlas-color-text);
+  margin: 0;
+}
+
+.scheduling-tool-card > p,
+.scheduling-section-block > p {
+  font-size: var(--atlas-font-size-xs);
+  color: var(--atlas-color-text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.scheduling-section > ul {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  border-top: 1px solid var(--atlas-color-border-subtle);
+}
+
+.scheduling-section > ul > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--atlas-space-3);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--atlas-color-border-subtle);
+  font-size: var(--atlas-font-size-sm);
+  color: var(--atlas-color-text);
+}
+
+.scheduling-section > ul > li:last-child {
+  border-bottom: none;
+}
+
+/* Automation form */
+.scheduling-automations .automation-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--atlas-space-4);
+  align-items: end;
+  padding-top: var(--atlas-space-4);
+  border-top: 1px solid var(--atlas-color-border-subtle);
+}
+
+.scheduling-automations .automation-form > :is(h4, .button) {
+  grid-column: 1 / -1;
+}
+
+.scheduling-automations .automation-form > h4 {
+  font-size: var(--atlas-font-size-sm);
+  font-weight: 650;
+  color: var(--atlas-color-text);
+  margin: 0;
+}
+
+.scheduling-automations .automation-form > .button {
+  justify-self: start;
+  border-radius: var(--atlas-radius-pill) !important;
+}
+
+.scheduling-automations .automation-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--atlas-space-2);
+  min-height: 38px;
+  color: var(--atlas-color-text);
+  font-size: var(--atlas-font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+@media (max-width: 840px) {
+  .scheduling-split-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .scheduling-master-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    padding-bottom: var(--atlas-space-2);
+    border-bottom: 1px solid var(--atlas-color-border-subtle);
+  }
+
+  .scheduling-master-nav__item {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .scheduling-automations .automation-form {
+    grid-template-columns: 1fr;
+  }
+}

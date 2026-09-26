@@ -1,21 +1,382 @@
+/* ==========================================================================
+   COMMERCIAL & BILLING CONTROLS - HOTFIX054 V4 OBSIDIAN DESIGN
+   ========================================================================== */
+
 .admin-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--atlas-space-3);
 }
+
 .commercial-usage {
   display: flex;
   flex-wrap: wrap;
   gap: var(--atlas-space-6);
 }
+
 .commercial-usage div {
   display: grid;
   gap: var(--atlas-space-1);
 }
+
 .commercial-usage dt {
   color: var(--atlas-color-text-secondary);
 }
+
 .commercial-usage dd {
   margin: 0;
   font-weight: 700;
+}
+
+/* Billing Page */
+.billing-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--atlas-space-6);
+  inline-size: 100%;
+  max-inline-size: 1100px;
+  animation: atlas-fade-in 0.2s ease-out;
+}
+
+.billing-page header.work-anchor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--atlas-space-2);
+}
+
+.billing-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--atlas-space-6);
+  padding: var(--atlas-space-5) 0;
+  background: transparent;
+  border-bottom: 1px solid var(--atlas-color-border-subtle);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.billing-summary h2 {
+  margin: 0;
+  font-size: var(--atlas-font-size-xl);
+  font-weight: 700;
+  color: var(--atlas-color-text);
+}
+
+.billing-summary strong {
+  font-size: var(--atlas-font-size-md);
+  color: var(--atlas-color-action);
+}
+
+.billing-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--atlas-space-3);
+  flex-wrap: wrap;
+}
+
+/* Entitlements horizontal stats */
+.billing-entitlement {
+  display: flex;
+  flex-direction: column;
+  gap: var(--atlas-space-4);
+  padding: var(--atlas-space-5) 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--atlas-color-border-subtle);
+  border-radius: 0;
+}
+
+.billing-entitlement h2 {
+  margin: 0;
+  font-size: var(--atlas-font-size-md);
+  font-weight: 650;
+  color: var(--atlas-color-text);
+}
+
+.billing-entitlement dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--atlas-space-4);
+  margin: 0;
+}
+
+.billing-entitlement dl div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--atlas-space-4);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--atlas-color-border-subtle);
+  border-radius: var(--atlas-radius-md);
+}
+
+.billing-entitlement dt {
+  font-size: var(--atlas-font-size-xs);
+  font-weight: 600;
+  color: var(--atlas-color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.billing-entitlement dd {
+  margin: 0;
+  font-size: var(--atlas-font-size-xl);
+  font-weight: 750;
+  color: var(--atlas-color-text);
+}
+
+/* Pricing Offer Cards */
+.billing-offer-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--atlas-space-5);
+}
+
+.billing-offers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--atlas-space-5);
+}
+
+.billing-offer {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--atlas-space-5);
+  padding: var(--atlas-space-6);
+  background: var(--atlas-color-surface-raised);
+  border: 1px solid var(--atlas-color-border);
+  border-radius: var(--atlas-radius-lg);
+  box-shadow: var(--atlas-shadow-card);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.billing-offer:hover {
+  border-color: rgba(245, 158, 11, 0.4);
+  transform: translateY(-2px);
+}
+
+.billing-offer h4 {
+  margin: 0 0 var(--atlas-space-2);
+  font-size: var(--atlas-font-size-lg);
+  font-weight: 700;
+  color: var(--atlas-color-text);
+}
+
+.billing-offer p {
+  margin: 0 0 var(--atlas-space-4);
+  font-size: var(--atlas-font-size-sm);
+  color: var(--atlas-color-text-secondary);
+}
+
+.billing-offer strong {
+  display: block;
+  font-size: 24px;
+  font-weight: 750;
+  color: var(--atlas-color-action);
+  margin-bottom: var(--atlas-space-4);
+}
+
+.billing-offer ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--atlas-space-2);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.billing-offer li {
+  font-size: var(--atlas-font-size-xs);
+  color: var(--atlas-color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--atlas-space-2);
+}
+
+.billing-offer li::before {
+  content: "✓";
+  color: var(--atlas-color-action);
+  font-weight: 700;
+}
+
+.billing-offer .button,
+.billing-offer .ds-button {
+  width: 100%;
+  border-radius: var(--atlas-radius-pill) !important;
+  font-weight: 650;
+}
+
+/* Payer Section */
+.billing-payer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--atlas-space-3);
+  padding: var(--atlas-space-5) 0;
+  background: transparent;
+  border-top: 1px solid var(--atlas-color-border-subtle);
+  border-radius: 0;
+}
+
+@media (max-width: 768px) {
+  .billing-summary {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .billing-entitlement dl {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* HOTFIX054 V4 FINAL POLISH BILLING */
+
+.billing-page {
+  max-inline-size: 1180px;
+  gap: 14px;
+}
+
+.billing-page header.work-anchor {
+  gap: 4px;
+  margin: 0;
+}
+
+.billing-page header.work-anchor h1 {
+  margin: 0;
+  font-size: clamp(24px, 2.2vw, 30px);
+  line-height: 1.05;
+}
+
+.billing-page header.work-anchor p {
+  margin: 0;
+}
+
+.billing-summary {
+  gap: 14px;
+  padding-block: 12px;
+}
+
+.billing-summary h2 {
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.billing-payer {
+  gap: 8px;
+  padding-block: 12px;
+}
+
+.billing-payer h2,
+.billing-entitlement h2,
+.billing-page .section-heading h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.15;
+}
+
+.billing-payer p,
+.billing-entitlement p {
+  margin-block: 4px;
+}
+
+.billing-payer label {
+  font-size: 12px;
+}
+
+.billing-payer select {
+  min-block-size: 38px;
+}
+
+.billing-entitlement {
+  gap: 10px;
+  padding-block: 12px;
+}
+
+.billing-entitlement dl {
+  gap: 0;
+}
+
+.billing-entitlement dl div {
+  min-block-size: 58px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 0;
+  border-inline-end: 1px solid var(--atlas-color-border-subtle);
+  border-radius: 0;
+}
+
+.billing-entitlement dl div:last-child {
+  border-inline-end: 0;
+}
+
+.billing-entitlement dd {
+  font-size: 18px;
+}
+
+.billing-offer-groups,
+.billing-offers {
+  gap: 14px;
+}
+
+.billing-offer {
+  gap: 14px;
+  padding: 16px;
+}
+
+.billing-offer h4 {
+  font-size: 16px;
+}
+
+.billing-offer strong {
+  margin-block-end: 10px;
+  font-size: 20px;
+}
+
+.billing-page .section-heading {
+  padding-block: 4px 8px;
+}
+
+@media (max-width: 768px) {
+  .billing-entitlement dl div {
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--atlas-color-border-subtle);
+  }
+
+  .billing-entitlement dl div:last-child {
+    border-block-end: 0;
+  }
+}
+
+
+/* HOTFIX054 V4 FINAL BILLING SPACING */
+
+.billing-page {
+  gap: 10px;
+}
+
+.billing-page > .context-back-navigation {
+  margin-block-end: 0 !important;
+}
+
+.billing-page header.work-anchor {
+  margin-block-start: 0;
+}
+
+/* HOTFIX054 V4 CLOSEOUT BILLING */
+.billing-page {
+  margin-block-start: 0 !important;
+  padding-block-start: 0 !important;
+  gap: 8px !important;
+}
+
+.billing-page > .context-back-navigation {
+  margin-block: 0 2px !important;
+}
+
+.billing-page > .context-back-navigation .context-back-link {
+  min-block-size: 24px !important;
+}
+
+.billing-page header.work-anchor {
+  margin-block-start: 0 !important;
 }

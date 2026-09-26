@@ -15,7 +15,6 @@ import {
   LoadingState,
   Select,
   StatusBadge,
-  Tabs,
 } from "../design-system/primitives";
 
 interface Props {
@@ -414,563 +413,597 @@ export function SchedulingAutomationsPanel(props: Props): React.JSX.Element {
           </p>
         </div>
       </header>
-      <Tabs
-        className="automation-tabs"
-        label="Secciones de automatizaciones"
-        selectedId={tab}
-        tabs={[
-          { id: "agenda", label: "Agenda" },
-          { id: "followups", label: "Seguimientos" },
-          { id: "locations", label: "Ubicaciones" },
-          { id: "resources", label: "Recursos" },
-          { id: "services", label: "Servicios" },
-          { id: "availability", label: "Disponibilidad" },
-          { id: "exceptions", label: "Excepciones" },
-        ]}
-        onSelect={(id) => setTab(id as AutomationTab)}
-      />
-      {loading && <LoadingState title="Cargando configuración..." />}
-      {message && (
-        <Alert
-          tone={
-            message.startsWith("Configuración guardada") ? "success" : "danger"
-          }
-        >
-          {message}
-        </Alert>
-      )}
-      {configuration && (
-        <>
-          <Readiness configuration={configuration} />
-          <section>
-            <h3>Seguimientos proactivos</h3>
-            <p>
-              Esta política pertenece a la empresa, no a un asistente. Atlas
-              puede programar un único seguimiento compatible por WhatsApp según
-              las reglas y ventana de servicio existentes.
-            </p>
-            <p>
-              Una conversación que requiere atención sigue con Atlas activo; al
-              tomar control humano, el seguimiento se suprime. No hay campañas,
-              recurrencias ni destinatarios alternativos.
-            </p>
-            {proactivePolicy ? (
-              <>
-                <StatusBadge
-                  tone={proactivePolicy.enabled ? "success" : "warning"}
-                >
-                  {proactivePolicy.enabled
-                    ? "Los seguimientos proactivos están habilitados."
-                    : "Los seguimientos proactivos están deshabilitados."}
-                </StatusBadge>
-                {canManage ? (
-                  <Button
-                    variant="secondary"
-                    disabled={proactiveSaving}
-                    onClick={() => setConfirmPolicy(!proactivePolicy.enabled)}
-                  >
-                    {proactivePolicy.enabled
-                      ? "Deshabilitar seguimientos"
-                      : "Habilitar seguimientos"}
-                  </Button>
-                ) : (
-                  <p className="state-copy">
-                    Podés consultar esta política, pero no modificarla.
-                  </p>
-                )}
-              </>
-            ) : (
-              <LoadingState title="Cargando política de seguimientos..." />
-            )}
-            {proactiveMessage && (
-              <Alert
-                tone={
-                  proactiveMessage.startsWith(
-                    "La política de seguimientos se guardó",
-                  )
-                    ? "success"
-                    : "danger"
-                }
+      <div className="scheduling-split-layout">
+        <aside className="scheduling-master-rail" aria-label="Secciones de automatizaciones">
+          <nav className="scheduling-master-nav">
+            {[
+              { id: "agenda", label: "Agenda" },
+              { id: "followups", label: "Seguimientos" },
+              { id: "locations", label: "Ubicaciones" },
+              { id: "resources", label: "Recursos" },
+              { id: "services", label: "Servicios" },
+              { id: "availability", label: "Disponibilidad" },
+              { id: "exceptions", label: "Excepciones" },
+            ].map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`scheduling-master-nav__item ${tab === item.id ? "is-active" : ""}`}
+                onClick={() => setTab(item.id as AutomationTab)}
               >
-                {proactiveMessage}
-              </Alert>
-            )}
-            <ConfirmDialog
-              cancelLabel="Cancelar"
-              confirmDisabled={proactiveSaving}
-              confirmLabel="Confirmar"
-              confirmVariant="primary"
-              description={
-                confirmPolicy
-                  ? "Habilitá los seguimientos proactivos para esta empresa."
-                  : "Deshabilitá los seguimientos proactivos para esta empresa."
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        <div className="scheduling-detail-plane">
+          {loading && <LoadingState title="Cargando configuración..." />}
+          {message && (
+            <Alert
+              tone={
+                message.startsWith("Configuración guardada") ? "success" : "danger"
               }
-              open={confirmPolicy !== null}
-              role="dialog"
-              title="Confirmar cambio"
-              onCancel={() => setConfirmPolicy(null)}
-              onConfirm={() => {
-                if (confirmPolicy !== null)
-                  void saveProactivePolicy(confirmPolicy);
-              }}
-            />
-          </section>
-          <section>
-            <h3>Capacidad del asistente</h3>
-            <p>
-              {tool?.enabled
-                ? "El asistente tiene la capacidad de agenda habilitada."
-                : "La preparación de la empresa no habilita por sí misma la capacidad del asistente."}
-            </p>
-            {!tool?.enabled && (
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  props.onNavigate(
-                    `/companies/${props.companyId}/assistant/${props.profileId}/capabilities`,
-                  )
-                }
-              >
-                Revisar capacidades
-              </Button>
-            )}
-          </section>
-          <section>
-            <h3>Ubicaciones</h3>
-            <ul>
-              {configuration.locations.map((item) => (
-                <li key={item.id}>
-                  {item.name} · {item.address ?? "Sin dirección"} ·{" "}
-                  {item.timezone} · {item.active ? "Activa" : "Inactiva"}{" "}
-                  {canManage && (
-                    <Button
-                      variant="quiet"
-                      onClick={() => editLocation(item.id)}
-                    >
-                      Editar ubicación
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-            {canManage && (
-              <form className="automation-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const payload = editingLocationId
-                    ? {
-                        locationId: editingLocationId,
-                        name: location.name,
-                        address: location.address || null,
-                        timezone: location.timezone,
-                        active: location.active,
-                      }
-                    : {
-                        name: location.name,
-                        address: location.address || null,
-                        timezone: location.timezone,
-                      };
-                  void execute(
-                    editingLocationId ? "update_location" : "create_location",
-                    payload,
-                  ).then((saved) => {
-                    if (saved) clearLocation();
-                  });
-                }}
-              >
-                <h4>
-                  {editingLocationId ? "Editar ubicación" : "Agregar ubicación"}
-                </h4>
-                <Text
-                  label="Nombre de ubicación"
-                  value={location.name}
-                  set={(value) => setLocation({ ...location, name: value })}
-                />
-                <Text
-                  label="Dirección"
-                  value={location.address}
-                  set={(value) => setLocation({ ...location, address: value })}
-                />
-                <Text
-                  label="Zona horaria"
-                  value={location.timezone}
-                  set={(value) => setLocation({ ...location, timezone: value })}
-                />
-                <Check
-                  label="Ubicación activa"
-                  value={location.active}
-                  set={(value) => setLocation({ ...location, active: value })}
-                />
-                <Button disabled={saving}>Guardar ubicación</Button>
-                {editingLocationId && (
-                  <Button variant="secondary" onClick={clearLocation}>
-                    Cancelar edición
-                  </Button>
-                )}
-              </form>
-            )}
-          </section>
-          <section>
-            <h3>Recursos</h3>
-            <ul>
-              {configuration.resources.map((item) => (
-                <li key={item.id}>
-                  {item.name} · {item.timezone} · capacidad {item.capacity}{" "}
-                  {canManage && (
-                    <button
-                      type="button"
-                      className="button button--quiet"
-                      onClick={() => editResource(item.id)}
-                    >
-                      Editar recurso
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-            {canManage && (
-              <form className="automation-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const payload = {
-                    name: resource.name,
-                    locationId: resource.locationId || null,
-                    timezone: resource.timezone,
-                    capacity: resource.capacity,
-                    active: resource.active,
-                  };
-                  void execute(
-                    editingResourceId ? "update_resource" : "create_resource",
-                    editingResourceId
-                      ? { resourceId: editingResourceId, ...payload }
-                      : payload,
-                  ).then((saved) => {
-                    if (saved) clearResource();
-                  });
-                }}
-              >
-                <h4>
-                  {editingResourceId ? "Editar recurso" : "Agregar recurso"}
-                </h4>
-                <Text
-                  label="Nombre de recurso"
-                  value={resource.name}
-                  set={(value) => setResource({ ...resource, name: value })}
-                />
-                <label className="ds-field">
-                  Ubicación
-                  <Select
-                    value={resource.locationId}
-                    onChange={(event) =>
-                      setResource({
-                        ...resource,
-                        locationId: event.target.value,
-                      })
-                    }
-                  >
-                    <option value="">Sin ubicación</option>
-                    {configuration.locations.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-                <Text
-                  label="Zona horaria del recurso"
-                  value={resource.timezone}
-                  set={(value) => setResource({ ...resource, timezone: value })}
-                />
-                <NumberField
-                  label="Capacidad"
-                  value={resource.capacity}
-                  set={(value) => setResource({ ...resource, capacity: value })}
-                />
-                <Check
-                  label="Recurso activo"
-                  value={resource.active}
-                  set={(value) => setResource({ ...resource, active: value })}
-                />
-                <Button disabled={saving}>Guardar recurso</Button>
-                {editingResourceId && (
-                  <Button variant="secondary" onClick={clearResource}>
-                    Cancelar edición
-                  </Button>
-                )}
-              </form>
-            )}
-          </section>
-          <section>
-            <h3>Servicios</h3>
-            <ul>
-              {configuration.services.map((item) => (
-                <li key={item.id}>
-                  {item.name} · {item.duration_minutes} min{" "}
-                  {canManage && (
-                    <Button
-                      variant="quiet"
-                      onClick={() => editService(item.id)}
-                    >
-                      Editar servicio
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-            {canManage && (
-              <form className="automation-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const payload = {
-                    resourceId: service.resourceId,
-                    name: service.name,
-                    durationMinutes: service.durationMinutes,
-                    bufferBeforeMinutes: service.bufferBeforeMinutes,
-                    bufferAfterMinutes: service.bufferAfterMinutes,
-                    slotGranularityMinutes: service.slotGranularityMinutes,
-                    minimumLeadMinutes: service.minimumLeadMinutes,
-                    maximumHorizonDays: service.maximumHorizonDays,
-                    active: service.active,
-                  };
-                  void execute(
-                    editingServiceId ? "update_service" : "create_service",
-                    editingServiceId
-                      ? { serviceId: editingServiceId, ...payload }
-                      : payload,
-                  ).then((saved) => {
-                    if (saved) clearService();
-                  });
-                }}
-              >
-                <h4>
-                  {editingServiceId ? "Editar servicio" : "Agregar servicio"}
-                </h4>
-                <Text
-                  label="Nombre de servicio"
-                  value={service.name}
-                  set={(value) => setService({ ...service, name: value })}
-                />
-                <label className="ds-field">
-                  Recurso
-                  <Select
-                    required
-                    value={service.resourceId}
-                    onChange={(event) =>
-                      setService({ ...service, resourceId: event.target.value })
-                    }
-                  >
-                    <option value="">Elegí un recurso</option>
-                    {configuration.resources.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-                <NumberField
-                  label="Duración (minutos)"
-                  value={service.durationMinutes}
-                  set={(value) =>
-                    setService({ ...service, durationMinutes: value })
-                  }
-                />
-                <NumberField
-                  label="Buffer antes"
-                  value={service.bufferBeforeMinutes}
-                  set={(value) =>
-                    setService({ ...service, bufferBeforeMinutes: value })
-                  }
-                />
-                <NumberField
-                  label="Buffer después"
-                  value={service.bufferAfterMinutes}
-                  set={(value) =>
-                    setService({ ...service, bufferAfterMinutes: value })
-                  }
-                />
-                <NumberField
-                  label="Granularidad"
-                  value={service.slotGranularityMinutes}
-                  set={(value) =>
-                    setService({ ...service, slotGranularityMinutes: value })
-                  }
-                />
-                <NumberField
-                  label="Anticipación mínima"
-                  value={service.minimumLeadMinutes}
-                  set={(value) =>
-                    setService({ ...service, minimumLeadMinutes: value })
-                  }
-                />
-                <NumberField
-                  label="Horizonte máximo"
-                  value={service.maximumHorizonDays}
-                  set={(value) =>
-                    setService({ ...service, maximumHorizonDays: value })
-                  }
-                />
-                <Check
-                  label="Servicio activo"
-                  value={service.active}
-                  set={(value) => setService({ ...service, active: value })}
-                />
-                <Button disabled={saving}>Guardar servicio</Button>
-                {editingServiceId && (
-                  <Button variant="secondary" onClick={clearService}>
-                    Cancelar edición
-                  </Button>
-                )}
-              </form>
-            )}
-          </section>
-          <section>
-            <h3>Disponibilidad semanal</h3>
-            {canManage && (
-              <form className="automation-form automation-form--schedule"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void execute("replace_weekly_availability", {
-                    resourceId: availability.resourceId,
-                    windows: [
-                      ...availabilityWindows,
-                      {
-                        weekday: availability.weekday,
-                        startTime: availability.startTime,
-                        endTime: availability.endTime,
-                      },
-                    ],
-                  });
-                }}
-              >
-                <ResourceSelect
-                  label="Recurso para disponibilidad"
-                  value={availability.resourceId}
-                  resources={configuration.resources}
-                  set={(value) =>
-                    setAvailability({ ...availability, resourceId: value })
-                  }
-                />
-                <WeekdaySelect
-                  value={availability.weekday}
-                  set={(value) =>
-                    setAvailability({ ...availability, weekday: value })
-                  }
-                />
-                <Text
-                  label="Hora de inicio"
-                  value={availability.startTime}
-                  set={(value) =>
-                    setAvailability({ ...availability, startTime: value })
-                  }
-                  type="time"
-                />
-                <Text
-                  label="Hora de fin"
-                  value={availability.endTime}
-                  set={(value) =>
-                    setAvailability({ ...availability, endTime: value })
-                  }
-                  type="time"
-                />
-                <Button disabled={saving}>Guardar disponibilidad</Button>
-              </form>
-            )}
-          </section>
-          <section>
-            <h3>Excepciones de fecha</h3>
-            <ul>
-              {configuration.dateExceptions.map((item) => (
-                <li key={item.id}>
-                  {item.local_date} · {item.kind}{" "}
-                  {canManage && (
-                    <Button
-                      variant="quiet"
-                      onClick={() =>
-                        void execute("remove_date_exception", {
-                          exceptionId: item.id,
-                        })
-                      }
-                    >
-                      Quitar excepción
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-            {canManage && (
-              <form className="automation-form automation-form--schedule"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void execute("add_date_exception", {
-                    resourceId: exception.resourceId,
-                    localDate: exception.localDate,
-                    kind: exception.kind,
-                    ...(exception.kind === "open"
-                      ? {
-                          startTime: exception.startTime,
-                          endTime: exception.endTime,
+            >
+              {message}
+            </Alert>
+          )}
+          {configuration && (
+            <>
+              {tab === "agenda" && (
+                <div className="scheduling-section">
+                  <Readiness configuration={configuration} />
+                  <div className="scheduling-tool-card">
+                    <h3>Capacidad del asistente</h3>
+                    <p>
+                      {tool?.enabled
+                        ? "El asistente tiene la capacidad de agenda habilitada."
+                        : "La preparación de la empresa no habilita por sí misma la capacidad del asistente."}
+                    </p>
+                    {!tool?.enabled && (
+                      <Button
+                        variant="secondary"
+                        onClick={() =>
+                          props.onNavigate(
+                            `/companies/${props.companyId}/assistant/${props.profileId}/capabilities`,
+                          )
                         }
-                      : {}),
-                  });
-                }}
-              >
-                <ResourceSelect
-                  label="Recurso para excepción"
-                  value={exception.resourceId}
-                  resources={configuration.resources}
-                  set={(value) =>
-                    setException({ ...exception, resourceId: value })
-                  }
-                />
-                <Text
-                  label="Fecha"
-                  value={exception.localDate}
-                  set={(value) =>
-                    setException({ ...exception, localDate: value })
-                  }
-                  type="date"
-                />
-                <label className="ds-field">
-                  Tipo
-                  <Select
-                    value={exception.kind}
-                    onChange={(event) =>
-                      setException({
-                        ...exception,
-                        kind: event.target.value as "open" | "closed",
-                      })
+                      >
+                        Revisar capacidades
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {tab === "followups" && (
+                <div className="scheduling-section">
+                  <h3>Seguimientos proactivos</h3>
+                  <p>
+                    Esta política pertenece a la empresa, no a un asistente. Atlas
+                    puede programar un único seguimiento compatible por WhatsApp según
+                    las reglas y ventana de servicio existentes.
+                  </p>
+                  <p>
+                    Una conversación que requiere atención sigue con Atlas activo; al
+                    tomar control humano, el seguimiento se suprime. No hay campañas,
+                    recurrencias ni destinatarios alternativos.
+                  </p>
+                  {proactivePolicy ? (
+                    <>
+                      <StatusBadge
+                        tone={proactivePolicy.enabled ? "success" : "warning"}
+                      >
+                        {proactivePolicy.enabled
+                          ? "Los seguimientos proactivos están habilitados."
+                          : "Los seguimientos proactivos están deshabilitados."}
+                      </StatusBadge>
+                      {canManage ? (
+                        <Button
+                          variant="secondary"
+                          disabled={proactiveSaving}
+                          onClick={() => setConfirmPolicy(!proactivePolicy.enabled)}
+                        >
+                          {proactivePolicy.enabled
+                            ? "Deshabilitar seguimientos"
+                            : "Habilitar seguimientos"}
+                        </Button>
+                      ) : (
+                        <p className="state-copy">
+                          Podés consultar esta política, pero no modificarla.
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <LoadingState title="Cargando política de seguimientos..." />
+                  )}
+                  {proactiveMessage && (
+                    <Alert
+                      tone={
+                        proactiveMessage.startsWith(
+                          "La política de seguimientos se guardó",
+                        )
+                          ? "success"
+                          : "danger"
+                      }
+                    >
+                      {proactiveMessage}
+                    </Alert>
+                  )}
+                  <ConfirmDialog
+                    cancelLabel="Cancelar"
+                    confirmDisabled={proactiveSaving}
+                    confirmLabel="Confirmar"
+                    confirmVariant="primary"
+                    description={
+                      confirmPolicy
+                        ? "Habilitá los seguimientos proactivos para esta empresa."
+                        : "Deshabilitá los seguimientos proactivos para esta empresa."
                     }
-                  >
-                    <option value="closed">Cerrado</option>
-                    <option value="open">Abierto</option>
-                  </Select>
-                </label>
-                {exception.kind === "open" && (
-                  <>
-                    <Text
-                      label="Inicio de excepción"
-                      value={exception.startTime}
-                      set={(value) =>
-                        setException({ ...exception, startTime: value })
-                      }
-                      type="time"
-                    />
-                    <Text
-                      label="Fin de excepción"
-                      value={exception.endTime}
-                      set={(value) =>
-                        setException({ ...exception, endTime: value })
-                      }
-                      type="time"
-                    />
-                  </>
-                )}
-                <Button disabled={saving}>Agregar excepción</Button>
-              </form>
-            )}
-          </section>
-        </>
-      )}
+                    open={confirmPolicy !== null}
+                    role="dialog"
+                    title="Confirmar cambio"
+                    onCancel={() => setConfirmPolicy(null)}
+                    onConfirm={() => {
+                      if (confirmPolicy !== null)
+                        void saveProactivePolicy(confirmPolicy);
+                    }}
+                  />
+                </div>
+              )}
+
+              {tab === "locations" && (
+                <div className="scheduling-section">
+                  <h3>Ubicaciones</h3>
+                  <ul>
+                    {configuration.locations.map((item) => (
+                      <li key={item.id}>
+                        {item.name} · {item.address ?? "Sin dirección"} ·{" "}
+                        {item.timezone} · {item.active ? "Activa" : "Inactiva"}{" "}
+                        {canManage && (
+                          <Button
+                            variant="quiet"
+                            onClick={() => editLocation(item.id)}
+                          >
+                            Editar ubicación
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  {canManage && (
+                    <form className="automation-form"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const payload = editingLocationId
+                          ? {
+                              locationId: editingLocationId,
+                              name: location.name,
+                              address: location.address || null,
+                              timezone: location.timezone,
+                              active: location.active,
+                            }
+                          : {
+                              name: location.name,
+                              address: location.address || null,
+                              timezone: location.timezone,
+                            };
+                        void execute(
+                          editingLocationId ? "update_location" : "create_location",
+                          payload,
+                        ).then((saved) => {
+                          if (saved) clearLocation();
+                        });
+                      }}
+                    >
+                      <h4>
+                        {editingLocationId ? "Editar ubicación" : "Agregar ubicación"}
+                      </h4>
+                      <Text
+                        label="Nombre de ubicación"
+                        value={location.name}
+                        set={(value) => setLocation({ ...location, name: value })}
+                      />
+                      <Text
+                        label="Dirección"
+                        value={location.address}
+                        set={(value) => setLocation({ ...location, address: value })}
+                      />
+                      <Text
+                        label="Zona horaria"
+                        value={location.timezone}
+                        set={(value) => setLocation({ ...location, timezone: value })}
+                      />
+                      <Check
+                        label="Ubicación activa"
+                        value={location.active}
+                        set={(value) => setLocation({ ...location, active: value })}
+                      />
+                      <Button disabled={saving}>Guardar ubicación</Button>
+                      {editingLocationId && (
+                        <Button variant="secondary" onClick={clearLocation}>
+                          Cancelar edición
+                        </Button>
+                      )}
+                    </form>
+                  )}
+                </div>
+              )}
+
+              {tab === "resources" && (
+                <div className="scheduling-section">
+                  <h3>Recursos</h3>
+                  <ul>
+                    {configuration.resources.map((item) => (
+                      <li key={item.id}>
+                        {item.name} · {item.timezone} · capacidad {item.capacity}{" "}
+                        {canManage && (
+                          <button
+                            type="button"
+                            className="button button--quiet"
+                            onClick={() => editResource(item.id)}
+                          >
+                            Editar recurso
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  {canManage && (
+                    <form className="automation-form"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const payload = {
+                          name: resource.name,
+                          locationId: resource.locationId || null,
+                          timezone: resource.timezone,
+                          capacity: resource.capacity,
+                          active: resource.active,
+                        };
+                        void execute(
+                          editingResourceId ? "update_resource" : "create_resource",
+                          editingResourceId
+                            ? { resourceId: editingResourceId, ...payload }
+                            : payload,
+                        ).then((saved) => {
+                          if (saved) clearResource();
+                        });
+                      }}
+                    >
+                      <h4>
+                        {editingResourceId ? "Editar recurso" : "Agregar recurso"}
+                      </h4>
+                      <Text
+                        label="Nombre de recurso"
+                        value={resource.name}
+                        set={(value) => setResource({ ...resource, name: value })}
+                      />
+                      <label className="ds-field">
+                        Ubicación
+                        <Select
+                          value={resource.locationId}
+                          onChange={(event) =>
+                            setResource({
+                              ...resource,
+                              locationId: event.target.value,
+                            })
+                          }
+                        >
+                          <option value="">Sin ubicación</option>
+                          {configuration.locations.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </label>
+                      <Text
+                        label="Zona horaria del recurso"
+                        value={resource.timezone}
+                        set={(value) => setResource({ ...resource, timezone: value })}
+                      />
+                      <NumberField
+                        label="Capacidad"
+                        value={resource.capacity}
+                        set={(value) => setResource({ ...resource, capacity: value })}
+                      />
+                      <Check
+                        label="Recurso activo"
+                        value={resource.active}
+                        set={(value) => setResource({ ...resource, active: value })}
+                      />
+                      <Button disabled={saving}>Guardar recurso</Button>
+                      {editingResourceId && (
+                        <Button variant="secondary" onClick={clearResource}>
+                          Cancelar edición
+                        </Button>
+                      )}
+                    </form>
+                  )}
+                </div>
+              )}
+
+              {tab === "services" && (
+                <div className="scheduling-section">
+                  <h3>Servicios</h3>
+                  <ul>
+                    {configuration.services.map((item) => (
+                      <li key={item.id}>
+                        {item.name} · {item.duration_minutes} min{" "}
+                        {canManage && (
+                          <Button
+                            variant="quiet"
+                            onClick={() => editService(item.id)}
+                          >
+                            Editar servicio
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  {canManage && (
+                    <form className="automation-form"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const payload = {
+                          resourceId: service.resourceId,
+                          name: service.name,
+                          durationMinutes: service.durationMinutes,
+                          bufferBeforeMinutes: service.bufferBeforeMinutes,
+                          bufferAfterMinutes: service.bufferAfterMinutes,
+                          slotGranularityMinutes: service.slotGranularityMinutes,
+                          minimumLeadMinutes: service.minimumLeadMinutes,
+                          maximumHorizonDays: service.maximumHorizonDays,
+                          active: service.active,
+                        };
+                        void execute(
+                          editingServiceId ? "update_service" : "create_service",
+                          editingServiceId
+                            ? { serviceId: editingServiceId, ...payload }
+                            : payload,
+                        ).then((saved) => {
+                          if (saved) clearService();
+                        });
+                      }}
+                    >
+                      <h4>
+                        {editingServiceId ? "Editar servicio" : "Agregar servicio"}
+                      </h4>
+                      <Text
+                        label="Nombre de servicio"
+                        value={service.name}
+                        set={(value) => setService({ ...service, name: value })}
+                      />
+                      <label className="ds-field">
+                        Recurso
+                        <Select
+                          required
+                          value={service.resourceId}
+                          onChange={(event) =>
+                            setService({ ...service, resourceId: event.target.value })
+                          }
+                        >
+                          <option value="">Elegí un recurso</option>
+                          {configuration.resources.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </label>
+                      <NumberField
+                        label="Duración (minutos)"
+                        value={service.durationMinutes}
+                        set={(value) =>
+                          setService({ ...service, durationMinutes: value })
+                        }
+                      />
+                      <NumberField
+                        label="Buffer antes"
+                        value={service.bufferBeforeMinutes}
+                        set={(value) =>
+                          setService({ ...service, bufferBeforeMinutes: value })
+                        }
+                      />
+                      <NumberField
+                        label="Buffer después"
+                        value={service.bufferAfterMinutes}
+                        set={(value) =>
+                          setService({ ...service, bufferAfterMinutes: value })
+                        }
+                      />
+                      <NumberField
+                        label="Granularidad"
+                        value={service.slotGranularityMinutes}
+                        set={(value) =>
+                          setService({ ...service, slotGranularityMinutes: value })
+                        }
+                      />
+                      <NumberField
+                        label="Anticipación mínima"
+                        value={service.minimumLeadMinutes}
+                        set={(value) =>
+                          setService({ ...service, minimumLeadMinutes: value })
+                        }
+                      />
+                      <NumberField
+                        label="Horizonte máximo"
+                        value={service.maximumHorizonDays}
+                        set={(value) =>
+                          setService({ ...service, maximumHorizonDays: value })
+                        }
+                      />
+                      <Check
+                        label="Servicio activo"
+                        value={service.active}
+                        set={(value) => setService({ ...service, active: value })}
+                      />
+                      <Button disabled={saving}>Guardar servicio</Button>
+                      {editingServiceId && (
+                        <Button variant="secondary" onClick={clearService}>
+                          Cancelar edición
+                        </Button>
+                      )}
+                    </form>
+                  )}
+                </div>
+              )}
+
+              {tab === "availability" && (
+                <div className="scheduling-section">
+                  <h3>Disponibilidad semanal</h3>
+                  {canManage && (
+                    <form className="automation-form automation-form--schedule"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void execute("replace_weekly_availability", {
+                          resourceId: availability.resourceId,
+                          windows: [
+                            ...availabilityWindows,
+                            {
+                              weekday: availability.weekday,
+                              startTime: availability.startTime,
+                              endTime: availability.endTime,
+                            },
+                          ],
+                        });
+                      }}
+                    >
+                      <ResourceSelect
+                        label="Recurso para disponibilidad"
+                        value={availability.resourceId}
+                        resources={configuration.resources}
+                        set={(value) =>
+                          setAvailability({ ...availability, resourceId: value })
+                        }
+                      />
+                      <WeekdaySelect
+                        value={availability.weekday}
+                        set={(value) =>
+                          setAvailability({ ...availability, weekday: value })
+                        }
+                      />
+                      <Text
+                        label="Hora de inicio"
+                        value={availability.startTime}
+                        set={(value) =>
+                          setAvailability({ ...availability, startTime: value })
+                        }
+                        type="time"
+                      />
+                      <Text
+                        label="Hora de fin"
+                        value={availability.endTime}
+                        set={(value) =>
+                          setAvailability({ ...availability, endTime: value })
+                        }
+                        type="time"
+                      />
+                      <Button disabled={saving}>Guardar disponibilidad</Button>
+                    </form>
+                  )}
+                </div>
+              )}
+
+              {tab === "exceptions" && (
+                <div className="scheduling-section">
+                  <h3>Excepciones de fecha</h3>
+                  <ul>
+                    {configuration.dateExceptions.map((item) => (
+                      <li key={item.id}>
+                        {item.local_date} · {item.kind}{" "}
+                        {canManage && (
+                          <Button
+                            variant="quiet"
+                            onClick={() =>
+                              void execute("remove_date_exception", {
+                                exceptionId: item.id,
+                              })
+                            }
+                          >
+                            Quitar excepción
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  {canManage && (
+                    <form className="automation-form automation-form--schedule"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void execute("add_date_exception", {
+                          resourceId: exception.resourceId,
+                          localDate: exception.localDate,
+                          kind: exception.kind,
+                          ...(exception.kind === "open"
+                            ? {
+                                startTime: exception.startTime,
+                                endTime: exception.endTime,
+                              }
+                            : {}),
+                        });
+                      }}
+                    >
+                      <ResourceSelect
+                        label="Recurso para excepción"
+                        value={exception.resourceId}
+                        resources={configuration.resources}
+                        set={(value) =>
+                          setException({ ...exception, resourceId: value })
+                        }
+                      />
+                      <Text
+                        label="Fecha"
+                        value={exception.localDate}
+                        set={(value) =>
+                          setException({ ...exception, localDate: value })
+                        }
+                        type="date"
+                      />
+                      <label className="ds-field">
+                        Tipo
+                        <Select
+                          value={exception.kind}
+                          onChange={(event) =>
+                            setException({
+                              ...exception,
+                              kind: event.target.value as "open" | "closed",
+                            })
+                          }
+                        >
+                          <option value="closed">Cerrado</option>
+                          <option value="open">Abierto</option>
+                        </Select>
+                      </label>
+                      {exception.kind === "open" && (
+                        <>
+                          <Text
+                            label="Inicio de excepción"
+                            value={exception.startTime}
+                            set={(value) =>
+                              setException({ ...exception, startTime: value })
+                            }
+                            type="time"
+                          />
+                          <Text
+                            label="Fin de excepción"
+                            value={exception.endTime}
+                            set={(value) =>
+                              setException({ ...exception, endTime: value })
+                            }
+                            type="time"
+                          />
+                        </>
+                      )}
+                      <Button disabled={saving}>Agregar excepción</Button>
+                    </form>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
     </section>
   );
 }
@@ -980,7 +1013,7 @@ function Readiness({
   configuration: SchedulingConfiguration;
 }): React.JSX.Element {
   return (
-    <section>
+    <div className="scheduling-section-block">
       <h3>Qué puede usar Atlas ahora</h3>
       <p>
         {configuration.readiness.state === "not_configured"
@@ -989,7 +1022,7 @@ function Readiness({
             ? "La agenda está iniciada; todavía faltan servicios activos y disponibilidad semanal."
             : "La disponibilidad interna está configurada y puede usarse dentro de la empresa."}
       </p>
-    </section>
+    </div>
   );
 }
 function Text({
