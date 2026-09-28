@@ -44,6 +44,10 @@ export function IconConversations({ size = 20, className = "" }: { readonly size
   );
 }
 
+export function IconCalendar({ size = 20, className = "" }: { readonly size?: number; readonly className?: string }): React.JSX.Element {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></svg>;
+}
+
 export function IconSettings({ size = 20, className = "" }: { readonly size?: number; readonly className?: string }): React.JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">

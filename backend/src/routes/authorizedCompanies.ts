@@ -16,6 +16,8 @@ import type { PilotReadinessService } from "../onboarding/services/pilotReadines
 import { createGetPilotReadinessController } from "../controllers/pilotReadinessController.js";
 import type { ActivationService } from "../activation/services/activationService.js";
 import { createGetActivationController, createStartActivationVerificationController } from "../controllers/activationController.js";
+import type { AgendaService } from "../scheduling/services/agendaService.js";
+import { createAgendaControllers } from "../controllers/agendaController.js";
 
 interface ContextualControllers {
   list: (context: WorkspaceContext) => RequestHandler;
@@ -68,6 +70,7 @@ interface ContextualConversationReadControllers {
   markRead?: (context: WorkspaceContext, actor: ActorContext) => RequestHandler;
 }
 interface ContextualConversationControlControllers { takeover: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; release: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; resolve: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; resume: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; }
+interface ContextualAgendaControllers { list: (context: WorkspaceContext) => RequestHandler; slots: (context: WorkspaceContext) => RequestHandler; get: (context: WorkspaceContext) => RequestHandler; create: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; reschedule: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; cancel: (context: WorkspaceContext, actor: ActorContext) => RequestHandler; }
 interface AuthorizedCompaniesUserReader { findById(id: UserId): User | null | Promise<User | null>; }
 
 interface AuthorizedCompanyDependencies {
@@ -96,6 +99,7 @@ interface AuthorizedCompanyDependencies {
   schedulingConfigurationService?: SchedulingConfigurationService;
   pilotReadinessService?: PilotReadinessService;
   activationService?: ActivationService;
+  agendaService?: AgendaService;
 }
 
 let productionConversationMessageController: ((context: WorkspaceContext, actor: ActorContext) => RequestHandler) | null = null;
@@ -112,6 +116,7 @@ let productionCompanyOperationalStatusService: CompanyOperationalStatusService |
 let productionSchedulingConfigurationService: SchedulingConfigurationService | null = null;
 let productionPilotReadinessService: PilotReadinessService | null = null;
 let productionActivationService: ActivationService | null = null;
+let productionAgendaService: AgendaService | null = null;
 export function configureProductionConversationMessageController(controller: (context: WorkspaceContext, actor: ActorContext) => RequestHandler): void { productionConversationMessageController = controller; }
 export function configureProductionConversationReadControllers(controllers: ContextualConversationReadControllers): void { productionConversationReadControllers = controllers; }
 export function configureProductionConversationControlControllers(controllers: ContextualConversationControlControllers): void { productionConversationControlControllers = controllers; }
@@ -126,6 +131,7 @@ export function configureProductionCompanyOperationalStatusService(service: Comp
 export function configureProductionSchedulingConfigurationService(service: SchedulingConfigurationService): void { productionSchedulingConfigurationService = service; }
 export function configureProductionPilotReadinessService(service: PilotReadinessService): void { productionPilotReadinessService = service; }
 export function configureProductionActivationService(service: ActivationService): void { productionActivationService = service; }
+export function configureProductionAgendaService(service: AgendaService): void { productionAgendaService = service; }
 
 function rawCookie(req: Request, name: string): string | null {
   for (const part of (req.headers.cookie ?? "").split(";")) {
@@ -235,6 +241,16 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
   if (schedulingConfiguration) {
     router.get("/:workspaceId/companies/:companyId/scheduling-configuration", authorize("company:read", false, (context) => createGetSchedulingConfigurationController(schedulingConfiguration, context)));
     router.post("/:workspaceId/companies/:companyId/scheduling-configuration/commands", authorize("company:manage", true, (context, actor) => createMutateSchedulingConfigurationController(schedulingConfiguration, context, actor)));
+  }
+  const agendaService = dependencies.agendaService ?? productionAgendaService;
+  if (agendaService) {
+    const agenda = createAgendaControllers(agendaService);
+    router.get("/:workspaceId/companies/:companyId/agenda/bookings", authorize("company:read", false, agenda.list));
+    router.get("/:workspaceId/companies/:companyId/agenda/slots", authorize("company:read", false, agenda.slots));
+    router.post("/:workspaceId/companies/:companyId/agenda/bookings", authorize("company:manage", true, agenda.create));
+    router.get("/:workspaceId/companies/:companyId/agenda/bookings/:agendaBookingId", authorize("company:read", false, agenda.get));
+    router.post("/:workspaceId/companies/:companyId/agenda/bookings/:agendaBookingId/reschedule", authorize("company:manage", true, agenda.reschedule));
+    router.post("/:workspaceId/companies/:companyId/agenda/bookings/:agendaBookingId/cancel", authorize("company:manage", true, agenda.cancel));
   }
   const defaults=dependencies.defaultAssistantControllers??productionDefaultAssistantControllers;
   if(defaults){router.get("/:workspaceId/companies/:companyId/assistant/default",authorize("company:read",false,defaults.get));router.put("/:workspaceId/companies/:companyId/assistant/default",authorize("company:manage",true,defaults.put));}

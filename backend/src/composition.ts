@@ -60,7 +60,7 @@ import{WorkspaceAdministrationService}from"./workspace/services/workspaceAdminis
 import{AuthorizationService}from"./workspace/services/authorizationService.js";
 import { SqlWorkspaceAdministrationTransaction } from "./workspace/infrastructure/asyncWorkspaceAdministrationTransaction.js";
 import{WorkspaceResolver}from"./workspace/services/workspaceResolver.js";
-import{configureProductionActivationService,configureProductionCompanyOperationalStatusService,configureProductionPilotReadinessService,configureProductionProactiveActionControllers,configureProductionSchedulingConfigurationService,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
+import{configureProductionActivationService,configureProductionAgendaService,configureProductionCompanyOperationalStatusService,configureProductionPilotReadinessService,configureProductionProactiveActionControllers,configureProductionSchedulingConfigurationService,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
 import{AssistantProfileService}from"./assistant/services/assistantProfileService.js";
 import{createAssistantProfileController,createGetAssistantProfileController,createListAssistantProfilesController,createTransitionAssistantProfileController,createUpdateAssistantProfileController}from"./controllers/assistantProfileController.js";
 import { AssistantPreviewService } from "./assistant/services/assistantPreviewService.js";
@@ -159,6 +159,8 @@ import { LiveDataObservationRepository } from "./repositories/liveDataObservatio
 import { liveDataReadToolDefinition } from "./liveData/application/liveDataReadToolDefinition.js";
 import { BookingCommandService } from "./scheduling/services/bookingCommandService.js";
 import { BookingQueryService } from "./scheduling/services/bookingQueryService.js";
+import { AgendaService } from "./scheduling/services/agendaService.js";
+import { AgendaRepository } from "./repositories/agendaRepository.js";
 import { schedulingBookingToolDefinitions } from "./scheduling/application/bookingToolDefinitions.js";
 import { createAsyncLocalMediaCore, createAsyncMediaCore } from "./media/composition.js";
 import { createAsyncMediaPersistence } from "./media/infrastructure/asyncMediaFactory.js";
@@ -326,6 +328,8 @@ export const externalBookingRescheduleService = new ExternalBookingRescheduleSer
 export const externalBookingCancelService = new ExternalBookingCancelService(schedulingRepository, externalCalendarBindingService, externalCalendarRepository, bookingRepository, providerAdapterRegistry, identityClock);
 const bookingCommands = new BookingCommandService(bookingRepository, identityClock);
 const bookingQueries = new BookingQueryService(bookingRepository);
+const agendaService = new AgendaService(new AgendaRepository(sqlDatabase), identityClock, externalSchedulingService);
+configureProductionAgendaService(agendaService);
 export const schedulingBookingRouter = new SchedulingBookingRouter(bookingCommands, externalCalendarBindingService, externalBookingCreateService, externalBookingRescheduleService, externalBookingCancelService, bookingRepository, externalCalendarRepository, schedulingRepository);
 const productionToolRegistry=new ToolRegistry(productionAssistantCapabilityCatalog,[liveDataReadToolDefinition(liveDataService),...schedulingBookingToolDefinitions(bookingCommands,bookingQueries)]);
 const productionToolAvailability=new LiveDataToolAvailabilityPolicy(new IntegrationToolAvailabilityPolicy(new NoIntegrationToolAvailabilityPolicy(),integrationConnections),integrationConnections);

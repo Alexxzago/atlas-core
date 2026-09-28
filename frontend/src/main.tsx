@@ -16,6 +16,7 @@ import "./styles/workspace.css";
 import "./styles/assistant.css";
 import "./styles/design-v2.css";
 import "./styles/conversations.css";
+import "./styles/agenda.css";
 import "./styles/product.css";
 import "./styles/admin.css";
 import "./styles/admin-plan-form.css";

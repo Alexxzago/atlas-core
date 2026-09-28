@@ -18,6 +18,14 @@ export interface LocalBookingCommandPort {
   cancel(context: WorkspaceContext, companyId: number, input: { readonly bookingId: string; readonly idempotencyKey: string }): Promise<SchedulingBooking>;
 }
 
+/** Explicit local authority for operator surfaces. It deliberately never resolves a calendar binding. */
+export class LocalOnlySchedulingBookingRouter {
+  public constructor(private readonly local: LocalBookingCommandPort) {}
+  public async create(context: WorkspaceContext, companyId: number, input: { readonly serviceId: string; readonly startAt: string; readonly reference: string; readonly idempotencyKey: string; readonly workerId: string }): Promise<RoutedBookingWriteOutcome> { const request = createInput(input); return request ? local(() => this.local.create(context, companyId, request)) : { kind: "validation_error" }; }
+  public async reschedule(context: WorkspaceContext, companyId: number, input: { readonly bookingId: string; readonly startAt: string; readonly reference: string; readonly idempotencyKey: string; readonly workerId: string }): Promise<RoutedBookingWriteOutcome> { const request = rescheduleInput(input); return request ? local(() => this.local.reschedule(context, companyId, { bookingId: request.bookingId, newStartAt: request.startAt, reference: request.reference, idempotencyKey: request.idempotencyKey })) : { kind: "validation_error" }; }
+  public async cancel(context: WorkspaceContext, companyId: number, input: { readonly bookingId: string; readonly idempotencyKey: string; readonly workerId: string }): Promise<RoutedBookingWriteOutcome> { const request = cancelInput(input); return request ? local(() => this.local.cancel(context, companyId, request)) : { kind: "validation_error" }; }
+}
+
 export interface ExternalBookingCreatePort { create(context: WorkspaceContext, companyId: number, input: { readonly resourceId: string; readonly serviceId: string; readonly startAt: string; readonly reference: string; readonly idempotencyKey: string; readonly workerId: string }): Promise<ExternalCreateResult>; }
 export interface ExternalBookingReschedulePort { reschedule(context: WorkspaceContext, companyId: number, input: { readonly bookingId: string; readonly startAt: string; readonly reference: string; readonly idempotencyKey: string; readonly workerId: string }): Promise<ExternalMutationResult>; }
 export interface ExternalBookingCancelPort { cancel(context: WorkspaceContext, companyId: number, input: { readonly bookingId: string; readonly idempotencyKey: string; readonly workerId: string }): Promise<ExternalMutationResult>; }
@@ -37,6 +45,8 @@ export class SchedulingBookingRouter {
     private readonly mappings: ExternalBookingEventRepositoryPort,
     private readonly scheduling: SchedulingRepositoryPort,
   ) {}
+
+  public static localOnly(local: LocalBookingCommandPort): LocalOnlySchedulingBookingRouter { return new LocalOnlySchedulingBookingRouter(local); }
 
   public async create(context: WorkspaceContext, companyId: number, input: { readonly serviceId: string; readonly startAt: string; readonly reference: string; readonly idempotencyKey: string; readonly workerId: string }): Promise<RoutedBookingWriteOutcome> {
     const request = createInput(input);

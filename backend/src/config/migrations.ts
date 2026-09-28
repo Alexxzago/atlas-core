@@ -2385,6 +2385,77 @@ const migrations: Migration[] = [
     ALTER TABLE media_blobs ADD COLUMN reclaim_lease_expires_at TEXT;
     CREATE INDEX idx_media_blobs_reclaim_recovery ON media_blobs(state,reclaim_lease_expires_at,created_at,id) WHERE state='reclaim_pending';
   `);}},
+  { id:79,name:"0079_operator_agenda_contacts",checksumSource:"operator-agenda-local-bookings-minimal-contacts-idempotent-versioned-audit-v1",apply(database):void{database.exec(`
+    CREATE TABLE contacts(
+      id TEXT PRIMARY KEY CHECK(length(id)=36 AND substr(id,1,4)='act_'),workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,
+      name TEXT CHECK(name IS NULL OR length(name) BETWEEN 1 AND 200),phone TEXT CHECK(phone IS NULL OR length(phone) BETWEEN 1 AND 200),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,CHECK(name IS NOT NULL OR phone IS NOT NULL)
+    );
+    CREATE INDEX idx_contacts_agenda_search ON contacts(workspace_id,company_id,name,phone,id);
+    CREATE TABLE agenda_bookings(
+      id TEXT PRIMARY KEY CHECK(length(id)=36 AND substr(id,1,4)='abk_'),workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,
+      current_booking_id TEXT NOT NULL UNIQUE REFERENCES scheduling_bookings(id) ON DELETE RESTRICT,version INTEGER NOT NULL CHECK(version>0),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_agenda_bookings_read ON agenda_bookings(workspace_id,company_id,updated_at DESC,id DESC);
+    CREATE TRIGGER agenda_bookings_scope_insert BEFORE INSERT ON agenda_bookings WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.current_booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Agenda booking scope is invalid'); END;
+    CREATE TRIGGER agenda_bookings_scope_update BEFORE UPDATE OF current_booking_id,workspace_id,company_id ON agenda_bookings WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.current_booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Agenda booking scope is invalid'); END;
+    CREATE TABLE agenda_booking_contacts(
+      agenda_booking_id TEXT PRIMARY KEY REFERENCES agenda_bookings(id) ON DELETE CASCADE,contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE RESTRICT
+    );
+    CREATE TRIGGER agenda_booking_contacts_scope_insert BEFORE INSERT ON agenda_booking_contacts WHEN NOT EXISTS(SELECT 1 FROM agenda_bookings b JOIN contacts c ON c.id=NEW.contact_id WHERE b.id=NEW.agenda_booking_id AND b.workspace_id=c.workspace_id AND b.company_id=c.company_id) BEGIN SELECT RAISE(ABORT,'Agenda contact scope is invalid'); END;
+    CREATE TABLE agenda_booking_operations(
+      id TEXT PRIMARY KEY CHECK(length(id)=36 AND substr(id,1,4)='ago_'),workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 200),request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),operation TEXT NOT NULL CHECK(operation IN ('create','reschedule','cancel')),result_agenda_booking_id TEXT NOT NULL REFERENCES agenda_bookings(id) ON DELETE RESTRICT,created_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,UNIQUE(workspace_id,company_id,idempotency_key)
+    );
+    CREATE TRIGGER agenda_booking_operations_no_update BEFORE UPDATE ON agenda_booking_operations BEGIN SELECT RAISE(ABORT,'Agenda booking operations are append-only'); END;
+    CREATE TRIGGER agenda_booking_operations_no_delete BEFORE DELETE ON agenda_booking_operations BEGIN SELECT RAISE(ABORT,'Agenda booking operations are append-only'); END;
+    CREATE TABLE agenda_booking_audit_events(
+      id TEXT PRIMARY KEY CHECK(length(id)=36 AND substr(id,1,4)='aga_'),workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,agenda_booking_id TEXT NOT NULL REFERENCES agenda_bookings(id) ON DELETE RESTRICT,operation_id TEXT NOT NULL REFERENCES agenda_booking_operations(id) ON DELETE RESTRICT,idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 200),actor_id TEXT NOT NULL CHECK(length(actor_id) BETWEEN 1 AND 128),origin TEXT NOT NULL CHECK(origin IN ('phone','operator')),reason TEXT CHECK(reason IS NULL OR length(reason) BETWEEN 1 AND 200),previous_version INTEGER CHECK(previous_version IS NULL OR previous_version>0),resulting_version INTEGER NOT NULL CHECK(resulting_version>0),occurred_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_agenda_booking_audit_read ON agenda_booking_audit_events(workspace_id,company_id,agenda_booking_id,occurred_at,id);
+    CREATE TRIGGER agenda_booking_audit_events_no_update BEFORE UPDATE ON agenda_booking_audit_events BEGIN SELECT RAISE(ABORT,'Agenda booking audit events are append-only'); END;
+    CREATE TRIGGER agenda_booking_audit_events_no_delete BEFORE DELETE ON agenda_booking_audit_events BEGIN SELECT RAISE(ABORT,'Agenda booking audit events are append-only'); END;
+  `);}},
+  { id:80,name:"0080_operator_agenda_contact_identifiers",checksumSource:"operator-agenda-normalized-phone-consent-provenance-v1",apply(database):void{database.exec(`
+    ALTER TABLE contacts ADD COLUMN normalized_phone TEXT;
+    ALTER TABLE contacts ADD COLUMN consent_source TEXT;
+    ALTER TABLE contacts ADD COLUMN consent_at TEXT;
+    CREATE UNIQUE INDEX idx_contacts_agenda_normalized_phone ON contacts(workspace_id,company_id,normalized_phone) WHERE normalized_phone IS NOT NULL;
+    CREATE INDEX idx_contacts_agenda_name ON contacts(workspace_id,company_id,name,id);
+    CREATE TRIGGER contacts_agenda_identifier_consent_insert BEFORE INSERT ON contacts WHEN NEW.normalized_phone IS NULL OR NEW.consent_source IS NULL OR NEW.consent_at IS NULL BEGIN SELECT RAISE(ABORT,'Agenda contact identifier and consent are required'); END;
+  `);}},
+  { id:81,name:"0081_operator_agenda_legacy_projection_receipts",checksumSource:"operator-agenda-canonical-legacy-heads-immutable-operation-receipts-v1",apply(database):void{database.exec(`
+    INSERT OR IGNORE INTO agenda_bookings(id,workspace_id,company_id,current_booking_id,version,created_at,updated_at)
+    SELECT 'abk_' || substr(b.id,5),b.workspace_id,b.company_id,b.id,1,b.created_at,b.created_at
+    FROM scheduling_bookings b
+    WHERE NOT EXISTS(SELECT 1 FROM scheduling_bookings child WHERE child.workspace_id=b.workspace_id AND child.company_id=b.company_id AND child.rescheduled_from_booking_id=b.id)
+      AND NOT EXISTS(SELECT 1 FROM agenda_bookings a WHERE a.workspace_id=b.workspace_id AND a.company_id=b.company_id AND a.current_booking_id=b.id);
+    CREATE TABLE agenda_booking_operation_receipts(
+      operation_id TEXT PRIMARY KEY REFERENCES agenda_booking_operations(id) ON DELETE RESTRICT,
+      workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,result_json TEXT NOT NULL CHECK(length(result_json) BETWEEN 2 AND 20000),created_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    CREATE TRIGGER agenda_booking_operation_receipts_no_update BEFORE UPDATE ON agenda_booking_operation_receipts BEGIN SELECT RAISE(ABORT,'Agenda booking operation receipts are append-only'); END;
+    CREATE TRIGGER agenda_booking_operation_receipts_no_delete BEFORE DELETE ON agenda_booking_operation_receipts BEGIN SELECT RAISE(ABORT,'Agenda booking operation receipts are append-only'); END;
+  `);}},
+  // Keep 0081 immutable for already-migrated local databases; rebuild only its receipt table without a payload ceiling.
+  { id:82,name:"0082_operator_agenda_unbounded_receipts",checksumSource:"operator-agenda-receipts-preserve-immutable-history-without-size-ceiling-v1",apply(database):void{database.exec(`
+    DROP TRIGGER agenda_booking_operation_receipts_no_update;
+    DROP TRIGGER agenda_booking_operation_receipts_no_delete;
+    CREATE TABLE agenda_booking_operation_receipts_next(
+      operation_id TEXT PRIMARY KEY REFERENCES agenda_booking_operations(id) ON DELETE RESTRICT,
+      workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,result_json TEXT NOT NULL,created_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    INSERT INTO agenda_booking_operation_receipts_next(operation_id,workspace_id,company_id,result_json,created_at)
+      SELECT operation_id,workspace_id,company_id,result_json,created_at FROM agenda_booking_operation_receipts;
+    DROP TABLE agenda_booking_operation_receipts;
+    ALTER TABLE agenda_booking_operation_receipts_next RENAME TO agenda_booking_operation_receipts;
+    CREATE TRIGGER agenda_booking_operation_receipts_no_update BEFORE UPDATE ON agenda_booking_operation_receipts BEGIN SELECT RAISE(ABORT,'Agenda booking operation receipts are append-only'); END;
+    CREATE TRIGGER agenda_booking_operation_receipts_no_delete BEFORE DELETE ON agenda_booking_operation_receipts BEGIN SELECT RAISE(ABORT,'Agenda booking operation receipts are append-only'); END;
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {
