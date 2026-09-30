@@ -28,6 +28,7 @@ import { SchedulingAutomationsPanel } from "./SchedulingAutomationsPanel";
 import { BillingPage } from "./BillingPage";
 import { ProductBootstrapState } from "./ProductBootstrapState";
 import { resolveProductBootstrap } from "../routing/productBootstrap";
+import { AgendaPanel } from "./AgendaPanel";
 
 interface Props { csrf: string; userId?: string | undefined; email: string; isPlatformAdmin?: boolean; onPassword: () => void; onLogout: () => Promise<void> | void; logoutPending?: boolean | undefined; logoutError?: string | undefined }
 
@@ -180,6 +181,7 @@ function AuthenticatedCompanyPortalContent({ csrf, userId, email, isPlatformAdmi
     if (route.name === "company-channels") return <>{requestedCompanyId && <ChannelHub companyId={requestedCompanyId} workspaceId={state.selectedWorkspace?.id ?? null} onNavigate={navigate}/>}</>;
     if (route.name === "company-web-chat") return <><ContextBackLink href={`/companies/${requestedCompanyId}/channels`} label={t("channels.back")} onNavigate={(event)=>{event.preventDefault();navigate(`/companies/${requestedCompanyId}/channels`);}}/>{webChatPanel}</>;
     if (route.name === "company-whatsapp") return whatsappPanel;
+    if (route.name === "company-agenda") return <AgendaPanel csrf={csrf} workspaceId={state.selectedWorkspace?.id ?? null} companyId={state.selectedCompanyId} capabilities={state.selectedWorkspace?.capabilities ?? []}/>;
     return <></>;
   };
 

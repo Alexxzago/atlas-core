@@ -2385,6 +2385,241 @@ const migrations: Migration[] = [
     ALTER TABLE media_blobs ADD COLUMN reclaim_lease_expires_at TEXT;
     CREATE INDEX idx_media_blobs_reclaim_recovery ON media_blobs(state,reclaim_lease_expires_at,created_at,id) WHERE state='reclaim_pending';
   `);}},
+  { id:79,name:"0079_operator_agenda_contacts",checksumSource:"operator-agenda-local-bookings-minimal-contacts-idempotent-versioned-audit-v1",apply(database):void{database.exec(`
+    CREATE TABLE contacts(
+      id TEXT PRIMARY KEY CHECK(length(id)=36 AND substr(id,1,4)='act_'),workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,
+      name TEXT CHECK(name IS NULL OR length(name) BETWEEN 1 AND 200),phone TEXT CHECK(phone IS NULL OR length(phone) BETWEEN 1 AND 200),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,CHECK(name IS NOT NULL OR phone IS NOT NULL)
+    );
+    CREATE INDEX idx_contacts_agenda_search ON contacts(workspace_id,company_id,name,phone,id);
+    CREATE TABLE agenda_bookings(
+      id TEXT PRIMARY KEY CHECK(length(id)=36 AND substr(id,1,4)='abk_'),workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,
+      current_booking_id TEXT NOT NULL UNIQUE REFERENCES scheduling_bookings(id) ON DELETE RESTRICT,version INTEGER NOT NULL CHECK(version>0),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_agenda_bookings_read ON agenda_bookings(workspace_id,company_id,updated_at DESC,id DESC);
+    CREATE TRIGGER agenda_bookings_scope_insert BEFORE INSERT ON agenda_bookings WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.current_booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Agenda booking scope is invalid'); END;
+    CREATE TRIGGER agenda_bookings_scope_update BEFORE UPDATE OF current_booking_id,workspace_id,company_id ON agenda_bookings WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.current_booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Agenda booking scope is invalid'); END;
+    CREATE TABLE agenda_booking_contacts(
+      agenda_booking_id TEXT PRIMARY KEY REFERENCES agenda_bookings(id) ON DELETE CASCADE,contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE RESTRICT
+    );
+    CREATE TRIGGER agenda_booking_contacts_scope_insert BEFORE INSERT ON agenda_booking_contacts WHEN NOT EXISTS(SELECT 1 FROM agenda_bookings b JOIN contacts c ON c.id=NEW.contact_id WHERE b.id=NEW.agenda_booking_id AND b.workspace_id=c.workspace_id AND b.company_id=c.company_id) BEGIN SELECT RAISE(ABORT,'Agenda contact scope is invalid'); END;
+    CREATE TABLE agenda_booking_operations(
+      id TEXT PRIMARY KEY CHECK(length(id)=36 AND substr(id,1,4)='ago_'),workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 200),request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),operation TEXT NOT NULL CHECK(operation IN ('create','reschedule','cancel')),result_agenda_booking_id TEXT NOT NULL REFERENCES agenda_bookings(id) ON DELETE RESTRICT,created_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,UNIQUE(workspace_id,company_id,idempotency_key)
+    );
+    CREATE TRIGGER agenda_booking_operations_no_update BEFORE UPDATE ON agenda_booking_operations BEGIN SELECT RAISE(ABORT,'Agenda booking operations are append-only'); END;
+    CREATE TRIGGER agenda_booking_operations_no_delete BEFORE DELETE ON agenda_booking_operations BEGIN SELECT RAISE(ABORT,'Agenda booking operations are append-only'); END;
+    CREATE TABLE agenda_booking_audit_events(
+      id TEXT PRIMARY KEY CHECK(length(id)=36 AND substr(id,1,4)='aga_'),workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,agenda_booking_id TEXT NOT NULL REFERENCES agenda_bookings(id) ON DELETE RESTRICT,operation_id TEXT NOT NULL REFERENCES agenda_booking_operations(id) ON DELETE RESTRICT,idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 200),actor_id TEXT NOT NULL CHECK(length(actor_id) BETWEEN 1 AND 128),origin TEXT NOT NULL CHECK(origin IN ('phone','operator')),reason TEXT CHECK(reason IS NULL OR length(reason) BETWEEN 1 AND 200),previous_version INTEGER CHECK(previous_version IS NULL OR previous_version>0),resulting_version INTEGER NOT NULL CHECK(resulting_version>0),occurred_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_agenda_booking_audit_read ON agenda_booking_audit_events(workspace_id,company_id,agenda_booking_id,occurred_at,id);
+    CREATE TRIGGER agenda_booking_audit_events_no_update BEFORE UPDATE ON agenda_booking_audit_events BEGIN SELECT RAISE(ABORT,'Agenda booking audit events are append-only'); END;
+    CREATE TRIGGER agenda_booking_audit_events_no_delete BEFORE DELETE ON agenda_booking_audit_events BEGIN SELECT RAISE(ABORT,'Agenda booking audit events are append-only'); END;
+  `);}},
+  { id:80,name:"0080_operator_agenda_contact_identifiers",checksumSource:"operator-agenda-normalized-phone-consent-provenance-v1",apply(database):void{database.exec(`
+    ALTER TABLE contacts ADD COLUMN normalized_phone TEXT;
+    ALTER TABLE contacts ADD COLUMN consent_source TEXT;
+    ALTER TABLE contacts ADD COLUMN consent_at TEXT;
+    CREATE UNIQUE INDEX idx_contacts_agenda_normalized_phone ON contacts(workspace_id,company_id,normalized_phone) WHERE normalized_phone IS NOT NULL;
+    CREATE INDEX idx_contacts_agenda_name ON contacts(workspace_id,company_id,name,id);
+    CREATE TRIGGER contacts_agenda_identifier_consent_insert BEFORE INSERT ON contacts WHEN NEW.normalized_phone IS NULL OR NEW.consent_source IS NULL OR NEW.consent_at IS NULL BEGIN SELECT RAISE(ABORT,'Agenda contact identifier and consent are required'); END;
+  `);}},
+  { id:81,name:"0081_operator_agenda_legacy_projection_receipts",checksumSource:"operator-agenda-canonical-legacy-heads-immutable-operation-receipts-v1",apply(database):void{database.exec(`
+    INSERT OR IGNORE INTO agenda_bookings(id,workspace_id,company_id,current_booking_id,version,created_at,updated_at)
+    SELECT 'abk_' || substr(b.id,5),b.workspace_id,b.company_id,b.id,1,b.created_at,b.created_at
+    FROM scheduling_bookings b
+    WHERE NOT EXISTS(SELECT 1 FROM scheduling_bookings child WHERE child.workspace_id=b.workspace_id AND child.company_id=b.company_id AND child.rescheduled_from_booking_id=b.id)
+      AND NOT EXISTS(SELECT 1 FROM agenda_bookings a WHERE a.workspace_id=b.workspace_id AND a.company_id=b.company_id AND a.current_booking_id=b.id);
+    CREATE TABLE agenda_booking_operation_receipts(
+      operation_id TEXT PRIMARY KEY REFERENCES agenda_booking_operations(id) ON DELETE RESTRICT,
+      workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,result_json TEXT NOT NULL CHECK(length(result_json) BETWEEN 2 AND 20000),created_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    CREATE TRIGGER agenda_booking_operation_receipts_no_update BEFORE UPDATE ON agenda_booking_operation_receipts BEGIN SELECT RAISE(ABORT,'Agenda booking operation receipts are append-only'); END;
+    CREATE TRIGGER agenda_booking_operation_receipts_no_delete BEFORE DELETE ON agenda_booking_operation_receipts BEGIN SELECT RAISE(ABORT,'Agenda booking operation receipts are append-only'); END;
+  `);}},
+  // Keep 0081 immutable for already-migrated local databases; rebuild only its receipt table without a payload ceiling.
+  { id:82,name:"0082_operator_agenda_unbounded_receipts",checksumSource:"operator-agenda-receipts-preserve-immutable-history-without-size-ceiling-v1",apply(database):void{database.exec(`
+    DROP TRIGGER agenda_booking_operation_receipts_no_update;
+    DROP TRIGGER agenda_booking_operation_receipts_no_delete;
+    CREATE TABLE agenda_booking_operation_receipts_next(
+      operation_id TEXT PRIMARY KEY REFERENCES agenda_booking_operations(id) ON DELETE RESTRICT,
+      workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,result_json TEXT NOT NULL,created_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    INSERT INTO agenda_booking_operation_receipts_next(operation_id,workspace_id,company_id,result_json,created_at)
+      SELECT operation_id,workspace_id,company_id,result_json,created_at FROM agenda_booking_operation_receipts;
+    DROP TABLE agenda_booking_operation_receipts;
+    ALTER TABLE agenda_booking_operation_receipts_next RENAME TO agenda_booking_operation_receipts;
+    CREATE TRIGGER agenda_booking_operation_receipts_no_update BEFORE UPDATE ON agenda_booking_operation_receipts BEGIN SELECT RAISE(ABORT,'Agenda booking operation receipts are append-only'); END;
+    CREATE TRIGGER agenda_booking_operation_receipts_no_delete BEFORE DELETE ON agenda_booking_operation_receipts BEGIN SELECT RAISE(ABORT,'Agenda booking operation receipts are append-only'); END;
+  `);}},
+  { id:83,name:"0083_calendar_sync_local_first_outbox",checksumSource:"calendar-sync-status-durable-local-first-outbox-leases-v1",apply(database):void{database.exec(`
+    CREATE TABLE scheduling_calendar_sync_statuses(
+      booking_id TEXT PRIMARY KEY REFERENCES scheduling_bookings(id) ON DELETE CASCADE,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,binding_id TEXT NOT NULL REFERENCES scheduling_external_resource_bindings(id) ON DELETE RESTRICT,
+      status TEXT NOT NULL CHECK(status IN ('pending','synced','failed','conflict')),desired_operation TEXT NOT NULL CHECK(desired_operation IN ('create','reschedule','cancel')),last_provider_evidence_at TEXT,last_failure_code TEXT,
+      created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_scheduling_calendar_sync_statuses_company_status ON scheduling_calendar_sync_statuses(workspace_id,company_id,status,updated_at,booking_id);
+    CREATE TRIGGER scheduling_calendar_sync_status_scope_insert BEFORE INSERT ON scheduling_calendar_sync_statuses WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Calendar sync status scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_status_scope_update BEFORE UPDATE OF booking_id,workspace_id,company_id,binding_id ON scheduling_calendar_sync_statuses WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Calendar sync status scope is invalid'); END;
+    CREATE TABLE scheduling_calendar_sync_outbox(
+      id TEXT PRIMARY KEY CHECK(length(id)=36 AND substr(id,1,4)='cso_'),workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,booking_id TEXT NOT NULL REFERENCES scheduling_bookings(id) ON DELETE RESTRICT,binding_id TEXT NOT NULL REFERENCES scheduling_external_resource_bindings(id) ON DELETE RESTRICT,
+      operation TEXT NOT NULL CHECK(operation IN ('create','reschedule','cancel')),idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 200),request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+      state TEXT NOT NULL CHECK(state IN ('pending','leased','retryable','succeeded','failed','conflict')),attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count>=0),lease_owner TEXT,lease_token TEXT,lease_expires_at TEXT,last_provider_evidence_at TEXT,last_failure_code TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,UNIQUE(workspace_id,company_id,binding_id,operation,idempotency_key)
+    );
+    CREATE INDEX idx_scheduling_calendar_sync_outbox_recovery ON scheduling_calendar_sync_outbox(workspace_id,company_id,state,lease_expires_at,created_at,id);
+    CREATE TRIGGER scheduling_calendar_sync_outbox_scope_insert BEFORE INSERT ON scheduling_calendar_sync_outbox WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Calendar sync outbox scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_outbox_scope_update BEFORE UPDATE OF booking_id,workspace_id,company_id,binding_id ON scheduling_calendar_sync_outbox WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Calendar sync outbox scope is invalid'); END;
+  `);}},
+  { id:84,name:"0084_google_calendar_oauth_onboarding",checksumSource:"google-oauth-pkce-attempts-subject-calendar-access-company-bindings-v1",apply(database):void{database.exec(`
+    CREATE TABLE google_calendar_oauth_attempts(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,initiating_user_id TEXT NOT NULL,state_digest TEXT NOT NULL,encrypted_pkce_verifier TEXT NOT NULL,
+      redirect_uri TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('started','completed','failed','expired')),created_at TEXT NOT NULL,expires_at TEXT NOT NULL,consumed_at TEXT,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(initiating_user_id) REFERENCES users(id) ON DELETE RESTRICT
+    );
+    CREATE INDEX idx_google_calendar_oauth_attempt_scope ON google_calendar_oauth_attempts(workspace_id,company_id,initiating_user_id,id);
+    CREATE TABLE google_calendar_authorizations(
+      integration_connection_id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,google_subject TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('active','revoked')),authorized_at TEXT NOT NULL,revoked_at TEXT,updated_at TEXT NOT NULL,
+      FOREIGN KEY(integration_connection_id) REFERENCES integration_connections(id) ON DELETE CASCADE,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      UNIQUE(workspace_id,company_id,google_subject)
+    );
+    CREATE TABLE google_calendar_accesses(
+      integration_connection_id TEXT NOT NULL,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,calendar_id TEXT NOT NULL,display_name TEXT NOT NULL,access_role TEXT NOT NULL,updated_at TEXT NOT NULL,
+      PRIMARY KEY(integration_connection_id,calendar_id),FOREIGN KEY(integration_connection_id) REFERENCES google_calendar_authorizations(integration_connection_id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    CREATE TABLE google_calendar_company_bindings(
+      binding_id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,google_subject TEXT NOT NULL,calendar_id TEXT NOT NULL,created_at TEXT NOT NULL,
+      FOREIGN KEY(binding_id) REFERENCES scheduling_external_resource_bindings(id) ON DELETE CASCADE,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,
+      UNIQUE(workspace_id,company_id,google_subject,calendar_id)
+    );
+  `);}},
+  { id:85,name:"0085_google_calendar_safe_resource_bindings",checksumSource:"google-calendar-resource-binding-lifecycle-cas-fresh-evidence-v1",apply(database):void{database.exec(`
+    ALTER TABLE scheduling_external_resource_bindings ADD COLUMN state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active','blocked','unbound'));
+    ALTER TABLE scheduling_external_resource_bindings ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK(version>0);
+    ALTER TABLE google_calendar_company_bindings ADD COLUMN state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active','blocked','unbound'));
+    ALTER TABLE google_calendar_company_bindings ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK(version>0);
+    ALTER TABLE google_calendar_company_bindings ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+    UPDATE google_calendar_company_bindings SET updated_at=created_at WHERE updated_at='';
+    CREATE INDEX idx_google_calendar_bindings_scope_subject_calendar ON google_calendar_company_bindings(workspace_id,company_id,google_subject,calendar_id,state);
+    CREATE INDEX idx_calendar_resource_bindings_scope_resource_state ON scheduling_external_resource_bindings(workspace_id,company_id,resource_id,state);
+  `);}},
+  { id:86,name:"0086_calendar_sync_requires_active_binding",checksumSource:"calendar-sync-rejects-new-work-for-blocked-or-unbound-bindings-v1",apply(database):void{database.exec(`
+    DROP TRIGGER IF EXISTS scheduling_calendar_sync_status_scope_insert;
+    DROP TRIGGER IF EXISTS scheduling_calendar_sync_status_scope_update;
+    DROP TRIGGER IF EXISTS scheduling_calendar_sync_outbox_scope_insert;
+    DROP TRIGGER IF EXISTS scheduling_calendar_sync_outbox_scope_update;
+    CREATE TRIGGER scheduling_calendar_sync_status_scope_insert BEFORE INSERT ON scheduling_calendar_sync_statuses WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id AND b.state='active') BEGIN SELECT RAISE(ABORT,'Calendar sync status scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_status_scope_update BEFORE UPDATE OF booking_id,workspace_id,company_id,binding_id ON scheduling_calendar_sync_statuses WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id AND b.state='active') BEGIN SELECT RAISE(ABORT,'Calendar sync status scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_outbox_scope_insert BEFORE INSERT ON scheduling_calendar_sync_outbox WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id AND b.state='active') BEGIN SELECT RAISE(ABORT,'Calendar sync outbox scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_outbox_scope_update BEFORE UPDATE OF booking_id,workspace_id,company_id,binding_id ON scheduling_calendar_sync_outbox WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id AND b.state='active') BEGIN SELECT RAISE(ABORT,'Calendar sync outbox scope is invalid'); END;
+  `);}},
+  { id:87,name:"0087_calendar_sync_outbox_provider_operation",checksumSource:"calendar-sync-outbox-provider-operation-id-and-durable-worker-recovery-v1",apply(database):void{database.exec(`
+    ALTER TABLE scheduling_calendar_sync_outbox ADD COLUMN provider_operation_id TEXT;
+    UPDATE scheduling_calendar_sync_outbox SET provider_operation_id='ewo_' || substr(id,5) WHERE provider_operation_id IS NULL;
+    CREATE UNIQUE INDEX uq_scheduling_calendar_sync_outbox_provider_operation ON scheduling_calendar_sync_outbox(provider_operation_id);
+    CREATE TRIGGER scheduling_calendar_sync_outbox_provider_operation_insert BEFORE INSERT ON scheduling_calendar_sync_outbox
+      WHEN NEW.provider_operation_id IS NULL OR length(NEW.provider_operation_id)!=36 OR substr(NEW.provider_operation_id,1,4)!='ewo_' OR substr(NEW.provider_operation_id,5) GLOB '*[^0-9a-f]*'
+      BEGIN SELECT RAISE(ABORT,'Calendar sync provider operation is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_outbox_provider_operation_immutable BEFORE UPDATE OF provider_operation_id ON scheduling_calendar_sync_outbox
+      WHEN NEW.provider_operation_id IS NOT OLD.provider_operation_id
+      BEGIN SELECT RAISE(ABORT,'Calendar sync provider operation is immutable'); END;
+  `);}},
+  { id:88,name:"0088_calendar_sync_outbox_retry_schedule",checksumSource:"calendar-sync-durable-retry-backoff-due-schedule-v1",apply(database):void{database.exec(`
+    ALTER TABLE scheduling_calendar_sync_outbox ADD COLUMN next_attempt_at TEXT NOT NULL DEFAULT '';
+    UPDATE scheduling_calendar_sync_outbox SET next_attempt_at=created_at WHERE next_attempt_at='';
+    CREATE INDEX idx_scheduling_calendar_sync_outbox_due ON scheduling_calendar_sync_outbox(workspace_id,company_id,state,next_attempt_at,lease_expires_at,created_at,id);
+  `);}},
+  { id:89,name:"0089_calendar_sync_persistence_foundation",checksumSource:"calendar-sync-durable-aggregate-evidence-receipt-fencing-canonical-head-material-evidence-fingerprint-shared-worker-ownership-v7",apply(database):void{database.exec(`
+    /* SQLite cannot extend CHECK constraints. Preserve every 0088 row while rebuilding only these two tables. */
+    DROP TRIGGER scheduling_calendar_sync_status_scope_insert;
+    DROP TRIGGER scheduling_calendar_sync_status_scope_update;
+    CREATE TABLE scheduling_calendar_sync_statuses_next(
+      booking_id TEXT PRIMARY KEY REFERENCES scheduling_bookings(id) ON DELETE CASCADE,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,binding_id TEXT NOT NULL REFERENCES scheduling_external_resource_bindings(id) ON DELETE RESTRICT,
+      status TEXT NOT NULL CHECK(status IN ('pending','synced','failed','conflict')),desired_operation TEXT NOT NULL CHECK(desired_operation IN ('create','reschedule','cancel','restore')),last_provider_evidence_at TEXT,last_failure_code TEXT,
+      created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE
+    );
+    INSERT INTO scheduling_calendar_sync_statuses_next SELECT * FROM scheduling_calendar_sync_statuses;
+    DROP TABLE scheduling_calendar_sync_statuses;
+    ALTER TABLE scheduling_calendar_sync_statuses_next RENAME TO scheduling_calendar_sync_statuses;
+    CREATE INDEX idx_scheduling_calendar_sync_statuses_company_status ON scheduling_calendar_sync_statuses(workspace_id,company_id,status,updated_at,booking_id);
+    CREATE TRIGGER scheduling_calendar_sync_status_scope_insert BEFORE INSERT ON scheduling_calendar_sync_statuses WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id AND b.state='active') BEGIN SELECT RAISE(ABORT,'Calendar sync status scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_status_scope_update BEFORE UPDATE OF booking_id,workspace_id,company_id,binding_id ON scheduling_calendar_sync_statuses WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id AND b.state='active') BEGIN SELECT RAISE(ABORT,'Calendar sync status scope is invalid'); END;
+    DROP TRIGGER scheduling_calendar_sync_outbox_scope_insert;
+    DROP TRIGGER scheduling_calendar_sync_outbox_scope_update;
+    DROP TRIGGER scheduling_calendar_sync_outbox_provider_operation_insert;
+    DROP TRIGGER scheduling_calendar_sync_outbox_provider_operation_immutable;
+    CREATE TABLE scheduling_calendar_sync_outbox_next(
+      id TEXT PRIMARY KEY CHECK(length(id)=36 AND substr(id,1,4)='cso_'),workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,booking_id TEXT NOT NULL REFERENCES scheduling_bookings(id) ON DELETE RESTRICT,binding_id TEXT NOT NULL REFERENCES scheduling_external_resource_bindings(id) ON DELETE RESTRICT,
+      operation TEXT NOT NULL CHECK(operation IN ('create','reschedule','cancel','restore')),idempotency_key TEXT NOT NULL CHECK(length(idempotency_key) BETWEEN 1 AND 200),request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64 AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+      state TEXT NOT NULL CHECK(state IN ('pending','leased','retryable','succeeded','failed','conflict')),attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count>=0),lease_owner TEXT,lease_token TEXT,lease_expires_at TEXT,last_provider_evidence_at TEXT,last_failure_code TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,provider_operation_id TEXT,next_attempt_at TEXT NOT NULL DEFAULT '',
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,UNIQUE(workspace_id,company_id,binding_id,operation,idempotency_key)
+    );
+    INSERT INTO scheduling_calendar_sync_outbox_next SELECT id,workspace_id,company_id,booking_id,binding_id,operation,idempotency_key,request_fingerprint,state,attempt_count,lease_owner,lease_token,lease_expires_at,last_provider_evidence_at,last_failure_code,created_at,updated_at,provider_operation_id,next_attempt_at FROM scheduling_calendar_sync_outbox;
+    DROP TABLE scheduling_calendar_sync_outbox;
+    ALTER TABLE scheduling_calendar_sync_outbox_next RENAME TO scheduling_calendar_sync_outbox;
+    CREATE INDEX idx_scheduling_calendar_sync_outbox_recovery ON scheduling_calendar_sync_outbox(workspace_id,company_id,state,lease_expires_at,created_at,id);
+    CREATE UNIQUE INDEX uq_scheduling_calendar_sync_outbox_provider_operation ON scheduling_calendar_sync_outbox(provider_operation_id);
+    CREATE INDEX idx_scheduling_calendar_sync_outbox_due ON scheduling_calendar_sync_outbox(workspace_id,company_id,state,next_attempt_at,lease_expires_at,created_at,id);
+    CREATE TRIGGER scheduling_calendar_sync_outbox_scope_insert BEFORE INSERT ON scheduling_calendar_sync_outbox WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id AND b.state='active') BEGIN SELECT RAISE(ABORT,'Calendar sync outbox scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_outbox_scope_update BEFORE UPDATE OF booking_id,workspace_id,company_id,binding_id ON scheduling_calendar_sync_outbox WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings b WHERE b.id=NEW.booking_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id AND b.state='active') BEGIN SELECT RAISE(ABORT,'Calendar sync outbox scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_outbox_provider_operation_insert BEFORE INSERT ON scheduling_calendar_sync_outbox WHEN NEW.provider_operation_id IS NULL OR length(NEW.provider_operation_id)!=36 OR substr(NEW.provider_operation_id,1,4)!='ewo_' OR substr(NEW.provider_operation_id,5) GLOB '*[^0-9a-f]*' BEGIN SELECT RAISE(ABORT,'Calendar sync provider operation is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_outbox_provider_operation_immutable BEFORE UPDATE OF provider_operation_id ON scheduling_calendar_sync_outbox WHEN NEW.provider_operation_id IS NOT OLD.provider_operation_id BEGIN SELECT RAISE(ABORT,'Calendar sync provider operation is immutable'); END;
+    ALTER TABLE scheduling_calendar_sync_outbox ADD COLUMN fence_generation INTEGER NOT NULL DEFAULT 0 CHECK(fence_generation>=0);
+    ALTER TABLE scheduling_calendar_sync_outbox ADD COLUMN causal_generation INTEGER NOT NULL DEFAULT 0 CHECK(causal_generation>=0);
+    UPDATE scheduling_calendar_sync_outbox SET causal_generation=rowid WHERE causal_generation=0;
+    CREATE UNIQUE INDEX uq_scheduling_calendar_sync_outbox_causal_generation ON scheduling_calendar_sync_outbox(causal_generation);
+    CREATE TABLE scheduling_calendar_sync_conflicts(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,booking_id TEXT NOT NULL,binding_id TEXT NOT NULL,resource_id TEXT NOT NULL,head_booking_id TEXT NOT NULL,head_outbox_id TEXT NOT NULL,head_fence_generation INTEGER NOT NULL CHECK(head_fence_generation>=0),state TEXT NOT NULL CHECK(state IN ('open','resolved')),version INTEGER NOT NULL CHECK(version>0),evidence_fingerprint TEXT NOT NULL CHECK(length(evidence_fingerprint)=64),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(booking_id) REFERENCES scheduling_bookings(id) ON DELETE RESTRICT,FOREIGN KEY(binding_id) REFERENCES scheduling_external_resource_bindings(id) ON DELETE RESTRICT
+    );
+    CREATE UNIQUE INDEX idx_scheduling_calendar_sync_conflicts_open_head ON scheduling_calendar_sync_conflicts(workspace_id,company_id,booking_id,binding_id) WHERE state='open';
+    CREATE TABLE scheduling_calendar_sync_remote_evidence_snapshots(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,conflict_id TEXT NOT NULL,google_subject TEXT NOT NULL,binding_id TEXT NOT NULL,resource_id TEXT NOT NULL,calendar_id TEXT NOT NULL,outbox_id TEXT NOT NULL,provider_operation_id TEXT NOT NULL,evidence_state TEXT NOT NULL CHECK(evidence_state IN ('present','verified_absent')),external_event_id TEXT,etag TEXT,interval_start_at TEXT NOT NULL,interval_end_at TEXT NOT NULL,time_zone TEXT NOT NULL,observed_at TEXT NOT NULL,fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64),source TEXT NOT NULL,created_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(conflict_id) REFERENCES scheduling_calendar_sync_conflicts(id) ON DELETE RESTRICT,FOREIGN KEY(binding_id) REFERENCES scheduling_external_resource_bindings(id) ON DELETE RESTRICT,FOREIGN KEY(outbox_id) REFERENCES scheduling_calendar_sync_outbox(id) ON DELETE RESTRICT,CHECK(interval_end_at>interval_start_at),CHECK((evidence_state='present' AND external_event_id IS NOT NULL AND etag IS NOT NULL) OR (evidence_state='verified_absent' AND external_event_id IS NULL AND etag IS NULL))
+    );
+    CREATE INDEX idx_scheduling_calendar_sync_evidence_replay ON scheduling_calendar_sync_remote_evidence_snapshots(workspace_id,company_id,binding_id,observed_at,id);
+    CREATE TABLE scheduling_calendar_sync_mapping_lineage(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,outbox_id TEXT NOT NULL,provider_operation_id TEXT NOT NULL,booking_id TEXT NOT NULL,binding_id TEXT NOT NULL,external_event_id TEXT NOT NULL,remote_version TEXT,remote_state TEXT NOT NULL CHECK(remote_state IN ('active','cancelled')),operation TEXT NOT NULL CHECK(operation IN ('create','reschedule','cancel','restore')),recorded_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(outbox_id) REFERENCES scheduling_calendar_sync_outbox(id) ON DELETE RESTRICT,FOREIGN KEY(booking_id) REFERENCES scheduling_bookings(id) ON DELETE RESTRICT,FOREIGN KEY(binding_id) REFERENCES scheduling_external_resource_bindings(id) ON DELETE RESTRICT
+    );
+    CREATE INDEX idx_scheduling_calendar_sync_mapping_lineage_replay ON scheduling_calendar_sync_mapping_lineage(workspace_id,company_id,booking_id,binding_id,recorded_at,id);
+    CREATE TABLE scheduling_calendar_sync_provider_operation_events(
+      id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,provider_operation_id TEXT NOT NULL,event_kind TEXT NOT NULL,evidence_snapshot_id TEXT,recorded_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(evidence_snapshot_id) REFERENCES scheduling_calendar_sync_remote_evidence_snapshots(id) ON DELETE RESTRICT
+    );
+    CREATE INDEX idx_scheduling_calendar_sync_provider_operation_events_replay ON scheduling_calendar_sync_provider_operation_events(workspace_id,company_id,provider_operation_id,recorded_at,id);
+    CREATE TABLE scheduling_calendar_sync_decisions(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,conflict_id TEXT NOT NULL,actor_id TEXT NOT NULL,reason TEXT NOT NULL,operation_id TEXT NOT NULL,request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64),expected_version INTEGER NOT NULL CHECK(expected_version>0),result_version INTEGER NOT NULL CHECK(result_version>0),head_booking_id TEXT NOT NULL,head_outbox_id TEXT NOT NULL,head_fence_generation INTEGER NOT NULL CHECK(head_fence_generation>=0),decision TEXT NOT NULL CHECK(decision IN ('restore_atlas','adopt_google','cancel_atlas')),evidence_snapshot_id TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(conflict_id) REFERENCES scheduling_calendar_sync_conflicts(id) ON DELETE RESTRICT,FOREIGN KEY(evidence_snapshot_id) REFERENCES scheduling_calendar_sync_remote_evidence_snapshots(id) ON DELETE RESTRICT,UNIQUE(workspace_id,company_id,operation_id),UNIQUE(workspace_id,company_id,conflict_id,request_fingerprint));
+    CREATE TABLE scheduling_calendar_sync_receipts(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,decision_id TEXT NOT NULL,operation_id TEXT NOT NULL,request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint)=64),result_json TEXT NOT NULL,conflict_projection_json TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(decision_id) REFERENCES scheduling_calendar_sync_decisions(id) ON DELETE RESTRICT,UNIQUE(workspace_id,company_id,operation_id),UNIQUE(decision_id));
+    CREATE TABLE scheduling_calendar_sync_audit_events(id TEXT PRIMARY KEY,workspace_id INTEGER NOT NULL,company_id INTEGER NOT NULL,decision_id TEXT NOT NULL,event_kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(workspace_id,company_id) REFERENCES companies(workspace_id,id) ON DELETE CASCADE,FOREIGN KEY(decision_id) REFERENCES scheduling_calendar_sync_decisions(id) ON DELETE RESTRICT);
+    /* The conflict booking is a lineage root; its head may be a descendant, never a replacement. */
+    CREATE TRIGGER scheduling_calendar_sync_conflicts_scope_insert BEFORE INSERT ON scheduling_calendar_sync_conflicts WHEN NOT EXISTS(SELECT 1 FROM scheduling_bookings root JOIN scheduling_services rs ON rs.id=root.service_id JOIN scheduling_bookings head ON head.id=NEW.head_booking_id AND head.workspace_id=root.workspace_id AND head.company_id=root.company_id JOIN scheduling_services hs ON hs.id=head.service_id WHERE root.id=NEW.booking_id AND root.workspace_id=NEW.workspace_id AND root.company_id=NEW.company_id AND rs.resource_id=NEW.resource_id AND hs.resource_id=NEW.resource_id AND NOT EXISTS(SELECT 1 FROM scheduling_bookings replacement WHERE replacement.workspace_id=head.workspace_id AND replacement.company_id=head.company_id AND replacement.rescheduled_from_booking_id=head.id) AND (head.id=root.id OR EXISTS(WITH RECURSIVE lineage(id) AS (SELECT head.id UNION ALL SELECT b.rescheduled_from_booking_id FROM scheduling_bookings b JOIN lineage l ON b.id=l.id WHERE b.rescheduled_from_booking_id IS NOT NULL AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id) SELECT 1 FROM lineage WHERE id=root.id))) OR NOT EXISTS(SELECT 1 FROM scheduling_external_resource_bindings b WHERE b.id=NEW.binding_id AND b.workspace_id=NEW.workspace_id AND b.company_id=NEW.company_id AND b.resource_id=NEW.resource_id) OR NOT EXISTS(SELECT 1 FROM scheduling_calendar_sync_outbox o WHERE o.id=NEW.head_outbox_id AND o.workspace_id=NEW.workspace_id AND o.company_id=NEW.company_id AND o.booking_id=NEW.head_booking_id AND o.binding_id=NEW.binding_id AND o.fence_generation=NEW.head_fence_generation) BEGIN SELECT RAISE(ABORT,'Calendar sync conflict aggregate scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_conflicts_scope_update BEFORE UPDATE OF workspace_id,company_id,booking_id,binding_id,resource_id,head_booking_id,head_outbox_id ON scheduling_calendar_sync_conflicts BEGIN SELECT RAISE(ABORT,'Calendar sync conflict aggregate is immutable'); END;
+    CREATE TRIGGER scheduling_calendar_sync_conflicts_fence_update BEFORE UPDATE OF head_fence_generation ON scheduling_calendar_sync_conflicts WHEN NEW.head_fence_generation!=OLD.head_fence_generation AND NOT EXISTS(SELECT 1 FROM scheduling_calendar_sync_outbox o WHERE o.id=OLD.head_outbox_id AND o.workspace_id=OLD.workspace_id AND o.company_id=OLD.company_id AND o.fence_generation=NEW.head_fence_generation) BEGIN SELECT RAISE(ABORT,'Calendar sync conflict fence is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_evidence_scope_insert BEFORE INSERT ON scheduling_calendar_sync_remote_evidence_snapshots WHEN NOT EXISTS(SELECT 1 FROM scheduling_calendar_sync_outbox o JOIN scheduling_external_resource_bindings b ON b.id=o.binding_id AND b.workspace_id=o.workspace_id AND b.company_id=o.company_id JOIN google_calendar_company_bindings g ON g.binding_id=b.id AND g.workspace_id=b.workspace_id AND g.company_id=b.company_id AND g.state='active' JOIN scheduling_calendar_sync_conflicts c ON c.id=NEW.conflict_id AND c.workspace_id=o.workspace_id AND c.company_id=o.company_id JOIN scheduling_external_booking_events e ON e.booking_id=c.head_booking_id AND e.binding_id=c.binding_id AND e.workspace_id=c.workspace_id AND e.company_id=c.company_id AND e.remote_state='active' WHERE c.state='open' AND o.id=NEW.outbox_id AND o.workspace_id=NEW.workspace_id AND o.company_id=NEW.company_id AND o.binding_id=NEW.binding_id AND o.provider_operation_id=NEW.provider_operation_id AND b.resource_id=NEW.resource_id AND b.external_calendar_id=NEW.calendar_id AND g.google_subject=NEW.google_subject AND g.calendar_id=NEW.calendar_id AND c.binding_id=NEW.binding_id AND c.resource_id=NEW.resource_id AND c.head_outbox_id=NEW.outbox_id AND c.head_fence_generation=o.fence_generation AND c.evidence_fingerprint=NEW.fingerprint AND (NEW.evidence_state='verified_absent' OR (NEW.external_event_id=e.external_event_id AND NEW.etag=e.remote_version))) BEGIN SELECT RAISE(ABORT,'Calendar sync evidence binding is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_evidence_no_update BEFORE UPDATE ON scheduling_calendar_sync_remote_evidence_snapshots BEGIN SELECT RAISE(ABORT,'Calendar sync evidence snapshots are immutable'); END;
+    CREATE TRIGGER scheduling_calendar_sync_evidence_no_delete BEFORE DELETE ON scheduling_calendar_sync_remote_evidence_snapshots BEGIN SELECT RAISE(ABORT,'Calendar sync evidence snapshots are immutable'); END;
+    CREATE TRIGGER scheduling_calendar_sync_mapping_lineage_scope_insert BEFORE INSERT ON scheduling_calendar_sync_mapping_lineage WHEN NOT EXISTS(SELECT 1 FROM scheduling_calendar_sync_outbox o WHERE o.id=NEW.outbox_id AND o.workspace_id=NEW.workspace_id AND o.company_id=NEW.company_id AND o.booking_id=NEW.booking_id AND o.binding_id=NEW.binding_id AND o.provider_operation_id=NEW.provider_operation_id) BEGIN SELECT RAISE(ABORT,'Calendar sync mapping lineage scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_provider_operation_events_scope_insert BEFORE INSERT ON scheduling_calendar_sync_provider_operation_events WHEN NOT EXISTS(SELECT 1 FROM scheduling_calendar_sync_outbox o WHERE o.provider_operation_id=NEW.provider_operation_id AND o.workspace_id=NEW.workspace_id AND o.company_id=NEW.company_id) OR (NEW.evidence_snapshot_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM scheduling_calendar_sync_remote_evidence_snapshots e WHERE e.id=NEW.evidence_snapshot_id AND e.workspace_id=NEW.workspace_id AND e.company_id=NEW.company_id AND e.provider_operation_id=NEW.provider_operation_id)) BEGIN SELECT RAISE(ABORT,'Calendar sync provider operation event scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_decisions_scope_insert BEFORE INSERT ON scheduling_calendar_sync_decisions WHEN NOT EXISTS(SELECT 1 FROM scheduling_calendar_sync_conflicts c JOIN scheduling_calendar_sync_remote_evidence_snapshots e ON e.id=NEW.evidence_snapshot_id AND e.workspace_id=c.workspace_id AND e.company_id=c.company_id JOIN scheduling_calendar_sync_outbox o ON o.id=c.head_outbox_id AND o.workspace_id=c.workspace_id AND o.company_id=c.company_id WHERE c.id=NEW.conflict_id AND c.workspace_id=NEW.workspace_id AND c.company_id=NEW.company_id AND c.state='resolved' AND c.version=NEW.result_version AND NEW.result_version=NEW.expected_version+1 AND c.head_booking_id=NEW.head_booking_id AND c.head_outbox_id=NEW.head_outbox_id AND c.head_fence_generation=NEW.head_fence_generation AND o.fence_generation=c.head_fence_generation AND e.binding_id=c.binding_id AND e.resource_id=c.resource_id AND e.outbox_id=c.head_outbox_id AND e.fingerprint=c.evidence_fingerprint) BEGIN SELECT RAISE(ABORT,'Calendar sync decision binding is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_receipts_scope_insert BEFORE INSERT ON scheduling_calendar_sync_receipts WHEN NOT EXISTS(SELECT 1 FROM scheduling_calendar_sync_decisions d WHERE d.id=NEW.decision_id AND d.workspace_id=NEW.workspace_id AND d.company_id=NEW.company_id AND d.operation_id=NEW.operation_id AND d.request_fingerprint=NEW.request_fingerprint) BEGIN SELECT RAISE(ABORT,'Calendar sync receipt scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_audit_events_scope_insert BEFORE INSERT ON scheduling_calendar_sync_audit_events WHEN NOT EXISTS(SELECT 1 FROM scheduling_calendar_sync_decisions d WHERE d.id=NEW.decision_id AND d.workspace_id=NEW.workspace_id AND d.company_id=NEW.company_id) BEGIN SELECT RAISE(ABORT,'Calendar sync audit scope is invalid'); END;
+    CREATE TRIGGER scheduling_calendar_sync_mapping_lineage_no_update BEFORE UPDATE ON scheduling_calendar_sync_mapping_lineage BEGIN SELECT RAISE(ABORT,'Calendar sync mapping lineage is append-only'); END;
+    CREATE TRIGGER scheduling_calendar_sync_mapping_lineage_no_delete BEFORE DELETE ON scheduling_calendar_sync_mapping_lineage BEGIN SELECT RAISE(ABORT,'Calendar sync mapping lineage is append-only'); END;
+    CREATE TRIGGER scheduling_calendar_sync_provider_operation_events_no_update BEFORE UPDATE ON scheduling_calendar_sync_provider_operation_events BEGIN SELECT RAISE(ABORT,'Calendar sync provider operation events are append-only'); END;
+    CREATE TRIGGER scheduling_calendar_sync_provider_operation_events_no_delete BEFORE DELETE ON scheduling_calendar_sync_provider_operation_events BEGIN SELECT RAISE(ABORT,'Calendar sync provider operation events are append-only'); END;
+    CREATE TRIGGER scheduling_calendar_sync_decisions_no_update BEFORE UPDATE ON scheduling_calendar_sync_decisions BEGIN SELECT RAISE(ABORT,'Calendar sync decisions are append-only'); END;
+    CREATE TRIGGER scheduling_calendar_sync_decisions_no_delete BEFORE DELETE ON scheduling_calendar_sync_decisions BEGIN SELECT RAISE(ABORT,'Calendar sync decisions are append-only'); END;
+    CREATE TRIGGER scheduling_calendar_sync_receipts_no_update BEFORE UPDATE ON scheduling_calendar_sync_receipts BEGIN SELECT RAISE(ABORT,'Calendar sync receipts are append-only'); END;
+    CREATE TRIGGER scheduling_calendar_sync_receipts_no_delete BEFORE DELETE ON scheduling_calendar_sync_receipts BEGIN SELECT RAISE(ABORT,'Calendar sync receipts are append-only'); END;
+    CREATE TRIGGER scheduling_calendar_sync_audit_events_no_update BEFORE UPDATE ON scheduling_calendar_sync_audit_events BEGIN SELECT RAISE(ABORT,'Calendar sync audit events are append-only'); END;
+    CREATE TRIGGER scheduling_calendar_sync_audit_events_no_delete BEFORE DELETE ON scheduling_calendar_sync_audit_events BEGIN SELECT RAISE(ABORT,'Calendar sync audit events are append-only'); END;
+    CREATE TABLE shared_worker_ownership(worker_name TEXT PRIMARY KEY,owner TEXT NOT NULL,expires_at TEXT NOT NULL,fence_generation INTEGER NOT NULL CHECK(fence_generation>0),updated_at TEXT NOT NULL);
+  `);}},
 ];
 
 function migrationChecksum(migration: Migration): string {

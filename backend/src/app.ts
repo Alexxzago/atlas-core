@@ -2,7 +2,7 @@ import express, { type Router } from "express";
 import healthRouter from "./routes/health.js";
 import { createRequestId, normalizeOperationalError, operationalLogger, withRequestContext } from "./observability/operationalLogger.js";
 
-export interface AppRouters { readonly authorizedCompaniesRouter: Router; readonly billingRouter?: Router; readonly chatRouter: Router; readonly companiesRouter: Router; readonly identityRouter: Router; readonly knowledgeRouter: Router; readonly publicWebChatRouter: Router; readonly scrapeRouter: Router; readonly whatsAppWebhookRouter?: Router; readonly billingWebhookRouter?: Router; readonly workspacesRouter: Router; readonly platformAdminRouter?: Router; }
+export interface AppRouters { readonly authorizedCompaniesRouter: Router; readonly billingRouter?: Router; readonly chatRouter: Router; readonly companiesRouter: Router; readonly identityRouter: Router; readonly knowledgeRouter: Router; readonly publicWebChatRouter: Router; readonly scrapeRouter: Router; readonly whatsAppWebhookRouter?: Router; readonly billingWebhookRouter?: Router; readonly googleCalendarOAuthCallbackRouter?: Router; readonly workspacesRouter: Router; readonly platformAdminRouter?: Router; }
 export interface AppOptions { readonly production?: boolean; readonly trustedLocalMode?: boolean; }
 
 function operationalPath(url: string): boolean { return /^\/workspaces\/[^/]+\/companies\/[^/]+\/assistant\/executions\/?(?:\?.*)?$/i.test(url); }
@@ -29,6 +29,7 @@ export function createApp(routers: AppRouters, options: AppOptions = {}): expres
   if (!options.production) app.use(routers.scrapeRouter);
   if (routers.whatsAppWebhookRouter) app.use("/webhooks", routers.whatsAppWebhookRouter);
   if (routers.billingWebhookRouter) app.use("/webhooks", routers.billingWebhookRouter);
+  if (routers.googleCalendarOAuthCallbackRouter) app.use("/oauth/google-calendar", routers.googleCalendarOAuthCallbackRouter);
   app.use("/public/web-chat", routers.publicWebChatRouter);
   const trustedLocalMode = options.trustedLocalMode ?? (!Boolean(options.production) && process.env.ATLAS_TRUSTED_LOCAL_MODE === "true");
   if (trustedLocalMode) { app.use(routers.knowledgeRouter); app.use(routers.chatRouter); app.use("/companies", routers.companiesRouter); }

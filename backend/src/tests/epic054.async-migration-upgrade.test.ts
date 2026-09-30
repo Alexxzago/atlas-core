@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { runAsyncMigrations, runFreshAsyncMigrations } from "../config/asyncMigrations.js";
-import { migrationHead, runMigrations } from "../config/migrations.js";
+import { migrationHead, migrationRegistry, runMigrations } from "../config/migrations.js";
 import { DeferredSqlDatabase, LocalSqlDatabase, type SqlDatabase, type SqlResult, type SqlValue } from "../config/sqlDatabase.js";
 
 function atHead(head: number): LocalSqlDatabase {
@@ -21,27 +21,27 @@ class FailingMigrationDatabase implements SqlDatabase {
   public close(): Promise<void> { return this.database.close(); }
 }
 
-test("EPIC054 production async migrations advance a validated existing 0074 ledger through 0078 exactly once", async () => {
+test("EPIC054 production async migrations retain stable 0078 and advance a validated 0074 ledger through the current head exactly once", async () => {
   const database = atHead(74);
   try {
     await runAsyncMigrations(database);
+    assert.deepEqual(await database.query("SELECT id,name,checksum FROM schema_migrations WHERE id=78"), [{ id: 78, name: "0078_media_reclaim_leases", checksum: "409e2b2f911fbb16dafaaad446673dda4a420f90c4f98303661a70a1f26d27df" }]);
+    assert.deepEqual(migrationRegistry.find(migration => migration.id === 78), { id: 78, name: "0078_media_reclaim_leases", checksum: "409e2b2f911fbb16dafaaad446673dda4a420f90c4f98303661a70a1f26d27df" });
     assert.deepEqual(await database.query("SELECT id,name FROM schema_migrations WHERE id>=75 ORDER BY id"), [
-      { id: 75, name: "0075_activation_verification_attempts" },
-      { id: 76, name: "0076_public_web_chat_durable_turn_claims" },
-      { id: 77, name: "0077_media_durable_ingest_attempts" },
-      { id: 78, name: "0078_media_reclaim_leases" },
+      { id: 75, name: "0075_activation_verification_attempts" }, { id: 76, name: "0076_public_web_chat_durable_turn_claims" }, { id: 77, name: "0077_media_durable_ingest_attempts" }, { id: 78, name: "0078_media_reclaim_leases" }, { id: 79, name: "0079_operator_agenda_contacts" }, { id: 80, name: "0080_operator_agenda_contact_identifiers" }, { id: 81, name: "0081_operator_agenda_legacy_projection_receipts" }, { id: 82, name: "0082_operator_agenda_unbounded_receipts" }, { id: 83, name: "0083_calendar_sync_local_first_outbox" }, { id: 84, name: "0084_google_calendar_oauth_onboarding" }, { id: 85, name: "0085_google_calendar_safe_resource_bindings" }, { id: 86, name: "0086_calendar_sync_requires_active_binding" }, { id: 87, name: "0087_calendar_sync_outbox_provider_operation" }, { id: 88, name: "0088_calendar_sync_outbox_retry_schedule" }, { id: 89, name: "0089_calendar_sync_persistence_foundation" },
     ]);
     assert.deepEqual(await database.query("SELECT id,name,checksum FROM schema_migrations ORDER BY id DESC LIMIT 1"), [{ id: migrationHead.id, name: migrationHead.name, checksum: migrationHead.checksum }]);
     await runAsyncMigrations(database);
-    assert.deepEqual(await database.query<{ count: number }>("SELECT COUNT(*) count FROM schema_migrations WHERE id>=75"), [{ count: 4 }]);
+    assert.deepEqual(await database.query<{ count: number }>("SELECT COUNT(*) count FROM schema_migrations WHERE id>=75"), [{ count: 15 }]);
   } finally { await database.close(); }
 });
 
-test("EPIC054 production async migrations preserve fresh bootstrap through 0078", async () => {
+test("EPIC054 production async migrations preserve fresh bootstrap through the current head", async () => {
   const database = new LocalSqlDatabase(new DatabaseSync(":memory:"));
   try {
     await runFreshAsyncMigrations(database);
-    assert.deepEqual(await database.query("SELECT id,name FROM schema_migrations ORDER BY id DESC LIMIT 1"), [{ id: 78, name: "0078_media_reclaim_leases" }]);
+    assert.deepEqual(await database.query("SELECT id,name,checksum FROM schema_migrations ORDER BY id DESC LIMIT 1"), [{ id: migrationHead.id, name: migrationHead.name, checksum: migrationHead.checksum }]);
+    assert.deepEqual(await database.query("SELECT id,name,checksum FROM schema_migrations WHERE id=78"), [{ id: 78, name: "0078_media_reclaim_leases", checksum: "409e2b2f911fbb16dafaaad446673dda4a420f90c4f98303661a70a1f26d27df" }]);
   } finally { await database.close(); }
 });
 

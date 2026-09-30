@@ -11,12 +11,14 @@ export class BookingRepository implements BookingRepositoryPort {
   public constructor(private readonly database: SqlDatabase) {}
   public async findBooking(context: WorkspaceContext, companyId: number, bookingId: string): Promise<SchedulingBooking | null> { return find(this.database, context, companyId, bookingId); }
   public async mutate(context: WorkspaceContext, companyId: number, mutation: BookingMutation): Promise<MutationResult> {
-    return this.database.transaction(async database => {
-      const existing = await database.query<{ request_fingerprint: string; booking_id: string; outcome: "created" | "already_cancelled" }>("SELECT request_fingerprint,booking_id,outcome FROM scheduling_booking_mutations WHERE workspace_id=? AND company_id=? AND operation=? AND idempotency_key=?", [context.workspaceId, companyId, mutation.operation, mutation.idempotencyKey]);
-      if (existing[0]) return existing[0].request_fingerprint === mutation.fingerprint ? { kind: existing[0].outcome === "already_cancelled" ? "already_cancelled" as const : "same" as const, booking: await find(database, context, companyId, existing[0].booking_id) } : { kind: "divergent" as const, booking: null };
-      if (mutation.operation === "cancel") return this.cancel(database, context, companyId, mutation);
-      return this.confirm(database, context, companyId, mutation);
-    });
+    return this.database.transaction(database => this.mutateInTransaction(database, context, companyId, mutation));
+  }
+  /** Lets a service compose the canonical booking mutation with other local persistence in one transaction. */
+  public async mutateInTransaction(database: SqlDatabase, context: WorkspaceContext, companyId: number, mutation: BookingMutation): Promise<MutationResult> {
+    const existing = await database.query<{ request_fingerprint: string; booking_id: string; outcome: "created" | "already_cancelled" }>("SELECT request_fingerprint,booking_id,outcome FROM scheduling_booking_mutations WHERE workspace_id=? AND company_id=? AND operation=? AND idempotency_key=?", [context.workspaceId, companyId, mutation.operation, mutation.idempotencyKey]);
+    if (existing[0]) return existing[0].request_fingerprint === mutation.fingerprint ? { kind: existing[0].outcome === "already_cancelled" ? "already_cancelled" as const : "same" as const, booking: await find(database, context, companyId, existing[0].booking_id) } : { kind: "divergent" as const, booking: null };
+    if (mutation.operation === "cancel") return this.cancel(database, context, companyId, mutation);
+    return this.confirm(database, context, companyId, mutation);
   }
   private async confirm(database: SqlDatabase, context: WorkspaceContext, companyId: number, mutation: BookingMutation): Promise<MutationResult> {
     let source: SchedulingBooking | null = null;

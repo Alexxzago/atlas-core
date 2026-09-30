@@ -8,6 +8,7 @@ export type PortalRoute =
   | { readonly name: "company-channels"; readonly companyId: number }
   | { readonly name: "company-whatsapp"; readonly companyId: number }
   | { readonly name: "company-web-chat"; readonly companyId: number }
+  | { readonly name: "company-agenda"; readonly companyId: number }
   | { readonly name: "conversations" }
   | { readonly name: "analytics" }
   | { readonly name: "billing" }
@@ -43,6 +44,7 @@ export function parsePortalRoute(pathname: string): PortalRoute {
     if (segments.length === 3 && segments[2] === "channels") return { name: "company-channels", companyId: id };
     if (segments.length === 4 && segments[2] === "channels" && segments[3] === "whatsapp") return { name: "company-whatsapp", companyId: id };
     if (segments.length === 4 && segments[2] === "channels" && segments[3] === "web-chat") return { name: "company-web-chat", companyId: id };
+    if (segments.length === 3 && segments[2] === "agenda") return { name: "company-agenda", companyId: id };
     return { name: "not-found" };
   }
   if (segments.length === 1 && segments[0] === "conversations") return { name: "conversations" };
@@ -88,6 +90,7 @@ export function portalPath(route: Exclude<PortalRoute, { name: "not-found" }>): 
   if (route.name === "company-knowledge") return `${base}/knowledge`;
   if (route.name === "company-channels") return `${base}/channels`;
   if (route.name === "company-whatsapp") return `${base}/channels/whatsapp`;
+  if (route.name === "company-agenda") return `${base}/agenda`;
   return `${base}/channels/web-chat`;
 }
 

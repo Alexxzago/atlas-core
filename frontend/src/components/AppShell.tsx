@@ -13,6 +13,7 @@ import {
   IconKnowledge,
   IconChannels,
   IconConversations,
+  IconCalendar,
   IconSettings,
 } from "./ShellIcons";
 import { AtlasAtmosphere } from "./AtlasAtmosphere";
@@ -44,7 +45,7 @@ interface AppShellProps {
   readonly children: ReactNode;
 }
 
-type Responsibility = { readonly key: "today" | "prepare" | "teach" | "places" | "conversations"; readonly path: string };
+type Responsibility = { readonly key: "today" | "prepare" | "teach" | "places" | "agenda" | "conversations"; readonly path: string };
 function responsibilities(companyId: number | null): readonly Responsibility[] {
   const base = companyId ? `/companies/${companyId}` : "/dashboard";
   return [
@@ -52,6 +53,7 @@ function responsibilities(companyId: number | null): readonly Responsibility[] {
     { key: "prepare", path: companyId ? `${base}/assistant` : "/dashboard" },
     { key: "teach", path: companyId ? `${base}/knowledge` : "/dashboard" },
     { key: "places", path: companyId ? `${base}/channels` : "/dashboard" },
+    { key: "agenda", path: companyId ? `${base}/agenda` : "/dashboard" },
     { key: "conversations", path: "/conversations" },
   ];
 }
@@ -61,6 +63,7 @@ const itemIcons: Record<Responsibility["key"], (props: { size?: number; classNam
   prepare: IconAssistant,
   teach: IconKnowledge,
   places: IconChannels,
+  agenda: IconCalendar,
   conversations: IconConversations,
 };
 
@@ -69,6 +72,7 @@ function active(key: Responsibility["key"], route: PortalRoute): boolean {
   if (key === "prepare") return route.name === "company-assistant" || route.name === "company-assistant-section";
   if (key === "teach") return route.name === "company-knowledge";
   if (key === "places") return route.name === "company-channels" || route.name === "company-whatsapp" || route.name === "company-web-chat";
+  if (key === "agenda") return route.name === "company-agenda";
   return route.name === "conversations";
 }
 

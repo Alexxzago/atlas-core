@@ -50,7 +50,9 @@ export function runtimeWorkerIsHealthy(name: string, at = now()): boolean {
   const worker = workers.get(name);
   if (!worker || !worker.required || !worker.started || worker.lastSuccessfulCycleAt === null || worker.lastErrorCategory !== null || worker.backlogUnsafe || worker.staleLease) return false;
   if (worker.running) { const maximum = name === "whatsapp_recovery" ? 55_000 : name === "billing_reconciliation" ? 120_000 : worker.staleAfterMilliseconds; return worker.cycleStartedAt !== null && at-worker.cycleStartedAt <= maximum; }
-  return worker.nextScheduledAt !== null && at <= worker.nextScheduledAt + 5_000;
+  // A completed cycle remains healthy until its configured stale window, including
+  // workers whose scheduler has not yet installed its next timer.
+  return at-worker.lastSuccessfulCycleAt <= worker.staleAfterMilliseconds;
 }
 export function runtimeMissingRequiredWorkers(): readonly string[] { return Object.freeze([...workers.entries()].filter(([name, worker]) => worker.required && !runtimeWorkerIsHealthy(name)).map(([name]) => name).sort()); }
 export function markRuntimeReady(): void { status = "ready"; }

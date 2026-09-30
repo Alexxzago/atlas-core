@@ -16,6 +16,7 @@ import {
   Select,
   StatusBadge,
 } from "../design-system/primitives";
+import { GoogleCalendarConnectionPanel } from "./GoogleCalendarConnectionPanel";
 
 interface Props {
   csrf: string;
@@ -66,7 +67,8 @@ type AutomationTab =
   | "resources"
   | "services"
   | "availability"
-  | "exceptions";
+  | "exceptions"
+  | "calendar";
 const blankLocation = (): LocationForm => ({
   name: "",
   address: "",
@@ -423,7 +425,8 @@ export function SchedulingAutomationsPanel(props: Props): React.JSX.Element {
               { id: "resources", label: "Recursos" },
               { id: "services", label: "Servicios" },
               { id: "availability", label: "Disponibilidad" },
-              { id: "exceptions", label: "Excepciones" },
+               { id: "exceptions", label: "Excepciones" },
+               { id: "calendar", label: "Google Calendar" },
             ].map((item) => (
               <button
                 key={item.id}
@@ -475,6 +478,7 @@ export function SchedulingAutomationsPanel(props: Props): React.JSX.Element {
                   </div>
                 </div>
               )}
+              {tab === "calendar" && <GoogleCalendarConnectionPanel csrf={props.csrf} workspaceId={props.workspaceId} companyId={props.companyId} canManage={canManage} resources={configuration.resources} />}
 
               {tab === "followups" && (
                 <div className="scheduling-section">

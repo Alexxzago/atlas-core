@@ -1,0 +1,16 @@
+import { Router, json, type Request, type RequestHandler } from "express";
+import type { GoogleCalendarConflictResolutionCommandService } from "../scheduling/services/googleCalendarConflictResolutionCommandService.js";
+import type { AuthenticationService } from "../identity/services/authenticationService.js";
+import type { User, UserId } from "../identity/domain/user.js";
+import { AuthorizationService } from "../workspace/services/authorizationService.js";
+import { WorkspaceResolver } from "../workspace/services/workspaceResolver.js";
+import { createActorContext } from "../knowledge/domain/actorContext.js";
+import { createGoogleCalendarConflictResolutionController } from "../controllers/googleCalendarConflictResolutionController.js";
+
+export interface GoogleCalendarConflictResolutionRouteDependencies { readonly service:GoogleCalendarConflictResolutionCommandService;readonly authentication:AuthenticationService;readonly users:{findById(id:UserId):User|null|Promise<User|null>};readonly authorization:AuthorizationService;readonly resolver:WorkspaceResolver; }
+
+/** Deliberately unmounted injectable route for the separately deployed conflict-resolution surface. */
+export function createGoogleCalendarConflictResolutionRouter(dependencies:GoogleCalendarConflictResolutionRouteDependencies):Router{const router=Router(),body=json({type:"application/json",limit:"8kb"});router.post("/:workspaceId/companies/:companyId/google-calendar/conflicts/:conflictId/resolutions",body,authorize(dependencies));return router;}
+function authorize(dependencies:GoogleCalendarConflictResolutionRouteDependencies):RequestHandler{return async(request,response,next)=>{response.setHeader("Cache-Control","no-store, private");response.setHeader("Pragma","no-cache");let context;let actor;try{const raw=cookie(request,dependencies.authentication.cookieName()),identity=raw?await dependencies.authentication.current(raw):null,csrf=request.headers["x-csrf-token"];if(!raw||!identity||typeof csrf!=="string"||request.headers["sec-fetch-site"]!=="same-origin"||!origin(request)||!await dependencies.authentication.validateCsrf(raw,csrf))throw new Error();const user=await dependencies.users.findById(identity.userId as UserId);if(!user||typeof request.params.workspaceId!=="string")throw new Error();const decision=await dependencies.authorization.authorize(user,request.params.workspaceId,"company:manage");context=await dependencies.resolver.resolve(decision);actor=createActorContext({userId:decision.userId,membershipId:decision.membershipId,role:decision.role,capabilities:decision.capabilities});}catch{response.status(404).json({error:{code:"resource_not_found",message:"Resource not found."}});return;}await createGoogleCalendarConflictResolutionController(dependencies.service,context!,actor!)(request,response,next);};}
+function cookie(request:Request,name:string):string|null{for(const part of(request.headers.cookie??"").split(";")){const[key,...value]=part.trim().split("=");if(key===name)return decodeURIComponent(value.join("="));}return null;}
+function origin(request:Request):boolean{try{return typeof request.headers.origin==="string"&&new URL(request.headers.origin).origin===`${request.protocol}://${request.headers.host}`;}catch{return false;}}
