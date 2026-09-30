@@ -1078,7 +1078,7 @@ test("EPIC039 inspector failures clean staged bytes before durable reservation",
   }
 });
 
-test("EPIC039 migration preserves the 0049 contract through the current 0078 head", () => {
+test("EPIC039 migration preserves the 0049 contract through the current 0089 head", () => {
   const directory = mkdtempSync(join(tmpdir(), "atlas-media-migration-")),
     path = join(directory, "atlas.sqlite");
   let db = new DatabaseSync(path);
@@ -1136,6 +1136,17 @@ test("EPIC039 migration preserves the 0049 contract through the current 0078 hea
         { id: 76, name: "0076_public_web_chat_durable_turn_claims" },
         { id: 77, name: "0077_media_durable_ingest_attempts" },
         { id: 78, name: "0078_media_reclaim_leases" },
+        { id: 79, name: "0079_operator_agenda_contacts" },
+        { id: 80, name: "0080_operator_agenda_contact_identifiers" },
+        { id: 81, name: "0081_operator_agenda_legacy_projection_receipts" },
+        { id: 82, name: "0082_operator_agenda_unbounded_receipts" },
+        { id: 83, name: "0083_calendar_sync_local_first_outbox" },
+        { id: 84, name: "0084_google_calendar_oauth_onboarding" },
+        { id: 85, name: "0085_google_calendar_safe_resource_bindings" },
+        { id: 86, name: "0086_calendar_sync_requires_active_binding" },
+        { id: 87, name: "0087_calendar_sync_outbox_provider_operation" },
+        { id: 88, name: "0088_calendar_sync_outbox_retry_schedule" },
+        { id: 89, name: "0089_calendar_sync_persistence_foundation" },
       ],
     );
     assert.equal(
@@ -1166,7 +1177,7 @@ test("EPIC039 migration preserves the 0049 contract through the current 0078 hea
   }
 });
 
-test("EPIC039 declares the complete immutable migration inventory through the 0078 head", () => {
+test("EPIC039 declares the complete immutable migration inventory through the 0089 head", () => {
   const db = createDatabase(":memory:");
   try {
     const rows = db
@@ -1193,10 +1204,21 @@ test("EPIC039 declares the complete immutable migration inventory through the 00
         76,
         77,
         78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
       ],
     );
-    assert.equal(rows.at(-1)?.name, "0078_media_reclaim_leases");
-    assert.equal(new Set(rows.map((row) => row.name)).size, 77);
+    assert.equal(rows.at(-1)?.name, "0089_calendar_sync_persistence_foundation");
+    assert.equal(new Set(rows.map((row) => row.name)).size, 88);
     assert.equal(
       rows.every((row) => /^[a-f0-9]{64}$/u.test(row.checksum)),
       true,

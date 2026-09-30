@@ -512,7 +512,7 @@ test("EPIC041 booking event mappings reject duplicate and foreign associations",
   try {
     const bind = binding(),
       insertBinding = value.database.prepare(
-        "INSERT INTO scheduling_external_resource_bindings VALUES(?,?,?,?,?,?,?,?)",
+        "INSERT INTO scheduling_external_resource_bindings(id,workspace_id,company_id,resource_id,integration_connection_id,external_calendar_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
       );
     insertBinding.run(
       bind.id,
@@ -590,7 +590,7 @@ test("EPIC041 write operation checks reservation, lifecycle, and tenant scope", 
   try {
     const bind = binding(),
       insertBinding = value.database.prepare(
-        "INSERT INTO scheduling_external_resource_bindings VALUES(?,?,?,?,?,?,?,?)",
+        "INSERT INTO scheduling_external_resource_bindings(id,workspace_id,company_id,resource_id,integration_connection_id,external_calendar_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
       );
     insertBinding.run(
       bind.id,
@@ -2920,6 +2920,7 @@ function probeComposition(
     "ATLAS_INTEGRATION_SECRET_KEY",
     "GOOGLE_CALENDAR_OAUTH_CLIENT_ID",
     "GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET",
+    "GOOGLE_CALENDAR_OAUTH_REDIRECT_URI",
     "WHATSAPP_PLATFORM_ENCRYPTION_KEY",
     "WHATSAPP_ACCESS_TOKEN",
   ])
@@ -2947,6 +2948,7 @@ test("EPIC041 production composition owns one registry and wires all Google capa
     ATLAS_INTEGRATION_SECRET_KEY: "a".repeat(64),
     GOOGLE_CALENDAR_OAUTH_CLIENT_ID: "test-google-client",
     GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET: "test-google-client-secret",
+    GOOGLE_CALENDAR_OAUTH_REDIRECT_URI: "https://atlas.test/oauth/google-calendar/callback",
   });
   assert.equal(result.status, 0, result.output);
   const graph = result.graph!;
@@ -3014,6 +3016,7 @@ test("EPIC041 production composition gates Google configuration safely without W
   const oauthWithoutCipher = probeComposition({
     GOOGLE_CALENDAR_OAUTH_CLIENT_ID: "test-google-client",
     GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET: "test-google-client-secret",
+    GOOGLE_CALENDAR_OAUTH_REDIRECT_URI: "https://atlas.test/oauth/google-calendar/callback",
     WHATSAPP_PLATFORM_ENCRYPTION_KEY: "c".repeat(64),
   });
   assert.equal(oauthWithoutCipher.status, 0, oauthWithoutCipher.output);

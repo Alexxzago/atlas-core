@@ -39,9 +39,9 @@ test("EPIC054 PASS5B configured WhatsApp and billing reconciliation publish the 
   resetRuntimeReadinessForTests(); registerRuntimeWorker("billing_reconciliation", { required: true }); const callback = { value: null as (() => void) | null };
   const billing = new BillingReconciliationRuntime({ runBatch: async () => [] } as never, { intervalMilliseconds: 1_000, batchSize: 1 }, { schedule: scheduled => { callback.value = scheduled; return { unref() {} }; }, clear: () => {}, reportError: () => {} });
   billing.start(); await new Promise<void>(resolve => setImmediate(resolve)); assert.notEqual(runtimeWorkerHealth("billing_reconciliation")?.lastSuccessfulCycleAt, null); await billing.stop();
-  registerRuntimeWorker("whatsapp_recovery", { required: true }); let calls = 0, release: (() => void) | null = null; const gate = new Promise<void>(resolve => { release = resolve; }), timer = { value: null as (() => void) | null };
-  const whatsApp = new WhatsAppRecoveryRuntime(async () => { calls++; await gate; }, { schedule: callback => { timer.value = callback; return { unref() {} }; }, clear: () => {} });
-  whatsApp.start(); timer.value!(); timer.value!(); assert.equal(calls, 1); const stopping = whatsApp.stop(); timer.value!(); assert.equal(calls, 1); release!(); await stopping; assert.equal(runtimeWorkerHealth("whatsapp_recovery")?.running, false); resetRuntimeReadinessForTests();
+  registerRuntimeWorker("whatsapp_recovery", { required: true }); let calls = 0, release: (() => void) | null = null, initial = true, scheduled: (() => void) | null = null; const gate = new Promise<void>(resolve => { release = resolve; }), timer = { value: null as (() => void) | null }, firstSchedule = new Promise<void>(resolve => { scheduled = resolve; });
+  const whatsApp = new WhatsAppRecoveryRuntime(async () => { if (initial) { initial = false; return 1; } calls++; await gate; }, { schedule: callback => { timer.value = callback; scheduled!(); return { unref() {} }; }, clear: () => {} });
+  whatsApp.start(); await firstSchedule; await new Promise<void>(resolve => setImmediate(resolve)); timer.value!(); timer.value!(); assert.equal(calls, 1); const stopping = whatsApp.stop(); timer.value!(); assert.equal(calls, 1); release!(); await stopping; assert.equal(runtimeWorkerHealth("whatsapp_recovery")?.running, false); resetRuntimeReadinessForTests();
 });
 
 test("EPIC055 PASS6 billing readiness allows the configured interval plus its bounded provider work window", async () => {
