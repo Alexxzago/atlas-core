@@ -1,0 +1,37 @@
+import { createHash, randomUUID } from "node:crypto";
+import type { SqlDatabase } from "../../config/sqlDatabase.js";
+import { BookingRepository } from "../../repositories/bookingRepository.js";
+import { CalendarSyncRepository, type CalendarSyncDecisionKind } from "../../repositories/calendarSyncRepository.js";
+import type { WorkspaceContext } from "../../types/workspaceContext.js";
+import { GoogleCalendarConflictEvidenceVerifier } from "./googleCalendarConflictEvidenceVerifier.js";
+
+export type GoogleCalendarConflictResolutionOutcome = { readonly kind:"resolved"|"replayed";readonly receiptId:string;readonly decision:CalendarSyncDecisionKind }|{readonly kind:"not_found"|"conflict"|"unavailable"|"invalid"};
+
+/** Isolated local-first manual conflict resolution. Google is read before its sole local transaction. */
+export class GoogleCalendarConflictResolutionCommandService {
+  public constructor(private readonly database:SqlDatabase,private readonly sync:CalendarSyncRepository,private readonly bookings:BookingRepository,private readonly verifier:GoogleCalendarConflictEvidenceVerifier,private readonly clock:{now():string}){}
+  public async execute(context:WorkspaceContext,companyId:number,input:{readonly conflictId:string;readonly decision:CalendarSyncDecisionKind;readonly expectedVersion:number;readonly operationId:string;readonly reason:string;readonly actorId:string}):Promise<GoogleCalendarConflictResolutionOutcome>{
+    if(!valid(input))return {kind:"invalid"};
+    const fingerprint=hash(input),prior=await this.sync.decisionReceiptByOperation(this.database,context,companyId,input.operationId);
+    if(prior)return prior.requestFingerprint===fingerprint?{kind:"replayed",receiptId:prior.id,decision:prior.decision}:{kind:"conflict"};
+    const existing=await this.sync.resolutionContext(this.database,context,companyId,input.conflictId);
+    if(!existing)return {kind:"not_found"};
+    const ownership=await this.sync.ownedProviderOperationIds(this.database,context,companyId,existing.conflict.headBookingId,existing.binding.id,existing.externalEventId),expectedOperationId=ownership.includes(existing.providerOperationId)?existing.providerOperationId:ownership[0]??existing.providerOperationId;
+    const verified=await this.verifier.verify(context,companyId,{connectionId:existing.connectionId,binding:existing.binding as never,googleSubject:existing.googleSubject,externalEventId:existing.externalEventId,expectedRemoteVersion:existing.remoteVersion,expectedOperationId,startAt:existing.startAt,endAt:existing.endAt});
+    if(!verified||verified.fingerprint!==existing.conflict.evidenceFingerprint)return {kind:"unavailable"};
+    const now=this.clock.now(),ids={snapshot:`ces_${randomUUID().replaceAll("-","")}`,decision:`cde_${randomUUID().replaceAll("-","")}`,receipt:`crp_${randomUUID().replaceAll("-","")}`,audit:`cae_${randomUUID().replaceAll("-","")}`,outbox:`cso_${randomUUID().replaceAll("-","")}`};
+    try{return await this.database.transaction(async database=>{
+       await this.sync.recordEvidenceSnapshot(database,context,companyId,{id:ids.snapshot,conflictId:existing.conflict.id,googleSubject:existing.googleSubject,bindingId:existing.binding.id,resourceId:existing.binding.resourceId,calendarId:existing.binding.externalCalendarId,outboxId:existing.conflict.headOutboxId,evidenceState:"present",externalEventId:verified.externalEventId,etag:verified.remoteVersion,intervalStartAt:verified.startAt,intervalEndAt:verified.endAt,timeZone:verified.timeZone,providerOperationId:existing.providerOperationId,observedAt:verified.observedAt,fingerprint:verified.fingerprint,source:"manual_verifier",createdAt:now});
+      let bookingId=existing.conflict.headBookingId,operation:"restore"|"cancel"|null=input.decision==="restore_atlas"?"restore":null;
+      if(input.decision==="cancel_atlas"){const mutation=await this.bookings.mutateInTransaction(database,context,companyId,{operation:"cancel",idempotencyKey:`calendar-resolution:${input.operationId}`,fingerprint,bookingId:`sbk_${randomUUID().replaceAll("-","")}`,sourceBookingId:bookingId,at:now});if(!mutation.booking||mutation.kind==="conflict"||mutation.kind==="divergent"||mutation.kind==="not_found")throw new Conflict();bookingId=mutation.booking.id;operation="cancel";}
+       if(input.decision==="adopt_google"){const sourceBookingId=bookingId,mutation=await this.bookings.mutateInTransaction(database,context,companyId,{operation:"reschedule",idempotencyKey:`calendar-resolution:${input.operationId}`,fingerprint,bookingId:`sbk_${randomUUID().replaceAll("-","")}`,sourceBookingId,startAt:verified.startAt,reference:`Google adoption ${input.operationId}`,at:now});if(!mutation.booking||mutation.kind==="conflict"||mutation.kind==="divergent"||mutation.kind==="not_found")throw new Conflict();bookingId=mutation.booking.id;if(!await this.sync.adoptMapping(database,context,companyId,{fromBookingId:sourceBookingId,toBookingId:bookingId,bindingId:existing.binding.id,externalEventId:verified.externalEventId,remoteVersion:verified.remoteVersion,outboxId:existing.conflict.headOutboxId,providerOperationId:existing.providerOperationId,at:now}))throw new Conflict();}
+       const receipt=await this.sync.decide(database,context,companyId,{id:ids.decision,receiptId:ids.receipt,auditId:ids.audit,auditEventKind:"resolved",auditPayloadJson:JSON.stringify({actorId:input.actorId,reason:input.reason,decision:input.decision,evidenceSnapshotId:ids.snapshot,evidenceFingerprint:verified.fingerprint,evidenceObservedAt:verified.observedAt,evidenceSource:"manual_verifier"}),conflictId:input.conflictId,actorId:input.actorId,reason:input.reason,operationId:input.operationId,requestFingerprint:fingerprint,expectedVersion:input.expectedVersion,decision:input.decision,evidenceSnapshotId:ids.snapshot,resultJson:JSON.stringify({decision:input.decision,bookingId,operation}),now});
+      if(!receipt)throw new Conflict();
+       if(operation){if(operation==="restore"){const restored=await this.sync.restoreAfterSupersede(database,context,companyId,{id:ids.outbox,bookingId,bindingId:existing.binding.id,idempotencyKey:`calendar-resolution:${input.operationId}`,requestFingerprint:fingerprint,headOutboxId:existing.conflict.headOutboxId,headFenceGeneration:receipt.conflict.headFenceGeneration,at:now});if(!restored)throw new Conflict();}else await this.sync.enqueue(database,context,companyId,{id:ids.outbox,bookingId,bindingId:existing.binding.id,operation,idempotencyKey:`calendar-resolution:${input.operationId}`,requestFingerprint:fingerprint,at:now});}
+      return {kind:"resolved",receiptId:receipt.id,decision:receipt.decision} as const;
+    });}catch(error){if(error instanceof Conflict)return {kind:"conflict"};throw error;}
+  }
+}
+class Conflict extends Error {}
+function hash(value:object):string{return createHash("sha256").update(JSON.stringify(value)).digest("hex");}
+function valid(value:{readonly conflictId:string;readonly decision:string;readonly expectedVersion:number;readonly operationId:string;readonly reason:string;readonly actorId:string}):boolean{return /^ccf_[A-Za-z0-9_-]{1,196}$/.test(value.conflictId)&&["restore_atlas","adopt_google","cancel_atlas"].includes(value.decision)&&Number.isSafeInteger(value.expectedVersion)&&value.expectedVersion>0&&value.operationId.trim().length>0&&value.operationId.length<=200&&value.reason.trim().length>0&&value.reason.length<=500&&value.actorId.trim().length>0&&value.actorId.length<=200;}

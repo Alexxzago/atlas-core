@@ -1,0 +1,10 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import { ApiError, atlasApi } from "../api/atlasApi";
+import { GoogleCalendarConnectionPanel } from "./GoogleCalendarConnectionPanel";
+
+const resources=[{id:"src_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",location_id:null,name:"Sala",timezone:"UTC",capacity:1,active:true,created_at:"now",updated_at:"now"}];
+afterEach(()=>{cleanup();vi.restoreAllMocks();});
+test("Google Calendar panel binds a writable calendar and never promises synchronization",async()=>{vi.spyOn(atlasApi,"getGoogleCalendar").mockResolvedValue({status:"not_ready",calendars:[{id:"read",displayName:"Lectura",accessRole:"reader"},{id:"write",displayName:"Escribible",accessRole:"writer"}]});vi.spyOn(atlasApi,"getGoogleCalendarBinding").mockRejectedValue(new ApiError(404,"missing"));const bind=vi.spyOn(atlasApi,"bindGoogleCalendar").mockResolvedValue({kind:"bound"});render(<GoogleCalendarConnectionPanel csrf="csrf" workspaceId="w" companyId={1} canManage resources={resources}/>);expect(await screen.findByText(/no activa sincronización ni reservas externas/i)).toBeTruthy();const select=screen.getByLabelText("Calendario para Sala");expect(screen.queryByRole("option",{name:"Lectura"})).toBeNull();fireEvent.change(select,{target:{value:"write"}});fireEvent.click(screen.getByRole("button",{name:"Vincular recurso"}));await waitFor(()=>expect(bind).toHaveBeenCalledWith("csrf","w",1,{resourceId:resources[0]!.id,calendarId:"write"}));});
+test("read-only users cannot bind or unbind",async()=>{vi.spyOn(atlasApi,"getGoogleCalendar").mockResolvedValue({status:"not_ready",calendars:[{id:"write",displayName:"Escribible",accessRole:"writer"}]});vi.spyOn(atlasApi,"getGoogleCalendarBinding").mockRejectedValue(new ApiError(404,"missing"));render(<GoogleCalendarConnectionPanel csrf="csrf" workspaceId="w" companyId={1} canManage={false} resources={resources}/>);await screen.findByText("Escribible");expect(screen.queryByRole("button",{name:"Vincular recurso"})).toBeNull();});

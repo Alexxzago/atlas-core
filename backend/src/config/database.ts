@@ -66,8 +66,9 @@ class LocalSynchronousDatabase implements SynchronousDatabase {
 const production = process.env.NODE_ENV === "production";
 const runtimeConfiguration = production ? productionConfiguration(process.env) : null;
 export const database: SynchronousDatabase = new LocalSynchronousDatabase();
-export const sqlDatabase: SqlDatabase = production
-  ? new DeferredSqlDatabase(() => createProductionDatabase())
-  : new LocalSqlDatabase(createDatabase(databasePath));
+// Keep module imports side-effect free: tests and CLI modules can inject their own database.
+export const sqlDatabase: SqlDatabase = new DeferredSqlDatabase(() => production
+  ? createProductionDatabase()
+  : Promise.resolve(new LocalSqlDatabase(createDatabase(databasePath))));
 export async function initializeSqlDatabase(): Promise<void> { if (sqlDatabase instanceof DeferredSqlDatabase) await sqlDatabase.initialize(); }
 export const runtimeProductionConfiguration = runtimeConfiguration;

@@ -191,6 +191,8 @@ export interface SchedulingService { id:string; resource_id:string; name:string;
 export interface SchedulingWorkingWindow { id:string; resource_id:string; weekday:number; start_time:string; end_time:string; }
 export interface SchedulingDateException { id:string; resource_id:string; local_date:string; kind:"open"|"closed"; start_time:string|null; end_time:string|null; }
 export interface SchedulingConfiguration { aggregateVersion:number; locations:SchedulingLocation[]; resources:SchedulingResource[]; services:SchedulingService[]; weeklyWorkingWindows:SchedulingWorkingWindow[]; dateExceptions:SchedulingDateException[]; readiness:{state:SchedulingReadiness;hasLocations:boolean;hasResources:boolean;hasServices:boolean;hasWeeklyAvailability:boolean}; }
+export interface GoogleCalendarConnection { status:"not_connected"|"not_ready"|"revoked"; calendars:Array<{id:string;displayName:string;accessRole:string}>; }
+export interface GoogleCalendarBinding { bindingId:string; resourceId:string; calendarId:string; subject:string; state:"active"|"blocked"|"unbound"; version:number; }
 export type AgendaBookingState="confirmed"|"cancelled";
 export interface AgendaAuditEvent { operation:"create"|"reschedule"|"cancel";idempotencyKey:string;actorId:string;origin:"phone"|"operator";reason:string|null;previousVersion:number|null;resultingVersion:number;occurredAt:string; }
 export interface AgendaBooking { id:string;bookingId:string;version:number;state:AgendaBookingState;service:{id:string;name:string;durationMinutes:number};resource:{id:string;name:string;timezone:string};reference:string;startAt:string;endAt:string;contact:{id:string;name:string|null;phone:string;consent:{source:string;recordedAt:string}}|null;history:AgendaAuditEvent[]; }

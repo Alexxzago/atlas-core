@@ -18,6 +18,12 @@ import type { ActivationService } from "../activation/services/activationService
 import { createGetActivationController, createStartActivationVerificationController } from "../controllers/activationController.js";
 import type { AgendaService } from "../scheduling/services/agendaService.js";
 import { createAgendaControllers } from "../controllers/agendaController.js";
+import type { GoogleCalendarOAuthService } from "../integrations/application/googleCalendarOAuth.js";
+import { createGoogleCalendarOAuthControllers } from "../controllers/googleCalendarOAuthController.js";
+import type { GoogleCalendarBindingService } from "../scheduling/services/googleCalendarBindingService.js";
+import { createGoogleCalendarBindingControllers } from "../controllers/googleCalendarBindingController.js";
+import type { GoogleCalendarConflictResolutionCommandService } from "../scheduling/services/googleCalendarConflictResolutionCommandService.js";
+import { createGoogleCalendarConflictResolutionController } from "../controllers/googleCalendarConflictResolutionController.js";
 
 interface ContextualControllers {
   list: (context: WorkspaceContext) => RequestHandler;
@@ -100,6 +106,9 @@ interface AuthorizedCompanyDependencies {
   pilotReadinessService?: PilotReadinessService;
   activationService?: ActivationService;
   agendaService?: AgendaService;
+  googleCalendarOAuthService?: GoogleCalendarOAuthService;
+  googleCalendarBindingService?: GoogleCalendarBindingService;
+  googleCalendarConflictResolutionService?: GoogleCalendarConflictResolutionCommandService;
 }
 
 let productionConversationMessageController: ((context: WorkspaceContext, actor: ActorContext) => RequestHandler) | null = null;
@@ -112,6 +121,12 @@ let productionAssistantCapabilityControllers: ContextualAssistantCapabilityContr
 let productionCommercialControls: AsyncCommercialControlsRepository | null = null;
 let productionVoicePolicyControllers: ContextualVoicePolicyControllers | null = null;
 let productionProactiveActionControllers: ContextualProactiveActionControllers | null = null;
+let productionGoogleCalendarOAuthService: GoogleCalendarOAuthService | null = null;
+export function configureProductionGoogleCalendarOAuthService(service: GoogleCalendarOAuthService | null): void { productionGoogleCalendarOAuthService = service; }
+let productionGoogleCalendarBindingService: GoogleCalendarBindingService | null = null;
+export function configureProductionGoogleCalendarBindingService(service: GoogleCalendarBindingService | null): void { productionGoogleCalendarBindingService = service; }
+let productionGoogleCalendarConflictResolutionService: GoogleCalendarConflictResolutionCommandService | null = null;
+export function configureProductionGoogleCalendarConflictResolutionService(service: GoogleCalendarConflictResolutionCommandService | null): void { productionGoogleCalendarConflictResolutionService = service; }
 let productionCompanyOperationalStatusService: CompanyOperationalStatusService | null = null;
 let productionSchedulingConfigurationService: SchedulingConfigurationService | null = null;
 let productionPilotReadinessService: PilotReadinessService | null = null;
@@ -252,6 +267,24 @@ export function createAuthorizedCompaniesRouter(dependencies: AuthorizedCompanyD
     router.post("/:workspaceId/companies/:companyId/agenda/bookings/:agendaBookingId/reschedule", authorize("company:manage", true, agenda.reschedule));
     router.post("/:workspaceId/companies/:companyId/agenda/bookings/:agendaBookingId/cancel", authorize("company:manage", true, agenda.cancel));
   }
+  const googleOAuth = dependencies.googleCalendarOAuthService ?? productionGoogleCalendarOAuthService;
+  if (googleOAuth) {
+    const google = createGoogleCalendarOAuthControllers(googleOAuth);
+    router.get("/:workspaceId/companies/:companyId/google-calendar", authorize("company:read", false, google.status));
+    router.post("/:workspaceId/companies/:companyId/google-calendar/attempts", authorize("company:manage", true, (context, actor) => google.start(context, actor.userId)));
+    router.post("/:workspaceId/companies/:companyId/google-calendar/attempts/:attemptId/complete", authorize("company:manage", true, (context, actor) => google.complete(context, actor.userId)));
+    router.post("/:workspaceId/companies/:companyId/google-calendar/revoke", authorize("company:manage", true, google.revoke));
+  }
+  const googleBindingService = dependencies.googleCalendarBindingService ?? productionGoogleCalendarBindingService;
+  if (googleBindingService) {
+    const googleBinding = createGoogleCalendarBindingControllers(googleBindingService);
+    router.get("/:workspaceId/companies/:companyId/google-calendar/bindings/:resourceId", authorize("company:read", false, googleBinding.status));
+    router.post("/:workspaceId/companies/:companyId/google-calendar/bindings", authorize("company:manage", true, googleBinding.bind));
+    router.post("/:workspaceId/companies/:companyId/google-calendar/bindings/unbind", authorize("company:manage", true, googleBinding.unbind));
+    router.post("/:workspaceId/companies/:companyId/google-calendar/bindings/reconnect", authorize("company:manage", true, googleBinding.reconnect));
+  }
+  const googleConflictResolution = dependencies.googleCalendarConflictResolutionService ?? productionGoogleCalendarConflictResolutionService;
+  if (googleConflictResolution) router.post("/:workspaceId/companies/:companyId/google-calendar/conflicts/:conflictId/resolutions", authorize("company:manage", true, (context, actor) => createGoogleCalendarConflictResolutionController(googleConflictResolution, context, actor)));
   const defaults=dependencies.defaultAssistantControllers??productionDefaultAssistantControllers;
   if(defaults){router.get("/:workspaceId/companies/:companyId/assistant/default",authorize("company:read",false,defaults.get));router.put("/:workspaceId/companies/:companyId/assistant/default",authorize("company:manage",true,defaults.put));}
   const operationalJson = json({ type: "application/json", limit: 8 * 1024 });

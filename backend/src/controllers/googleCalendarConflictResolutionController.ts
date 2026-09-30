@@ -1,0 +1,9 @@
+import type { RequestHandler } from "express";
+import type { ActorContext } from "../knowledge/domain/actorContext.js";
+import type { WorkspaceContext } from "../types/workspaceContext.js";
+import type { GoogleCalendarConflictResolutionCommandService } from "../scheduling/services/googleCalendarConflictResolutionCommandService.js";
+
+/** HTTP translation only; authorization and session handling are supplied by the isolated router. */
+export function createGoogleCalendarConflictResolutionController(service:GoogleCalendarConflictResolutionCommandService,context:WorkspaceContext,actor:ActorContext):RequestHandler{return async(request,response)=>{const body=request.body!==null&&typeof request.body==="object"?request.body as Record<string,unknown>:{};const outcome=await service.execute(context,company(request.params.companyId),{conflictId:text(request.params.conflictId),decision:text(body.decision) as "restore_atlas"|"adopt_google"|"cancel_atlas",expectedVersion:Number(body.expectedVersion),operationId:text(body.operationId),reason:text(body.reason),actorId:actor.userId});if(outcome.kind==="not_found"){response.status(404).json({error:{code:"resource_not_found",message:"Resource not found."}});return;}if(outcome.kind==="conflict"||outcome.kind==="unavailable"){response.status(409).json({error:{code:"calendar_conflict_resolution_conflict",message:"Calendar conflict resolution could not be applied."}});return;}if(outcome.kind==="invalid"){response.status(400).json({error:{code:"invalid_calendar_conflict_resolution",message:"A valid calendar conflict resolution is required."}});return;}response.status(200).json(outcome);};}
+function company(value:unknown):number{return typeof value==="string"&&/^\d+$/.test(value)?Number(value):0;}
+function text(value:unknown):string{return typeof value==="string"?value:"";}

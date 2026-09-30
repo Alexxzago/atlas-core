@@ -1,5 +1,5 @@
 import { createApp } from "./app.js";
-import { billingReconciliationRuntime, createProductionAppRouters, mediaRecoveryService, proactiveDueWorkerService, proactiveSemanticRecoveryService, voiceDeferredSemanticRecoveryService, voiceWorkerRecoveryService, whatsAppInboundMediaRecoveryService, whatsAppOutboundDeliveryService, whatsAppWebhookService } from "./composition.js";
+import { billingReconciliationRuntime, createProductionAppRouters, googleCalendarOutboxRuntime, mediaRecoveryService, proactiveDueWorkerService, proactiveSemanticRecoveryService, voiceDeferredSemanticRecoveryService, voiceWorkerRecoveryService, whatsAppInboundMediaRecoveryService, whatsAppOutboundDeliveryService, whatsAppWebhookService } from "./composition.js";
 import { initializeSqlDatabase, runtimeProductionConfiguration, sqlDatabase } from "./config/database.js";
 import { mediaStorageAvailable } from "./config/productionConfiguration.js";
 import { setShuttingDown } from "./routes/health.js";
@@ -23,6 +23,8 @@ const server = createApp(createProductionAppRouters(), { production: process.env
   const whatsAppRecoveryRequired = runtimeProductionConfiguration?.whatsAppWebhookEnabled ?? false;
   registerRuntimeWorker("whatsapp_recovery", { configured: whatsAppRecoveryRequired, required: whatsAppRecoveryRequired });
   markRuntimeReady();
+  // Calendar projection is optional and independently blocked until shared leadership exists.
+  googleCalendarOutboxRuntime.start();
 });
 const dispatchOwner = `whatsapp-dispatch-${randomUUID()}`;
 const mediaRecoveryOwner = `whatsapp-media-recovery-${randomUUID()}`;
@@ -61,6 +63,7 @@ function gracefulShutdown(reason: string, exitCode: number): void {
   const forceTimeout = setTimeout(async () => {
     operationalLogger.error("process_shutdown_timeout", { subsystem: "process", safeErrorCategory: "internal_failure" });
     try {
+      await googleCalendarOutboxRuntime.stop();
       await sqlDatabase.close();
       operationalLogger.info("database_closed", { subsystem: "database", outcome: "forced" });
     } catch (error: unknown) {
@@ -77,7 +80,8 @@ function gracefulShutdown(reason: string, exitCode: number): void {
       operationalLogger.info("http_server_closed", { subsystem: "http", outcome: "completed" });
     }
 
-     await billingReconciliationRuntime.stop();
+    await googleCalendarOutboxRuntime.stop();
+    await billingReconciliationRuntime.stop();
      await whatsAppRecoveryRuntime.stop();
     clearTimeout(forceTimeout);
 

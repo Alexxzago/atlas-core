@@ -60,7 +60,7 @@ import{WorkspaceAdministrationService}from"./workspace/services/workspaceAdminis
 import{AuthorizationService}from"./workspace/services/authorizationService.js";
 import { SqlWorkspaceAdministrationTransaction } from "./workspace/infrastructure/asyncWorkspaceAdministrationTransaction.js";
 import{WorkspaceResolver}from"./workspace/services/workspaceResolver.js";
-import{configureProductionActivationService,configureProductionAgendaService,configureProductionCompanyOperationalStatusService,configureProductionPilotReadinessService,configureProductionProactiveActionControllers,configureProductionSchedulingConfigurationService,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
+import{configureProductionActivationService,configureProductionAgendaService,configureProductionCompanyOperationalStatusService,configureProductionGoogleCalendarBindingService,configureProductionGoogleCalendarConflictResolutionService,configureProductionGoogleCalendarOAuthService,configureProductionPilotReadinessService,configureProductionProactiveActionControllers,configureProductionSchedulingConfigurationService,configureProductionVoicePolicyControllers,createAuthorizedCompaniesRouter}from"./routes/authorizedCompanies.js";
 import{AssistantProfileService}from"./assistant/services/assistantProfileService.js";
 import{createAssistantProfileController,createGetAssistantProfileController,createListAssistantProfilesController,createTransitionAssistantProfileController,createUpdateAssistantProfileController}from"./controllers/assistantProfileController.js";
 import { AssistantPreviewService } from "./assistant/services/assistantPreviewService.js";
@@ -148,6 +148,11 @@ import { IntegrationToolAvailabilityPolicy } from "./integrations/services/integ
 import { IntegrationConnectionRepository } from "./repositories/integrationConnectionRepository.js";
 import { integrationSecretCipherRingFromEnvironment } from "./integrations/infrastructure/aesGcmIntegrationSecretCipher.js";
 import { googleCalendarAccessTokenProviderFromEnvironment } from "./integrations/providers/googleCalendarAccessTokenProvider.js";
+import { GoogleCalendarAuthorizationHttpProvider } from "./integrations/providers/googleCalendarAuthorizationProvider.js";
+import { GoogleCalendarOAuthService, googleCalendarOAuthConfiguration } from "./integrations/application/googleCalendarOAuth.js";
+import { GoogleCalendarOAuthRepository } from "./repositories/googleCalendarOAuthRepository.js";
+import { GoogleCalendarBindingService } from "./scheduling/services/googleCalendarBindingService.js";
+import { createGoogleCalendarOAuthCallbackRouter } from "./routes/googleCalendarOAuthCallback.js";
 import { AssistantToolOrchestrator } from "./assistant/services/assistantToolOrchestrator.js";
 import { ToolExecutionService } from "./assistant/services/toolExecutionService.js";
 import { ConversationIntelligenceService } from "./conversationIntelligence/services/conversationIntelligenceService.js";
@@ -206,6 +211,14 @@ import { createBillingControllers } from "./controllers/billingController.js";
 import { createBillingRouter } from "./routes/billing.js";
 import { createAsyncBillingPersistence } from "./billing/infrastructure/asyncBillingFactory.js";
 import { createAsyncBillingPilotReadinessPersistence } from "./billing/infrastructure/asyncBillingPilotReadiness.js";
+import { CalendarSyncRepository } from "./repositories/calendarSyncRepository.js";
+import { BookingRepository } from "./repositories/bookingRepository.js";
+import { SharedWorkerOwnershipRepository } from "./repositories/sharedWorkerOwnershipRepository.js";
+import { GoogleCalendarOutboxWorker } from "./scheduling/services/googleCalendarOutboxWorker.js";
+import { GoogleCalendarOutboxRuntime, googleCalendarOutboxRuntimeConfiguration } from "./scheduling/services/googleCalendarOutboxRuntime.js";
+import { CalendarBoundBookingCommandService } from "./scheduling/services/calendarBoundBookingCommandService.js";
+import { GoogleCalendarConflictEvidenceVerifier } from "./scheduling/services/googleCalendarConflictEvidenceVerifier.js";
+import { GoogleCalendarConflictResolutionCommandService } from "./scheduling/services/googleCalendarConflictResolutionCommandService.js";
 
 import { HmacMetaEmbeddedSignupDigestProvider, MetaEmbeddedSignupAttemptService, metaEmbeddedSignupStateHmacKeyFromEnvironment } from "./whatsapp/application/metaEmbeddedSignupAttemptService.js";
 import { StructuredMetaEmbeddedSignupAudit } from "./whatsapp/application/metaEmbeddedSignupAudit.js";
@@ -307,6 +320,7 @@ const assistantCapabilityRepository=assistantPersistence.capabilities;
 const integrationConnections = new IntegrationConnectionRepository(sqlDatabase);
 export const integrationSecretCipher = integrationSecretCipherRingFromEnvironment();
 export const googleCalendarAccessTokenProvider = googleCalendarAccessTokenProviderFromEnvironment(process.env.GOOGLE_CALENDAR_OAUTH_CLIENT_ID, process.env.GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET);
+const googleCalendarOAuthConfig = googleCalendarOAuthConfiguration();
 export const metaEmbeddedSignupProvider = metaEmbeddedSignupProviderFromEnvironment();
 export const providerAdapterRegistry = new ProviderAdapterRegistry();
 const externalCalendarRepository = schedulingPersistence.externalCalendar;
@@ -319,17 +333,29 @@ const scopedExternalProviderCredentials = integrationSecretCipher ? new ScopedEx
 if (integrationSecretCipher && googleCalendarAccessTokenProvider && scopedExternalProviderCredentials) providerAdapterRegistry.register({ provider: "google_calendar", kind: "calendar", validation: new GoogleCalendarValidationProvider(googleCalendarAccessTokenProvider, new GoogleCalendarValidationHttpTransport(), identityClock), calendarBusy: new GoogleCalendarFreeBusyProvider(scopedExternalProviderCredentials, googleCalendarAccessTokenProvider, new GoogleCalendarHttpTransport()), calendarEvents: new GoogleCalendarEventsProvider(scopedExternalProviderCredentials, googleCalendarAccessTokenProvider, new GoogleCalendarHttpTransport()) });
 if (integrationSecretCipher && metaEmbeddedSignupProvider) providerAdapterRegistry.register({ provider: "meta_whatsapp", kind: "cloud_api", validation: new MetaWhatsAppIntegrationValidationProvider(metaEmbeddedSignupProvider) });
 export const integrationConnectionService = integrationSecretCipher ? new IntegrationConnectionService(integrationConnections, integrationSecretCipher, new RegistryIntegrationProviderValidator(providerAdapterRegistry), identityClock) : null;
+const googleCalendarOAuthProvider = googleCalendarOAuthConfig ? new GoogleCalendarAuthorizationHttpProvider(googleCalendarOAuthConfig.clientId, googleCalendarOAuthConfig.clientSecret) : null;
+const googleCalendarOAuthService = integrationSecretCipher && integrationConnectionService && googleCalendarOAuthConfig && googleCalendarOAuthProvider ? new GoogleCalendarOAuthService(new GoogleCalendarOAuthRepository(sqlDatabase), googleCalendarOAuthProvider, integrationSecretCipher, integrationConnectionService, googleCalendarOAuthConfig, identityClock) : null;
+configureProductionGoogleCalendarOAuthService(googleCalendarOAuthService);
+const googleCalendarBindingService = scopedExternalProviderCredentials && googleCalendarOAuthProvider ? new GoogleCalendarBindingService(sqlDatabase, { async listCalendars(input) { const credentials = await scopedExternalProviderCredentials.resolve(input.context, input.companyId, input.connectionId as import("./integrations/domain/integrationConnection.js").IntegrationConnectionId); if (credentials.kind !== "resolved") return { kind: credentials.kind === "unavailable" ? "unavailable" : "revoked" }; const refreshed = await googleCalendarOAuthProvider.listCalendars({ refreshToken: credentials.material.opaqueSecret }); return refreshed.kind === "success" ? refreshed : refreshed.kind === "unavailable" ? { kind: "unavailable" } : { kind: "revoked" }; } }, identityClock) : null;
+configureProductionGoogleCalendarBindingService(googleCalendarBindingService);
 export const externalBusyRefreshService = new ExternalBusyRefreshService(externalCalendarBindingService, providerAdapterRegistry, schedulingRepository, identityClock);
+const calendarSyncRepository = new CalendarSyncRepository(sqlDatabase);
+// The default configuration is disabled; explicitly approved startup is fenced by durable shared ownership.
+export const googleCalendarOutboxRuntime = new GoogleCalendarOutboxRuntime(new GoogleCalendarOutboxWorker(calendarSyncRepository, providerAdapterRegistry, identityClock), { listPendingScopes: limit => calendarSyncRepository.listPendingScopes(sqlDatabase, limit) }, new SharedWorkerOwnershipRepository(sqlDatabase), googleCalendarOutboxRuntimeConfiguration(), { now: () => identityClock.now() });
 const liveDataProvider = new FakeLiveDataProvider();
 const liveDataService = new LiveDataService(new LiveDataObservationRepository(sqlDatabase), integrationConnections, liveDataProvider, identityClock);
 const bookingRepository = schedulingPersistence.booking;
+const calendarBoundBookingCommands = new CalendarBoundBookingCommandService(sqlDatabase, schedulingRepository, externalCalendarBindingService, externalCalendarRepository, providerAdapterRegistry, calendarSyncRepository, identityClock);
 export const externalBookingCreateService = new ExternalBookingCreateService(externalSchedulingService, schedulingRepository, externalCalendarBindingService, externalCalendarRepository, bookingRepository, providerAdapterRegistry, identityClock);
 export const externalBookingRescheduleService = new ExternalBookingRescheduleService(externalSchedulingService, schedulingRepository, externalCalendarBindingService, externalCalendarRepository, bookingRepository, providerAdapterRegistry, identityClock);
 export const externalBookingCancelService = new ExternalBookingCancelService(schedulingRepository, externalCalendarBindingService, externalCalendarRepository, bookingRepository, providerAdapterRegistry, identityClock);
 const bookingCommands = new BookingCommandService(bookingRepository, identityClock);
 const bookingQueries = new BookingQueryService(bookingRepository);
-const agendaService = new AgendaService(new AgendaRepository(sqlDatabase), identityClock, externalSchedulingService);
+const agendaService = new AgendaService(new AgendaRepository(sqlDatabase), identityClock, externalSchedulingService, calendarBoundBookingCommands);
 configureProductionAgendaService(agendaService);
+const googleCalendarBusy = providerAdapterRegistry.resolveCalendarBusy("google_calendar", "calendar"), googleCalendarEvents = providerAdapterRegistry.resolveCalendarEvents("google_calendar", "calendar"), googleCalendarReconciliation = providerAdapterRegistry.resolveCalendarReconciliation("google_calendar", "calendar");
+const googleCalendarConflictResolutionService = googleCalendarBusy && googleCalendarEvents && googleCalendarReconciliation ? new GoogleCalendarConflictResolutionCommandService(sqlDatabase, calendarSyncRepository, new BookingRepository(sqlDatabase), new GoogleCalendarConflictEvidenceVerifier(googleCalendarBusy, googleCalendarEvents, googleCalendarReconciliation, identityClock), identityClock) : null;
+configureProductionGoogleCalendarConflictResolutionService(googleCalendarConflictResolutionService);
 export const schedulingBookingRouter = new SchedulingBookingRouter(bookingCommands, externalCalendarBindingService, externalBookingCreateService, externalBookingRescheduleService, externalBookingCancelService, bookingRepository, externalCalendarRepository, schedulingRepository);
 const productionToolRegistry=new ToolRegistry(productionAssistantCapabilityCatalog,[liveDataReadToolDefinition(liveDataService),...schedulingBookingToolDefinitions(bookingCommands,bookingQueries)]);
 const productionToolAvailability=new LiveDataToolAvailabilityPolicy(new IntegrationToolAvailabilityPolicy(new NoIntegrationToolAvailabilityPolicy(),integrationConnections),integrationConnections);
@@ -432,5 +458,5 @@ const preview = new AssistantPreviewService(asyncWorkspaceCompanyPersistence.leg
 export const authorizedCompaniesRouter = createProductionAuthorizedCompaniesRouter(agent);
 
 export function createProductionAppRouters(execution: AssistantExecutionPort = agent): AppRouters {
-  return { authorizedCompaniesRouter: createProductionAuthorizedCompaniesRouter(execution), billingRouter, chatRouter, companiesRouter, identityRouter, knowledgeRouter, publicWebChatRouter, scrapeRouter, ...(whatsAppWebhookRouter ? { whatsAppWebhookRouter } : {}), billingWebhookRouter, workspacesRouter, platformAdminRouter };
+  return { authorizedCompaniesRouter: createProductionAuthorizedCompaniesRouter(execution), billingRouter, chatRouter, companiesRouter, identityRouter, knowledgeRouter, publicWebChatRouter, scrapeRouter, ...(whatsAppWebhookRouter ? { whatsAppWebhookRouter } : {}), ...(googleCalendarOAuthService ? { googleCalendarOAuthCallbackRouter: createGoogleCalendarOAuthCallbackRouter(authenticationService, googleCalendarOAuthService, verificationOrigin) } : {}), billingWebhookRouter, workspacesRouter, platformAdminRouter };
 }
